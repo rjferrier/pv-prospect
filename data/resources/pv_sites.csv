@@ -1,0 +1,2 @@
+name,latitude,longitude,pvoutput_system_id,panel_brand,panel_rating,inverter_brand,inverter_rating,panel_azimuth_1,panel_elevation_1,panel_area_fraction_1,panel_azimuth_2,panel_elevation_2,panel_area_fraction_2
+Bells Meadow,52.65247,0.77848,89665,Trina Vertex S,7800,SolarEdge SE8000H,8000,90,36,0.5,270,36,0.5
