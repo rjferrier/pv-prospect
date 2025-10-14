@@ -18,23 +18,10 @@ CONSTANT_QUERY_PARAMS = {
     'include': 'minutes',
     'minuteInterval': '15',
     'contentType': 'csv',
-    'elements': 'datetime,temp,humidity,cloudcover,visibility,solarradiation,windspeed,winddir,precip,precipremote,'
-                'preciptype,pressure,source,stations',
+    'elements': 'datetime,temp,humidity,cloudcover,visibility,'
+                'solarradiation,windspeed,winddir,precip,precipremote,'
+                'preciptype,pressure',
 }
-
-# RETURNED_FIELDS = [
-#     ReturnedField(name='Date', format='YYYYMMDD', unit=''),
-#     ReturnedField(name='Time', format='HH:MM', unit=''),
-#     ReturnedField(name='Energy Generation', format='int', unit='Wh'),
-#     ReturnedField(name='Energy Efficiency', format='float', unit='Wh/kW'),
-#     ReturnedField(name='Instantaneous Power', format='int', unit='W'),
-#     ReturnedField(name='Average Power', format='int', unit='W'),
-#     ReturnedField(name='Normalised Output', format='float', unit=''),
-#     ReturnedField(name='Energy Consumption', format='int', unit='Wh'),
-#     ReturnedField(name='Power Consumption', format='int', unit='W'),
-#     ReturnedField(name='Temperature', format='float', unit='W'),
-#     ReturnedField(name='Voltage', format='float', unit='V'),
-# ]
 
 
 class VCWeatherDataExtractor:

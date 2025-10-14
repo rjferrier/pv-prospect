@@ -1,8 +1,9 @@
 import csv
 import json
 import os
+import time
 from tempfile import SpooledTemporaryFile
-from typing import Iterable, Optional, Any
+from typing import Iterable, Optional, Any, Callable, TypeVar
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -21,6 +22,27 @@ SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 DATA_FOLDER_NAME = "data"
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 CSV_MIME_TYPE = 'text/csv'
+
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
+
+T = TypeVar('T')
+
+
+def retry_on_500(func: Callable[..., T]) -> Callable[..., T]:
+    """Decorator to retry a function on HTTP 500 errors with exponential backoff"""
+    def wrapper(*args, **kwargs) -> T:
+        for attempt in range(MAX_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except HttpError as e:
+                if e.resp.status == 500 and attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAY * (attempt + 1)
+                    print(f"HTTP 500 error in {func.__name__}, retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                    time.sleep(delay)
+                else:
+                    raise
+    return wrapper
 
 
 def get_credentials() -> Credentials:
@@ -73,7 +95,7 @@ class GDriveClient:
             RuntimeError: If more than one folder with the same name and parent exists
         """
 
-        existing_folders = self.search(name, mime_type=FOLDER_MIME_TYPE, parent_id=parent_id)
+        existing_folders = self.search(file_name=name, mime_type=FOLDER_MIME_TYPE, parent_id=parent_id)
         if len(existing_folders) > 1:
             raise RuntimeError(f"More than one folder named '{name}' exists in the specified location.")
         if existing_folders:
@@ -81,6 +103,7 @@ class GDriveClient:
 
         return self._create_folder(name, parent_id)
 
+    @retry_on_500
     def upload_file(self, media_body: MediaIoBaseUpload, file_name: str, parent_id: str, mimetype: str) -> str:
         """
         Uploads a file to Google Drive in the specified parent folder.
@@ -106,34 +129,61 @@ class GDriveClient:
             print(f"An error occurred while uploading {file_name}: {error}")
             raise
 
-    def search(self, file_name: str, mime_type: str, parent_id: Optional[str] = None) -> list[dict]:
+    @retry_on_500
+    def search(
+            self, *,
+            file_name: Optional[str] = None,
+            mime_type: Optional[str] = None,
+            parent_id: Optional[str] = None,
+            include_trashed: bool = False
+    ) -> list[dict]:
         """
         Common method to search for files/folders based on name, parent, and optional mime type.
 
         Args:
-            file_name (str): The name of the file/folder to search for
+            file_name (Optional[str]): The name of the file/folder to search for
             mime_type (Optional[str]): The MIME type to filter by (e.g., folder mime type)
             parent_id (Optional[str]): The ID of the parent folder. If None, searches at root level
 
         Returns:
             list[dict]: List of matching files/folders
         """
-        query_conditions = [f"name='{file_name}'", f"mimeType='{mime_type}'", "trashed=false"]
-        if parent_id:
-            query_conditions.append(f"'{parent_id}' in parents")
+        query_str = _build_query_string(file_name, mime_type, parent_id, include_trashed)
 
-        query_str = " and ".join(query_conditions)
-        try:
+        def search_files(page_token: Optional[str] = None) -> tuple[list[dict], Optional[str]]:
             results = self.service.files().list(
                 q=query_str,
                 spaces="drive",
-                fields="files(id, name, parents)"
+                fields="nextPageToken, files(id, name, parents)",
+                pageToken=page_token
             ).execute()
-            return results.get("files", [])
+            return results.get("files", []), results.get("nextPageToken", None)
+
+        try:
+            files, next_page_token = search_files()
+            while next_page_token:
+                more_files, next_page_token = search_files(next_page_token)
+                files.extend(more_files)
+            return files
         except HttpError as error:
             print(f"Error while searching files with query '{query_str}': {error}")
             raise
 
+    @retry_on_500
+    def trash_file(self, file_id: str) -> None:
+        """
+        Moves a file to the Google Drive trash bin.
+
+        Args:
+            file_id (str): The ID of the file to trash.
+        """
+        try:
+            self.service.files().update(fileId=file_id, body={'trashed': True}).execute()
+        except HttpError as error:
+            print(f"Error while trashing file {file_id}: {error}")
+            raise
+
+    @retry_on_500
     def _create_folder(self, name: str, parent_id: Optional[str] = None) -> str:
         """
         Creates a folder in Google Drive and returns its ID.
@@ -202,3 +252,22 @@ class DataLoader:
             return None
 
         return self.load_csv(data, file_name)
+
+
+def _build_query_string(
+        file_name: str | None,
+        mime_type: str | None,
+        parent_id: str | None,
+        include_trashed: bool = False
+) -> str:
+    query_conditions = []
+    if file_name:
+        query_conditions.append(f"name = '{file_name}'")
+    if mime_type:
+        query_conditions.append(f"mimeType = '{mime_type}'")
+    if parent_id:
+        query_conditions.append(f"'{parent_id}' in parents")
+    if not include_trashed:
+        query_conditions.append("trashed = false")
+    query_str = " and ".join(query_conditions)
+    return query_str
