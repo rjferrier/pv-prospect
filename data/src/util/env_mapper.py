@@ -30,17 +30,17 @@ class ExtractedValue[T]:
         return self.value is None
 
 
-def map_from_env(cls: type[T], **mappings: VarMapping[T]) -> T:
-    values = {
+def map_from_env(cls: type[T], env_mappings: dict[str, VarMapping[T]], **kwargs) -> T:
+    env_values = {
         attr_name: _extract_value(os.environ, mapping)
-        for attr_name, mapping in mappings.items()
+        for attr_name, mapping in env_mappings.items()
     }
 
-    env_var_names = _get_names_of_env_vars_with_missing_values(mappings, values)
+    env_var_names = _get_names_of_env_vars_with_missing_values(env_mappings, env_values)
     if env_var_names:
         raise ValueError(f"Missing environment variables: {', '.join(env_var_names)}")
 
-    return cls(**values)
+    return cls(**env_values, **kwargs)
 
 
 def _extract_value(env: Mapping[str, str], mapping: VarMapping[T]) -> T:

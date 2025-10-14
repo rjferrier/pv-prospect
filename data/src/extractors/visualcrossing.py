@@ -1,5 +1,7 @@
 import csv
+from dataclasses import dataclass
 from datetime import datetime, date, time
+from enum import Enum
 from io import StringIO
 
 import requests
@@ -11,10 +13,14 @@ BASE_URL = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/se
 MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)
 
+
+class Mode(Enum):
+    QUARTERHOURLY = 'quarterhourly'
+    HOURLY = 'hourly'
+
+
 CONSTANT_QUERY_PARAMS = {
     'unitGroup': 'metric',
-    'include': 'minutes',
-    'minuteInterval': '15',
     'contentType': 'csv',
     'elements': 'datetime,temp,humidity,cloudcover,visibility,'
                 'solarradiation,windspeed,winddir,precip,precipremote,'
@@ -22,16 +28,44 @@ CONSTANT_QUERY_PARAMS = {
 }
 
 
+@dataclass(frozen=True)
+class APIHelper:
+    time_unit: str
+    minute_interval: int | None = None
+
+    def get_query_params(self, api_key: str) -> dict[str, str]:
+        query_params = {
+            'key': api_key,
+            'include': self.time_unit,
+        }
+        if self.minute_interval:
+            query_params['minuteInterval'] = str(self.minute_interval)
+
+        return {
+            **CONSTANT_QUERY_PARAMS,
+            **query_params,
+        }
+
+    def get_fields_param(self) -> dict[str, str]:
+        return {self.time_unit: ','.join(self.fields)}
+
+
+API_HELPERS_BY_MODE = {
+    Mode.QUARTERHOURLY: APIHelper(time_unit='minutes', minute_interval=15),
+    Mode.HOURLY: APIHelper(time_unit='hours')
+}
+
+
 class VCWeatherDataExtractor:
-    def __init__(self, api_key) -> None:
+    def __init__(self, api_key: str, mode: Mode) -> None:
         self.api_key = api_key
+        self.mode = mode
 
     @classmethod
-    def from_env(cls) -> 'VCWeatherDataExtractor':
-        return map_from_env(
-            VCWeatherDataExtractor,
-            api_key=VarMapping('VC_API_KEY', str),
-        )
+    def from_env(cls, mode: Mode) -> 'VCWeatherDataExtractor':
+        return map_from_env(VCWeatherDataExtractor, {
+            'api_key': VarMapping('VC_API_KEY', str)
+        }, mode=mode)
 
     def extract(self, system_id: int, date_: date) -> list[list[str]]:
         site = get_pv_site_by_system_id(system_id)
@@ -44,14 +78,10 @@ class VCWeatherDataExtractor:
         url = '/'.join((
             BASE_URL,
             str(site.location),
-            start_datetime.strftime('%Y-%m-%dT%H:%M:%S'),
-            end_datetime.strftime('%Y-%m-%dT%H:%M:%S')
+            start_datetime.strftime('%Y-%m-%d'),
+            end_datetime.strftime('%Y-%m-%d')
         ))
-
-        query_params = {
-            'key': self.api_key,
-            **CONSTANT_QUERY_PARAMS
-        }
+        query_params = API_HELPERS_BY_MODE[self.mode].get_query_params(self.api_key)
 
         response = requests.get(url, params=query_params)
         response.raise_for_status()

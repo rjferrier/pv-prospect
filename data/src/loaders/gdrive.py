@@ -4,6 +4,7 @@ import os
 import time
 from tempfile import SpooledTemporaryFile
 from typing import Iterable, Optional, Any, Callable, TypeVar
+import re
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -184,6 +185,42 @@ class GDriveClient:
             raise
 
     @retry_on_500
+    def rename_file(self, file_id: str, new_name: str) -> None:
+        """
+        Renames a file on Google Drive.
+
+        Args:
+            file_id (str): The ID of the file to rename.
+            new_name (str): The new name for the file.
+        """
+        try:
+            self.service.files().update(fileId=file_id, body={'name': new_name}).execute()
+        except HttpError as error:
+            print(f"Error while renaming file {file_id}: {error}")
+            raise
+
+    @retry_on_500
+    def move_file(self, file_id: str, old_parent_id: str, new_parent_id: str) -> None:
+        """
+        Moves a file from one folder to another on Google Drive.
+
+        Args:
+            file_id (str): The ID of the file to move.
+            old_parent_id (str): The ID of the current parent folder.
+            new_parent_id (str): The ID of the new parent folder.
+        """
+        try:
+            self.service.files().update(
+                fileId=file_id,
+                addParents=new_parent_id,
+                removeParents=old_parent_id,
+                fields='id, parents'
+            ).execute()
+        except HttpError as error:
+            print(f"Error while moving file {file_id}: {error}")
+            raise
+
+    @retry_on_500
     def _create_folder(self, name: str, parent_id: Optional[str] = None) -> str:
         """
         Creates a folder in Google Drive and returns its ID.
@@ -210,14 +247,20 @@ class DataLoader:
         self.folder_id = folder_id
 
     @classmethod
-    def from_folder_name(cls, folder_name: str) -> "DataLoader":
+    def from_path(cls, path: str) -> "DataLoader":
         """
-        Factory method to build a DataLoader with a GDriveClient and a folder (created or retrieved).
+        Factory method to build a DataLoader with a GDriveClient and a nested folder path under 'data'.
+
+        Args:
+            path: The folder path under 'data', using '/' or '\\' as a separator (e.g., 'foo/bar/baz' or 'foo\\bar\\baz')
         """
         client = GDriveClient.build_service()
         parent_id = client.create_or_get_folder(DATA_FOLDER_NAME)
-        folder_id = client.create_or_get_folder(folder_name, parent_id=parent_id)
-        return cls(client, folder_id)
+        # Split path on both '/' and '\\' and create each folder in sequence
+        for part in re.split(r"[\\/]+", path):
+            if part:
+                parent_id = client.create_or_get_folder(part, parent_id=parent_id)
+        return cls(client, parent_id)
 
     def load_csv(self, data: Iterable[Iterable[str]], file_name: str) -> str:
         """

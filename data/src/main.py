@@ -1,39 +1,42 @@
 from datetime import date, timedelta
 from argparse import ArgumentParser, RawTextHelpFormatter
 from dataclasses import dataclass
+from typing import Callable
 
-from src.extractors.openmeteo import OpenMeteoWeatherDataExtractor
 from src.extractors.pvoutput import PVOutputExtractor
-from src.extractors.visualcrossing import VCWeatherDataExtractor
-from src.extractors.weatherapi import WeatherAPIWeatherDataExtractor
+from src.extractors.openmeteo import OpenMeteoWeatherDataExtractor, Mode as OMMode
+from src.extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
 from src.loaders.gdrive import DataLoader
 from src.domain.pv_site import get_pv_site_by_system_id, PVSite
 
 
 @dataclass(frozen=True)
 class DataSource:
-    name: str
-    extractor_cls: type
+    descriptor: str
+    extractor_factory: Callable
 
-PV_OUTPUT_PREFIX = 'pvoutput'
 
 DATA_SOURCES = {
     'pv': DataSource(
-        name='pvoutput',
-        extractor_cls=PVOutputExtractor,
+        descriptor='pvoutput',
+        extractor_factory=lambda: PVOutputExtractor.from_env()
     ),
-    'weather-vc': DataSource(
-        name='visualcrossing',
-        extractor_cls=VCWeatherDataExtractor,
+    'weather-om-15': DataSource(
+        descriptor='openmeteo/quarterhourly',
+        extractor_factory=lambda: OpenMeteoWeatherDataExtractor(OMMode.QUARTERHOURLY)
     ),
-    'weather-wapi': DataSource(
-        name='weatherapi',
-        extractor_cls=WeatherAPIWeatherDataExtractor,
+    'weather-om-60': DataSource(
+        descriptor='openmeteo/hourly',
+        extractor_factory=lambda: OpenMeteoWeatherDataExtractor(OMMode.HOURLY)
     ),
-    'weather-om': DataSource(
-        name='openmeteo',
-        extractor_cls=OpenMeteoWeatherDataExtractor,
-    )
+    'weather-vc-15': DataSource(
+        descriptor='visualcrossing/quarterhourly',
+        extractor_factory=lambda: VCWeatherDataExtractor.from_env(mode=VCMode.QUARTERHOURLY),
+    ),
+    'weather-vc-60': DataSource(
+        descriptor='visualcrossing/hourly',
+        extractor_factory=lambda: VCWeatherDataExtractor.from_env(mode=VCMode.HOURLY),
+    ),
 }
 
 
@@ -71,13 +74,12 @@ def parse_args():
 
 def get_csv_file_name(data_source: DataSource, pv_site: PVSite, date_: date) -> str:
     """Generate CSV filename using site name and data source"""
-    date_str = "%04d%02d%02d" % (date_.year, date_.month, date_.day)
-    return f"{data_source.name}_{pv_site.pvoutput_system_id}_{date_str}.csv"
-
-
-def get_folder_name(pv_site: PVSite) -> str:
-    """Generate folder name based on site name"""
-    return pv_site.name.replace(' ', '_').lower()
+    strings = [
+        data_source.descriptor.replace('/', '-'),
+        str(pv_site.pvoutput_system_id),
+        "%04d%02d%02d" % (date_.year, date_.month, date_.day)
+    ]
+    return '_'.join(strings) + '.csv'
 
 
 def get_date_range(args) -> list[date]:
@@ -100,10 +102,10 @@ if __name__ == '__main__':
 
     # initialise components
     data_source = DATA_SOURCES[args.source]
-    print(f"Processing {data_source.name} data for site: {pv_site.name}")
+    print(f"Processing {data_source.descriptor} for site: {pv_site.name}")
 
-    extractor = data_source.extractor_cls.from_env()
-    loader = DataLoader.from_folder_name(data_source.name)
+    extractor = data_source.extractor_factory()
+    loader = DataLoader.from_path(data_source.descriptor)
 
     # run ETL
     for date_ in get_date_range(args):

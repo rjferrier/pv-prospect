@@ -1,47 +1,80 @@
 import json
+from dataclasses import dataclass
 from datetime import datetime, date, time
+from enum import Enum
+from typing import Callable
 
 import requests
 
+from src.domain.location import Location
 from src.domain.pv_site import get_pv_site_by_system_id
 from src.util.env_mapper import map_from_env
 
-BASE_URL = "https://api.open-meteo.com/v1/forecast"
 MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)
 
-
 CONSTANT_QUERY_PARAMS = {
-    'models': 'best_match',
     'timezone': 'Europe/London',
-    'minutely_15': 'temperature_2m,'
-                   'visibility,'
-                   'cloud_cover,'
-                   'cloud_cover_low,'
-                   'cloud_cover_mid,'
-                   'cloud_cover_high,'
-                   'shortwave_radiation,'
-                   'diffuse_radiation,'
-                   'direct_radiation,'
-                   'direct_normal_irradiance,'
-                   'terrestrial_radiation,'
-                   'shortwave_radiation_instant,'
-                   'diffuse_radiation_instant,'
-                   'direct_radiation_instant,'
-                   'direct_normal_irradiance_instant,'
-                   'terrestrial_radiation_instant',
+}
+
+BASIC_FIELDS = ['temperature_2m', 'visibility']
+CLOUD_COVER_FIELDS = ['cloud_cover', 'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high']
+SOLAR_RADIATION_FIELDS = [
+    'direct_radiation', 'direct_normal_irradiance', 'diffuse_radiation',
+    'diffuse_radiation_instant', 'direct_normal_irradiance_instant', 'direct_radiation_instant',
+]
+
+
+class Mode(Enum):
+    QUARTERHOURLY = 'quarterhourly'
+    HOURLY = 'hourly'
+
+
+@dataclass(frozen=True)
+class APIHelper:
+    time_resolution: str
+    base_url: str
+    models: str
+    date_stringifier: Callable[[datetime], str]
+    fields: list[str]
+
+    def get_query_params(
+            self, location: Location, start_datetime: datetime, end_datetime: datetime
+    ) -> dict[str, str]:
+        return {
+            'latitude': location.latitude,
+            'longitude': location.longitude,
+            f'start_{self.time_resolution}': self.date_stringifier(start_datetime),
+            f'end_{self.time_resolution}': self.date_stringifier(end_datetime),
+            self.time_resolution: ','.join(self.fields),
+            **CONSTANT_QUERY_PARAMS,
+        }
+
+    def get_fields_param(self) -> dict[str, str]:
+        return {self.time_resolution: ','.join(self.fields)}
+
+
+API_HELPERS_BY_MODE = {
+    Mode.QUARTERHOURLY: APIHelper(
+        time_resolution='minutely_15',
+        base_url="https://api.open-meteo.com/v1/forecast",
+        models='best_match',
+        date_stringifier=lambda dt: dt.isoformat(),
+        fields = BASIC_FIELDS + CLOUD_COVER_FIELDS + SOLAR_RADIATION_FIELDS
+    ),
+    Mode.HOURLY: APIHelper(
+        time_resolution='hourly',
+        base_url="https://satellite-api.open-meteo.com/v1/archive",
+        models='satellite_radiation_seamless,best_match',
+        date_stringifier=lambda dt: dt.strftime("%Y-%m-%d"),
+        fields=SOLAR_RADIATION_FIELDS
+    )
 }
 
 
 class OpenMeteoWeatherDataExtractor:
-    def __init__(self) -> None:
-        pass
-
-    @classmethod
-    def from_env(cls) -> 'OpenMeteoWeatherDataExtractor':
-        return map_from_env(
-            OpenMeteoWeatherDataExtractor,
-        )
+    def __init__(self, mode: Mode) -> None:
+        self.mode = mode
 
     def extract(self, system_id: int, date_: date) -> list[list[str]]:
         site = get_pv_site_by_system_id(system_id)
@@ -51,28 +84,24 @@ class OpenMeteoWeatherDataExtractor:
         start_datetime = datetime.combine(date_, MIN_TIME)
         end_datetime = datetime.combine(date_, MAX_TIME)
 
-        query_params = {
-            'latitude': site.location.latitude,
-            'longitude': site.location.longitude,
-            'start_minutely_15': start_datetime.isoformat(),
-            'end_minutely_15': end_datetime.isoformat(),
-            **CONSTANT_QUERY_PARAMS
-        }
-
-        response = requests.get(BASE_URL, params=query_params)
+        api_helper = API_HELPERS_BY_MODE[self.mode]
+        response = requests.get(
+            url=api_helper.base_url,
+            params=api_helper.get_query_params(site.location, start_datetime, end_datetime)
+        )
         response.raise_for_status()
 
         # Parse JSON response and convert to CSV rows
         data = json.loads(response.text)
 
-        # Extract the minutely_15 data
-        minutely_data = data.get('minutely_15', {})
-        if not minutely_data:
+        # Extract the data section based on time resolution
+        time_data = data.get(api_helper.time_resolution, {})
+        if not time_data:
             return []
 
         # Get the headers (field names) and corresponding arrays
-        headers = list(minutely_data.keys())
-        arrays = [minutely_data[header] for header in headers]
+        headers = list(time_data.keys())
+        arrays = [time_data[header] for header in headers]
 
         # Ensure all arrays have the same length
         if not arrays or not arrays[0]:
@@ -83,7 +112,7 @@ class OpenMeteoWeatherDataExtractor:
         # Build CSV rows: header row + data rows
         rows = [headers]
         for i in range(num_rows):
-            row = [str(array[i]) for array in arrays]
+            row = [str(array[i]) if array[i] is not None else '' for array in arrays]
             rows.append(row)
 
         return rows

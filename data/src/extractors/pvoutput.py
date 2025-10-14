@@ -38,11 +38,10 @@ class PVOutputExtractor:
 
     @classmethod
     def from_env(cls) -> 'PVOutputExtractor':
-        return map_from_env(
-            PVOutputExtractor,
-            api_key=VarMapping('PVO_API_KEY', str),
-            system_id=VarMapping('PVO_SYSTEM_ID', str)
-        )
+        return map_from_env(PVOutputExtractor, {
+            'api_key': VarMapping('PVO_API_KEY', str),
+            'system_id': VarMapping('PVO_SYSTEM_ID', str)
+        })
 
     def extract(self, system_id: int, date_: date) -> list[list[str]]:
         if not system_id:
