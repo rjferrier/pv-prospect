@@ -2,8 +2,10 @@ from datetime import date, timedelta
 from argparse import ArgumentParser, RawTextHelpFormatter
 from dataclasses import dataclass
 
+from src.extractors.openmeteo import OpenMeteoWeatherDataExtractor
 from src.extractors.pvoutput import PVOutputExtractor
 from src.extractors.visualcrossing import VCWeatherDataExtractor
+from src.extractors.weatherapi import WeatherAPIWeatherDataExtractor
 from src.loaders.gdrive import DataLoader
 from src.domain.pv_site import get_pv_site_by_system_id, PVSite
 
@@ -20,10 +22,18 @@ DATA_SOURCES = {
         name='pvoutput',
         extractor_cls=PVOutputExtractor,
     ),
-    'weather': DataSource(
+    'weather-vc': DataSource(
         name='visualcrossing',
         extractor_cls=VCWeatherDataExtractor,
     ),
+    'weather-wapi': DataSource(
+        name='weatherapi',
+        extractor_cls=WeatherAPIWeatherDataExtractor,
+    ),
+    'weather-om': DataSource(
+        name='openmeteo',
+        extractor_cls=OpenMeteoWeatherDataExtractor,
+    )
 }
 
 
@@ -33,7 +43,7 @@ def parse_args():
         prog='etl', formatter_class=lambda prog: RawTextHelpFormatter(prog, width=120)
     )
     parser.format_help()
-    parser.add_argument('source', choices=['pv', 'weather'], help="data source")
+    parser.add_argument('source', choices=list(DATA_SOURCES.keys()), help="data source")
     parser.add_argument('system_id', type=int, help="system (plant) ID")
     parser.add_argument(
         '-d', '--start-date',
