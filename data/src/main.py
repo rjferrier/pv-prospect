@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from argparse import ArgumentParser, RawTextHelpFormatter
 from dataclasses import dataclass
 
-from src.extractors.pvoutput import PVOutputExtractor, RETURNED_FIELDS as PV_RETURNED_FIELDS
+from src.extractors.pvoutput import PVOutputExtractor
 from src.extractors.visualcrossing import VCWeatherDataExtractor
 from src.loaders.gdrive import DataLoader
 from src.domain.pv_site import get_pv_site_by_system_id, PVSite
@@ -12,29 +12,17 @@ from src.domain.pv_site import get_pv_site_by_system_id, PVSite
 class DataSource:
     name: str
     extractor_cls: type
-    returned_fields: list
 
 PV_OUTPUT_PREFIX = 'pvoutput'
-FIELDS_CSV_FILE_NAME = 'fields.csv'
-
-# Weather data returned fields (based on the elements in visualcrossing.py)
-# TODO: come back to this
-WEATHER_RETURNED_FIELDS = [
-    ['datetime'], ['temp'], ['humidity'], ['cloudcover'], ['visibility'],
-    ['solarradiation'], ['windspeed'], ['winddir'], ['precip'], ['precipremote'],
-    ['preciptype'], ['pressure'], ['source'], ['stations']
-]
 
 DATA_SOURCES = {
     'pv': DataSource(
         name='pvoutput',
         extractor_cls=PVOutputExtractor,
-        returned_fields=PV_RETURNED_FIELDS,
     ),
     'weather': DataSource(
         name='visualcrossing',
         extractor_cls=VCWeatherDataExtractor,
-        returned_fields=WEATHER_RETURNED_FIELDS,
     ),
 }
 
@@ -105,8 +93,7 @@ if __name__ == '__main__':
     print(f"Processing {data_source.name} data for site: {pv_site.name}")
 
     extractor = data_source.extractor_cls.from_env()
-    loader = DataLoader.from_folder_name(get_folder_name(data_source.name))
-    loader.load_csv_if_absent(data_source.returned_fields, FIELDS_CSV_FILE_NAME)
+    loader = DataLoader.from_folder_name(data_source.name)
 
     # run ETL
     for date_ in get_date_range(args):

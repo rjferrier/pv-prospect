@@ -1,11 +1,9 @@
-from collections import namedtuple
 from datetime import date
 
 import requests
 
 from src.util.env_mapper import map_from_env, VarMapping
 
-ReturnedField = namedtuple('ReturnedField', ['name', 'format', 'unit'])
 
 URL = "https://pvoutput.org/service/r2/getstatus.jsp"
 API_KEY_HEADER_NAME = "X-Pvoutput-Apikey"
@@ -17,18 +15,19 @@ CONSTANT_QUERY_PARAMS = {
     'asc': 1,       # Ascending order
 }
 
-RETURNED_FIELDS = [
-    ReturnedField(name='Date', format='YYYYMMDD', unit=''),
-    ReturnedField(name='Time', format='HH:MM', unit=''),
-    ReturnedField(name='Energy Generation', format='int', unit='Wh'),
-    ReturnedField(name='Energy Efficiency', format='float', unit='Wh/kW'),
-    ReturnedField(name='Instantaneous Power', format='int', unit='W'),
-    ReturnedField(name='Average Power', format='int', unit='W'),
-    ReturnedField(name='Normalised Output', format='float', unit=''),
-    ReturnedField(name='Energy Consumption', format='int', unit='Wh'),
-    ReturnedField(name='Power Consumption', format='int', unit='W'),
-    ReturnedField(name='Temperature', format='float', unit='W'),
-    ReturnedField(name='Voltage', format='float', unit='V'),
+
+HEADER = [
+    'date',
+    'time',
+    'energy',
+    'efficiency',
+    'power',
+    'average',
+    'normalised',
+    'energy_used',
+    'power_used',
+    'temperature',
+    'voltage'
 ]
 
 
@@ -62,7 +61,9 @@ class PVOutputExtractor:
 
         response = requests.get(URL, headers=headers, params=params)
         response.raise_for_status()
-        return _to_clean_entries(response.text)
+        entries = _to_clean_entries(response.text)
+        # Prepend header row
+        return [HEADER] + entries
 
 
 def _to_clean_entries(text: str) -> list[list[str]]:
@@ -77,6 +78,7 @@ def _delete_if_nan(text: str) -> str:
     if text == 'NaN':
         return ''
     return text
+
 
 def _remove_nans(rows: list[list[str]]) -> list[list[str]]:
     return [[field if field != '-1.#IND' else '' for field in row] for row in rows]
