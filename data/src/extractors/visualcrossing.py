@@ -7,8 +7,6 @@ import requests
 from src.domain.pv_site import get_pv_site_by_system_id
 from src.util.env_mapper import map_from_env, VarMapping
 
-# ReturnedField = namedtuple('ReturnedField', ['name', 'format', 'unit'])
-
 BASE_URL = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
 MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)
