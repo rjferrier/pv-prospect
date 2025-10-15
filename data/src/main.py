@@ -1,20 +1,16 @@
-from datetime import date, timedelta
 from argparse import ArgumentParser, RawTextHelpFormatter
-from dataclasses import dataclass
-from typing import Callable
+from datetime import date, timedelta
 
-from src.extractors.pvoutput import PVOutputExtractor
+from src.domain.data_source import DataSource
+from src.domain.pv_site import get_pv_site_by_system_id
 from src.extractors.openmeteo import OpenMeteoWeatherDataExtractor, Mode as OMMode
+from src.extractors.pvoutput import PVOutputExtractor
 from src.extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
-from src.loaders.gdrive import DataLoader
-from src.domain.pv_site import get_pv_site_by_system_id, PVSite
+from src.loaders.csv_helpers import upload_csv, get_csv_file_path
+from src.loaders.gdrive import GDriveClient, CSV_MIME_TYPE
 
 
-@dataclass(frozen=True)
-class DataSource:
-    descriptor: str
-    extractor_factory: Callable
-
+ALLOW_DUPLICATE_FILES = False
 
 DATA_SOURCES = {
     'pv': DataSource(
@@ -72,17 +68,39 @@ def parse_args():
     return args
 
 
-def get_csv_file_name(data_source: DataSource, pv_site: PVSite, date_: date) -> str:
-    """Generate CSV filename using site name and data source"""
-    strings = [
-        data_source.descriptor.replace('/', '-'),
-        str(pv_site.pvoutput_system_id),
-        "%04d%02d%02d" % (date_.year, date_.month, date_.day)
-    ]
-    return '_'.join(strings) + '.csv'
+def main(args):
+    # Get PV site information
+    pv_site = get_pv_site_by_system_id(args.system_id)
+    if pv_site is None:
+        raise ValueError(f"No PV site found with system ID {args.system_id}")
+
+    # initialise components
+    client = GDriveClient.build_service()
+    data_source = DATA_SOURCES[args.source]
+    print(f"Processing {data_source.descriptor} for site: {pv_site.name}")
+
+    extractor = data_source.extractor_factory()
+
+    # run ETL
+    for date_ in _get_date_range(args):
+        print(f"Processing data for {date_}")
+
+        # Check if file already exists
+        file_path = get_csv_file_path(data_source, pv_site, date_)
+        resolved_file_path = client.resolve_path(file_path)
+
+        existing_files = client.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
+
+        if existing_files and not ALLOW_DUPLICATE_FILES:
+            print(f"File already exists: {file_path}")
+            continue
+
+        # Extract and upload
+        entries = extractor.extract(args.system_id, date_)
+        upload_csv(client, file_path, entries)
 
 
-def get_date_range(args) -> list[date]:
+def _get_date_range(args) -> list[date]:
     day_count = (args.end_date - args.start_date).days
     dates = [args.start_date + timedelta(days=i) for i in range(day_count)]
 
@@ -94,22 +112,4 @@ def get_date_range(args) -> list[date]:
 
 if __name__ == '__main__':
     args = parse_args()
-
-    # Get PV site information
-    pv_site = get_pv_site_by_system_id(args.system_id)
-    if pv_site is None:
-        raise ValueError(f"No PV site found with system ID {args.system_id}")
-
-    # initialise components
-    data_source = DATA_SOURCES[args.source]
-    print(f"Processing {data_source.descriptor} for site: {pv_site.name}")
-
-    extractor = data_source.extractor_factory()
-    loader = DataLoader.from_path(data_source.descriptor)
-
-    # run ETL
-    for date_ in get_date_range(args):
-        print(f"Processing data for {date_}")
-        entries = extractor.extract(args.system_id, date_)
-        filename = get_csv_file_name(data_source, pv_site, date_)
-        loader.load_csv(entries, filename)
+    main(args)

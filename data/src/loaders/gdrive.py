@@ -1,17 +1,17 @@
-import csv
+import io
 import json
 import os
 import time
-from tempfile import SpooledTemporaryFile
-from typing import Iterable, Optional, Any, Callable, TypeVar
-import re
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Optional, Any, Callable, TypeVar, Iterator, Iterable
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from importlib_resources import files
 
 import resources
@@ -28,22 +28,6 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
 T = TypeVar('T')
-
-
-def retry_on_500(func: Callable[..., T]) -> Callable[..., T]:
-    """Decorator to retry a function on HTTP 500 errors with exponential backoff"""
-    def wrapper(*args, **kwargs) -> T:
-        for attempt in range(MAX_RETRIES):
-            try:
-                return func(*args, **kwargs)
-            except HttpError as e:
-                if e.resp.status == 500 and attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAY * (attempt + 1)
-                    print(f"HTTP 500 error in {func.__name__}, retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
-                    time.sleep(delay)
-                else:
-                    raise
-    return wrapper
 
 
 def get_credentials() -> Credentials:
@@ -69,6 +53,28 @@ def get_credentials() -> Credentials:
     return creds
 
 
+def retry_on_500(func: Callable[..., T]) -> Callable[..., T]:
+    """Decorator to retry a function on HTTP 500 errors with exponential backoff"""
+    def wrapper(*args, **kwargs) -> T:
+        for attempt in range(MAX_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except HttpError as e:
+                if e.resp.status == 500 and attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAY * (attempt + 1)
+                    print(f"HTTP 500 error in {func.__name__}, retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                    time.sleep(delay)
+                else:
+                    raise
+    return wrapper
+
+
+@dataclass(frozen=True)
+class ResolvedFilePath:
+    name: str | None = None
+    parent_id: str | None = None
+
+
 class GDriveClient:
     def __init__(self, service: Any) -> None:
         self.service = service
@@ -79,14 +85,36 @@ class GDriveClient:
         service = build("drive", "v3", credentials=get_credentials())
         return cls(service)
 
-    def create_or_get_folder(self, name: str, *, parent_id: Optional[str] = None) -> str:
+    def resolve_path(self, path: str) -> ResolvedFilePath:
+        """
+        Resolves a path like 'folder1/folder2/file.csv' to a ResolvedFilePath with the file name and parent folder ID.
+
+        Args:
+            path (str): The path to resolve.
+
+        Returns:
+            ResolvedFilePath: The resolved file path with name and parent_id.
+        """
+        parts = [p for p in path.split('/') if p]
+        if not parts:
+            raise ValueError("Path must not be empty")
+
+        file_name = parts[-1]
+        parent_id = None
+
+        for part in parts[:-1]:
+            folder_path = ResolvedFilePath(name=part, parent_id=parent_id)
+            parent_id = self.create_or_get_folder(folder_path)
+
+        return ResolvedFilePath(name=file_name, parent_id=parent_id)
+
+    def create_or_get_folder(self, folder_path: ResolvedFilePath) -> str:
         """
         Creates a folder in Google Drive if it doesn't exist, or returns existing folder ID.
         Raises an error if more than one such folder exists.
 
         Args:
-            name (str): The name of the folder to create or get.
-            parent_id (str, optional): The ID of the parent folder. If None, searches/creates at root.
+            folder_path (ResolvedFilePath): The folder path with name and parent_id.
 
         Returns:
             str: ID of the folder
@@ -96,60 +124,63 @@ class GDriveClient:
             RuntimeError: If more than one folder with the same name and parent exists
         """
 
-        existing_folders = self.search(file_name=name, mime_type=FOLDER_MIME_TYPE, parent_id=parent_id)
+        existing_folders = self.search(folder_path, mime_type=FOLDER_MIME_TYPE)
         if len(existing_folders) > 1:
-            raise RuntimeError(f"More than one folder named '{name}' exists in the specified location.")
+            raise RuntimeError(f"More than one folder named '{folder_path.name}' exists in the specified location.")
         if existing_folders:
             return existing_folders[0]["id"]
 
-        return self._create_folder(name, parent_id)
+        return self._create_folder(folder_path)
 
     @retry_on_500
-    def upload_file(self, media_body: MediaIoBaseUpload, file_name: str, parent_id: str, mimetype: str) -> str:
+    def upload_file(self, media_body: MediaIoBaseUpload, file_path: ResolvedFilePath, mimetype: str) -> str:
         """
         Uploads a file to Google Drive in the specified parent folder.
 
         Args:
             media_body: A file-like object or MediaIoBaseUpload instance containing the file data.
-            file_name (str): The name of the file to upload.
-            parent_id (str): The ID of the parent folder.
+            file_path (ResolvedFilePath): The file path with name and parent_id.
             mimetype (str): The MIME type of the file (e.g., 'text/csv').
 
         Returns:
             str: The file ID of the uploaded file.
         """
-        file_metadata = {"name": file_name, "parents": [parent_id]}
+        file_metadata = {
+            'name': file_path.name,
+            'parents': [file_path.parent_id] if file_path.parent_id else [],
+            'mimeType': mimetype
+        }
         try:
-            file = self.service.files().create(
-                body=file_metadata,
-                media_body=media_body,
-                fields="id"
-            ).execute()
-            return file.get("id")
+            file = (
+                self.service.files()
+                .create(body=file_metadata, media_body=media_body, fields='id')
+                .execute()
+            )
+            return file.get('id')
         except HttpError as error:
-            print(f"An error occurred while uploading {file_name}: {error}")
+            print(f"An error occurred while uploading {file_path.name}: {error}")
             raise
 
     @retry_on_500
     def search(
-            self, *,
-            file_name: Optional[str] = None,
+            self,
+            file_path: ResolvedFilePath,
+            *,
             mime_type: Optional[str] = None,
-            parent_id: Optional[str] = None,
             include_trashed: bool = False
     ) -> list[dict]:
         """
-        Common method to search for files/folders based on name, parent, and optional mime type.
+        Search for files/folders based on name, parent, and optional mime type.
 
         Args:
-            file_name (Optional[str]): The name of the file/folder to search for
+            file_path (ResolvedFilePath): The file path with name and parent_id to search for.
             mime_type (Optional[str]): The MIME type to filter by (e.g., folder mime type)
-            parent_id (Optional[str]): The ID of the parent folder. If None, searches at root level
+            include_trashed (bool): Whether to include trashed files in the search results
 
         Returns:
             list[dict]: List of matching files/folders
         """
-        query_str = _build_query_string(file_name, mime_type, parent_id, include_trashed)
+        query_str = _build_query_string(file_path.name, mime_type, file_path.parent_id, include_trashed)
 
         def search_files(page_token: Optional[str] = None) -> tuple[list[dict], Optional[str]]:
             results = self.service.files().list(
@@ -221,14 +252,71 @@ class GDriveClient:
             raise
 
     @retry_on_500
-    def _create_folder(self, name: str, parent_id: Optional[str] = None) -> str:
+    def download_file(self, file_path: ResolvedFilePath, destination_path: str, mime_type: Optional[str] = None) -> None:
+        """
+        Downloads a file from Google Drive to the local file system.
+
+        Args:
+            file_path (ResolvedFilePath): The file path with name and parent_id.
+            destination_path (str): The local file system path where the file should be saved.
+            mime_type (Optional[str]): The MIME type to filter by. If None, any file type is matched.
+
+        Raises:
+            HttpError: If the API request fails
+            FileNotFoundError: If the file is not found
+        """
+        file_id = self._get_file_id(file_path, mime_type)
+
+        with io.FileIO(destination_path, 'wb') as fh:
+            self._download_to_stream(file_id, fh)
+
+    @contextmanager
+    def download_to_stream(self, file_path: ResolvedFilePath, mime_type: Optional[str] = None) -> Iterator[io.BytesIO]:
+        """
+        Context manager that downloads a file from Google Drive into a BytesIO stream.
+
+        Args:
+            file_path (ResolvedFilePath): The file path with name and parent_id.
+            mime_type (Optional[str]): The MIME type to filter by. If None, any file type is matched.
+
+        Yields:
+            io.BytesIO: A stream containing the downloaded file content.
+
+        Raises:
+            HttpError: If the API request fails
+            FileNotFoundError: If the file is not found
+
+        Example:
+            file_path = client.resolve_path('pvoutput/data.csv')
+            with client.download_to_stream(file_path) as stream:
+                content = stream.read()
+        """
+        file_id = self._get_file_id(file_path, mime_type)
+
+        stream = io.BytesIO()
+        self._download_to_stream(file_id, stream)
+        stream.seek(0)
+
+        try:
+            yield stream
+        finally:
+            stream.close()
+
+    @retry_on_500
+    def _create_folder(self, folder_path: ResolvedFilePath) -> str:
         """
         Creates a folder in Google Drive and returns its ID.
+
+        Args:
+            folder_path (ResolvedFilePath): The folder path with name and parent_id.
+
+        Returns:
+            str: The folder ID.
         """
         folder_metadata = {
-            "name": name,
+            "name": folder_path.name,
             "mimeType": FOLDER_MIME_TYPE,
-            "parents": [parent_id] if parent_id else []
+            "parents": [folder_path.parent_id] if folder_path.parent_id else []
         }
         try:
             folder = self.service.files().create(
@@ -237,64 +325,64 @@ class GDriveClient:
             ).execute()
             return folder.get("id")
         except HttpError as error:
-            print(f"Error while creating folder {name}: {error}")
+            print(f"Error while creating folder {folder_path.name}: {error}")
             raise
 
-
-class DataLoader:
-    def __init__(self, client: GDriveClient, folder_id: str) -> None:
-        self.client = client
-        self.folder_id = folder_id
-
-    @classmethod
-    def from_path(cls, path: str) -> "DataLoader":
+    def _get_file_id(self, file_path: ResolvedFilePath, mime_type: Optional[str] = None) -> str:
         """
-        Factory method to build a DataLoader with a GDriveClient and a nested folder path under 'data'.
+        Search for a file by name and return its ID.
 
         Args:
-            path: The folder path under 'data', using '/' or '\\' as a separator (e.g., 'foo/bar/baz' or 'foo\\bar\\baz')
-        """
-        client = GDriveClient.build_service()
-        parent_id = client.create_or_get_folder(DATA_FOLDER_NAME)
-        # Split path on both '/' and '\\' and create each folder in sequence
-        for part in re.split(r"[\\/]+", path):
-            if part:
-                parent_id = client.create_or_get_folder(part, parent_id=parent_id)
-        return cls(client, parent_id)
-
-    def load_csv(self, data: Iterable[Iterable[str]], file_name: str) -> str:
-        """
-        Uploads data as a CSV file to the associated Google Drive folder.
-
-        Args:
-            data (Iterable[Iterable[str]]): The data to write (e.g., CSV rows).
-            file_name (str): The name of the file to upload.
+            file_path (ResolvedFilePath): The file path with name and parent_id to search for.
+            mime_type (Optional[str]): The MIME type to filter by. If None, any file type is matched.
 
         Returns:
-            str: The file ID of the uploaded file.
-        """
-        with SpooledTemporaryFile(max_size=1_000_000, mode='w+', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerows(data)
-            f.seek(0)
-            media_upload = MediaIoBaseUpload(f, mimetype=CSV_MIME_TYPE, chunksize=-1)
-            return self.client.upload_file(media_upload, file_name, self.folder_id, CSV_MIME_TYPE)
+            str: The file ID.
 
-    def load_csv_if_absent(self, data: Iterable[Iterable[str]], file_name: str) -> Optional[str]:
+        Raises:
+            FileNotFoundError: If the file is not found.
         """
-        Uploads data as a CSV file to the associated Google Drive folder only if the file doesn't already exist.
+        files = self.search(file_path, mime_type=mime_type)
+        if not files:
+            raise FileNotFoundError(f"File '{file_path.name}' not found in the specified Google Drive folder.")
+        return files[0]['id']
+
+    def _download_to_stream(self, file_id: str, stream: io.IOBase) -> None:
+        """
+        Downloads a file from Google Drive to a stream.
 
         Args:
-            data (Iterable[Iterable[str]]): The data to write (e.g., CSV rows).
-            file_name (str): The name of the file to upload.
+            file_id (str): The ID of the file to download.
+            stream (io.IOBase): The stream to write the file content to.
+
+        Raises:
+            HttpError: If the API request fails
+        """
+        request = self._get_file_media(file_id)
+        downloader = MediaIoBaseDownload(stream, request)
+
+        done = False
+        while done is False:
+            try:
+                status, done = downloader.next_chunk()
+                if status:
+                    print(f"Download {int(status.progress() * 100)}%.")
+            except HttpError as error:
+                print(f"An error occurred while downloading file: {error}")
+                raise
+
+    @retry_on_500
+    def _get_file_media(self, file_id: str) -> Any:
+        """
+        Gets the media request for downloading a file from Google Drive.
+
+        Args:
+            file_id (str): The ID of the file to download.
 
         Returns:
-            Optional[str]: The file ID of the uploaded file if it was uploaded, None if file already exists.
+            The media request object for downloading.
         """
-        if self.client.search(file_name, CSV_MIME_TYPE, self.folder_id):
-            return None
-
-        return self.load_csv(data, file_name)
+        return self.service.files().get_media(fileId=file_id)
 
 
 def _build_query_string(

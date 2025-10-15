@@ -1,6 +1,6 @@
 import re
 import argparse
-from src.loaders.gdrive import GDriveClient
+from src.loaders.gdrive import GDriveClient, ResolvedFilePath
 
 
 def get_folder_id(client: GDriveClient, folder_path: str | None) -> str | None:
@@ -15,7 +15,8 @@ def get_folder_id(client: GDriveClient, folder_path: str | None) -> str | None:
     parent_id = None
 
     for part in parts:
-        parent_id = client.create_or_get_folder(part, parent_id=parent_id)
+        resolved_path = ResolvedFilePath(name=part, parent_id=parent_id)
+        parent_id = client.create_or_get_folder(resolved_path)
 
     return parent_id
 
@@ -26,10 +27,12 @@ def list_files_recursive(client: GDriveClient, folder_id: str | None, mime_type:
     Returns list of dicts with 'id', 'name', 'path' (relative path from search root), and 'parent_id'.
     If folder_id is None, searches from root.
     """
+    from src.loaders.gdrive import ResolvedFilePath
     files_with_paths = []
 
     # Get all files in current folder
-    files = client.search(mime_type=mime_type, parent_id=folder_id)
+    search_path = ResolvedFilePath(parent_id=folder_id)
+    files = client.search(search_path, mime_type=mime_type)
 
     for file in files:
         file_path = f"{prefix}{file['name']}" if prefix else file['name']
@@ -41,7 +44,8 @@ def list_files_recursive(client: GDriveClient, folder_id: str | None, mime_type:
         })
 
     # Get all subfolders and recurse
-    folders = client.search(mime_type='application/vnd.google-apps.folder', parent_id=folder_id)
+    folder_search_path = ResolvedFilePath(parent_id=folder_id)
+    folders = client.search(folder_search_path, mime_type='application/vnd.google-apps.folder')
     for folder in folders:
         folder_path = f"{prefix}{folder['name']}/" if prefix else f"{folder['name']}/"
         files_with_paths.extend(
