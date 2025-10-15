@@ -1,4 +1,5 @@
 import pandas as pd
+from pathlib import Path
 from src.loaders.gdrive import DATA_FOLDER_NAME, GDriveClient
 
 
@@ -23,58 +24,43 @@ def load_csv(path: str) -> pd.DataFrame:
 
 def load_folder_as_dataframe(folder_path: str) -> pd.DataFrame:
     """
-    Download all CSV files from a Google Drive folder and combine them into a single pandas DataFrame.
+    Load all CSV files from a local folder and concatenate them into a single pandas DataFrame.
 
     Args:
-        folder_path (str): The path to the folder in Google Drive (e.g., 'pvoutput').
-                          The 'data' folder is assumed to be the root.
+        folder_path (str): The path to the local folder containing CSV files (e.g., 'data/pvoutput').
 
     Returns:
         pd.DataFrame: Combined DataFrame from all CSV files in the folder.
 
     Raises:
         ValueError: If no CSV files are found in the folder.
+        FileNotFoundError: If the folder doesn't exist.
     """
-    client = GDriveClient.build_service()
+    folder = Path(folder_path)
 
-    # Navigate to the folder and get its ID
-    from src.loaders.gdrive import ResolvedFilePath
-    parts = [p for p in folder_path.split('/') if p]
-    parent_id = None
+    if not folder.exists():
+        raise FileNotFoundError(f"Folder not found: {folder_path}")
 
-    # Start with DATA_FOLDER_NAME
-    data_folder = ResolvedFilePath(name=DATA_FOLDER_NAME, parent_id=None)
-    parent_id = client.create_or_get_folder(data_folder)
+    if not folder.is_dir():
+        raise ValueError(f"Path is not a directory: {folder_path}")
 
-    # Navigate through the rest of the path
-    for part in parts:
-        folder = ResolvedFilePath(name=part, parent_id=parent_id)
-        parent_id = client.create_or_get_folder(folder)
-
-    # Search for all CSV files in the folder
-    from src.loaders.gdrive import CSV_MIME_TYPE
-    search_path = ResolvedFilePath(name=None, parent_id=parent_id)
-    csv_files = client.search(search_path, mime_type=CSV_MIME_TYPE)
+    # Find all CSV files in the folder
+    csv_files = sorted(folder.glob('*.csv'))
 
     if not csv_files:
         raise ValueError(f"No CSV files found in folder: {folder_path}")
 
-    # Download each CSV and collect into a list of DataFrames
+    # Load each CSV file and collect into a list of DataFrames
     dataframes = []
-    for file_info in csv_files:
-        file_name = file_info['name']
-        print(f"Loading {file_name}...")
-
-        # Create a ResolvedFilePath for this file
-        file_path = ResolvedFilePath(name=file_name, parent_id=parent_id)
-
-        # Download and read the CSV
-        with client.download_to_stream(file_path, mime_type=CSV_MIME_TYPE) as stream:
-            df = pd.read_csv(stream)
-            dataframes.append(df)
+    for csv_file in csv_files:
+        print(f"Loading {csv_file.name}...")
+        df = pd.read_csv(csv_file)
+        dataframes.append(df)
 
     # Combine all DataFrames
     print(f"Combining {len(dataframes)} CSV files...")
     combined_df = pd.concat(dataframes, ignore_index=True)
 
     return combined_df
+
+
