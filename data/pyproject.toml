@@ -17,6 +17,7 @@ google-auth-httplib2 = "==0.2.0"
 google-auth-oauthlib = "^1.2.2"
 importlib_resources = "^6.5.2"
 pandas = "^2.3.3"
+notebook = "^7.4.7"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }
