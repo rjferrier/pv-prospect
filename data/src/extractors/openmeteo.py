@@ -67,7 +67,9 @@ API_HELPERS_BY_MODE = {
     Mode.HOURLY: APIHelper(
         time_resolution='hourly',
         base_url="https://satellite-api.open-meteo.com/v1/archive",
-        models='satellite_radiation_seamless,best_match',
+        models='best_match,satellite_radiation_seamless,ukmo_seamless,meteoswiss_icon_seamless,knmi_seamless,'
+               'kma_seamless,jma_seamless,gfs_seamless,gem_seamless,icon_seamless,meteofrance_seamless,'
+               'dmi_seamless,metno_seamless,era5_seamless',
         time_delimiter_suffix='date',
         date_stringifier=lambda dt: dt.strftime("%Y-%m-%d"),
         fields=SOLAR_RADIATION_FIELDS
