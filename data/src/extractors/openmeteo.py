@@ -8,7 +8,6 @@ import requests
 
 from src.domain.location import Location
 from src.domain.pv_site import get_pv_site_by_system_id
-from src.util.env_mapper import map_from_env
 
 MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)
@@ -35,6 +34,7 @@ class APIHelper:
     time_resolution: str
     base_url: str
     models: str
+    time_delimiter_suffix: str
     date_stringifier: Callable[[datetime], str]
     fields: list[str]
 
@@ -44,9 +44,10 @@ class APIHelper:
         return {
             'latitude': location.latitude,
             'longitude': location.longitude,
-            f'start_{self.time_resolution}': self.date_stringifier(start_datetime),
-            f'end_{self.time_resolution}': self.date_stringifier(end_datetime),
+            f'start_{self.time_delimiter_suffix}': self.date_stringifier(start_datetime),
+            f'end_{self.time_delimiter_suffix}': self.date_stringifier(end_datetime),
             self.time_resolution: ','.join(self.fields),
+            'models': self.models,
             **CONSTANT_QUERY_PARAMS,
         }
 
@@ -59,6 +60,7 @@ API_HELPERS_BY_MODE = {
         time_resolution='minutely_15',
         base_url="https://api.open-meteo.com/v1/forecast",
         models='best_match',
+        time_delimiter_suffix='minutely_15',
         date_stringifier=lambda dt: dt.isoformat(),
         fields = BASIC_FIELDS + CLOUD_COVER_FIELDS + SOLAR_RADIATION_FIELDS
     ),
@@ -66,6 +68,7 @@ API_HELPERS_BY_MODE = {
         time_resolution='hourly',
         base_url="https://satellite-api.open-meteo.com/v1/archive",
         models='satellite_radiation_seamless,best_match',
+        time_delimiter_suffix='date',
         date_stringifier=lambda dt: dt.strftime("%Y-%m-%d"),
         fields=SOLAR_RADIATION_FIELDS
     )
