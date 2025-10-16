@@ -42,7 +42,10 @@ def parse_args():
         prog='etl', formatter_class=lambda prog: RawTextHelpFormatter(prog, width=120)
     )
     parser.format_help()
-    parser.add_argument('source', choices=list(DATA_SOURCES.keys()), help="data source")
+    parser.add_argument(
+        'source',
+        help="data source (comma-separated from: {} )".format(', '.join(DATA_SOURCES.keys()))
+    )
     parser.add_argument('system_id', type=int, help="system (plant) ID")
     parser.add_argument(
         '-d', '--start-date',
@@ -60,6 +63,11 @@ def parse_args():
         action="store_true",
         help="process dates in reverse order"
     )
+    parser.add_argument(
+        '-n', '--dry-run',
+        action='store_true',
+        help='Show what would be done, but do not upload or modify any files.'
+    )
     args = parser.parse_args()
 
     if not args.end_date:
@@ -69,35 +77,47 @@ def parse_args():
 
 
 def main(args):
-    # Get PV site information
-    pv_site = get_pv_site_by_system_id(args.system_id)
-    if pv_site is None:
-        raise ValueError(f"No PV site found with system ID {args.system_id}")
+    # Parse comma-separated sources
+    source_args = [s.strip() for s in args.source.split(',')]
+    # Validate sources
+    invalid = [s for s in source_args if s not in DATA_SOURCES]
+    if invalid:
+        raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(DATA_SOURCES.keys())}")
+    sources = source_args
+    for source in sources:
+        # Get PV site information
+        pv_site = get_pv_site_by_system_id(args.system_id)
+        if pv_site is None:
+            raise ValueError(f"No PV site found with system ID {args.system_id}")
 
-    # initialise components
-    client = GDriveClient.build_service()
-    data_source = DATA_SOURCES[args.source]
-    print(f"Processing {data_source.descriptor} for site: {pv_site.name}")
+        # initialise components
+        client = GDriveClient.build_service()
+        data_source = DATA_SOURCES[source]
+        print(f"Processing {data_source.descriptor} for site: {pv_site.name}")
 
-    extractor = data_source.extractor_factory()
+        extractor = data_source.extractor_factory()
 
-    # run ETL
-    for date_ in _get_date_range(args):
-        print(f"Processing data for {date_}")
+        # run ETL
+        for date_ in _get_date_range(args):
+            print(f"Processing data for {date_}")
 
-        # Check if file already exists
-        file_path = get_csv_file_path(data_source, pv_site, date_)
-        resolved_file_path = client.resolve_path(file_path)
+            # Check if file already exists
+            file_path = get_csv_file_path(data_source, pv_site, date_)
+            resolved_file_path = client.resolve_path(file_path)
 
-        existing_files = client.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
+            existing_files = client.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
 
-        if existing_files and not ALLOW_DUPLICATE_FILES:
-            print(f"File already exists: {file_path}")
-            continue
+            if existing_files and not ALLOW_DUPLICATE_FILES:
+                print(f"File already exists: {file_path}")
+                continue
 
-        # Extract and upload
-        entries = extractor.extract(args.system_id, date_)
-        upload_csv(client, file_path, entries)
+            if args.dry_run:
+                print(f"Dry run - not uploading: {file_path}")
+                continue
+
+            # Extract and upload
+            entries = extractor.extract(args.system_id, date_)
+            upload_csv(client, file_path, entries)
 
 
 def _get_date_range(args) -> list[date]:

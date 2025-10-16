@@ -4,11 +4,12 @@ import os
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional, Any, Callable, TypeVar, Iterator, Iterable
+from typing import Optional, Any, Callable, TypeVar, Iterator
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
@@ -37,19 +38,27 @@ def get_credentials() -> Credentials:
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # noinspection PyTypeChecker
-            source = files(resources).joinpath(CREDS_FILENAME)
-            f = source.open()
-            client_config = json.load(f)
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                print("Credentials have been revoked or expired, need to re-authenticate.")
+                creds = _get_new_creds()
 
-            flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-            creds = flow.run_local_server(port=0)
         # Save the credentials for the next run
         with open(TOKEN_FILENAME, "w") as token:
             token.write(creds.to_json())
 
+    return creds
+
+
+def _get_new_creds() -> Credentials:
+    # noinspection PyTypeChecker
+    source = files(resources).joinpath(CREDS_FILENAME)
+    f = source.open()
+    client_config = json.load(f)
+
+    flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+    creds = flow.run_local_server(port=0)
     return creds
 
 
