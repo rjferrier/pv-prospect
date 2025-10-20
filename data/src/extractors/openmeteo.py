@@ -7,7 +7,7 @@ from typing import Callable
 import requests
 
 from src.domain.location import Location
-from src.domain.pv_site import get_pv_site_by_system_id
+from src.domain.pv_site import PVSite
 
 MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)
@@ -81,10 +81,9 @@ class OpenMeteoWeatherDataExtractor:
     def __init__(self, mode: Mode) -> None:
         self.mode = mode
 
-    def extract(self, system_id: int, date_: date) -> list[list[str]]:
-        site = get_pv_site_by_system_id(system_id)
-        if site is None:
-            raise ValueError(f"No PV site found with system ID {system_id}")
+    def extract(self, pv_site: PVSite, date_: date) -> list[list[str]]:
+        if not pv_site:
+            raise ValueError("PVSite must be provided")
 
         start_datetime = datetime.combine(date_, MIN_TIME)
         end_datetime = datetime.combine(date_, MAX_TIME)
@@ -92,7 +91,7 @@ class OpenMeteoWeatherDataExtractor:
         api_helper = API_HELPERS_BY_MODE[self.mode]
         response = requests.get(
             url=api_helper.base_url,
-            params=api_helper.get_query_params(site.location, start_datetime, end_datetime)
+            params=api_helper.get_query_params(pv_site.location, start_datetime, end_datetime)
         )
         response.raise_for_status()
 
