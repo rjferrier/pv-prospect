@@ -1,17 +1,17 @@
 pvoutput_system_id,name,latitude,longitude,shading,installation_date,panel_brand,panels_capacity,inverter_brand,inverter_capacity,panel_azimuth_1,panel_elevation_1,panel_area_fraction_1,panel_azimuth_2,panel_elevation_2,panel_area_fraction_2,panel_azimuth_3,panel_elevation_3,panel_area_fraction_3,comments
-89665,Bells Meadow,52.6524, 0.7785,Low,2021-11-21,Trina Vertex S,7800,SolarEdge SE8000H,8000,90,36,0.5,270,36,0.5,,,,
+89665,Bell's Meadow,52.6524, 0.7785,Low,2021-11-21,Trina Vertex S,7800,SolarEdge SE8000H,8000,90,36,0.5,270,36,0.5,,,,
 66991,Ledbury Community Hospital,52.0364, -2.4251,Low,2015-07-01,BenQ SunForte PM096B00,76560,SMA Sunny Tripower,25000,175,40,0.293,165,40,0.362,205,40,0.345,
 26297,Hamilton House,51.4629, -2.5894,None,2011-12-08,Innotech and Siliken,39330,SMA,40000,187,37,1,,,,,,,
 32101,Queen Elizabeth's Grammar School,51.3179, 0.8971,None,,Solarworld SW250,9000,SMA Sunpower 9000,9000,213,30,1,,,,,,,
-61272,Pump Hollow,53.1462, -1.1629,None,,Unknown,4000,SMA,4000,192,32,1,,,,,,,
-25724,Green Acre,53.7515, -0.7338,Low,2013-12-20,Solarworld mono black,4000,Solar River,3680,170,40,1,,,,,,,
-6341,The Workshop,49.9609, -6.2838,None,2011-12-01,Unknown,3885,SMA Sunny Boy 3800,3800,213,15,1,,,,,,,
-100997,Slaley [*],54.8840, -1.5116,None,2023-03-27,Jinko Tiger Pro 54c N-Type ,9860,FoxEss Hybrid KH8,8000,192,29,0.261,102,29,0.304,282,29,0.435,Panels unidentifiable/too new to appear in satellite images. Angles inferred from owner comments.
+61272,Pump Hollow Lane,53.1462, -1.1629,None,,Unknown,4000,SMA,4000,192,32,1,,,,,,,
+25724,Greenacre Park,53.7515, -0.7338,Low,2013-12-20,Solarworld mono black,4000,Solar River,3680,170,40,1,,,,,,,
+6341,St Martin's,49.9609, -6.2838,None,2011-12-01,Unknown,3885,SMA Sunny Boy 3800,3800,213,15,1,,,,,,,
+100997,Slaley,54.8840, -1.5116,None,2023-03-27,Jinko Tiger Pro 54c N-Type ,9860,FoxEss Hybrid KH8,8000,192,29,0.261,102,29,0.304,282,29,0.435,Panels unidentifiable/too new to appear in satellite images. Angles inferred from owner comments.
 58619,Wheatland,57.3385, -2.1843,Low,,JA Solar,4060,Solis ,4060,180,35,1,,,,,,,
 79336,Orchard Lodge,50.4925, -3.5378,None,,Samil,4000,Samil River 4000TL-D,4000,175,20,1,,,,,,,Elevation estimated from Google Maps Street View.
 2108,Templar Close,51.3486, -0.8068,None,2011-05-19,Sharp NU185,3700,SMA SB4000TL,4000,197,35,1,,,,,,,
-110545,Abbeyfields,50.8779, -1.3398,None,,Enersol,4250,Luxpower,5000,240,35,1,,,,,,,Elevation estimated from Google Maps Street View.
+110545,Abbeyfields Close,50.8779, -1.3398,None,,Enersol,4250,Luxpower,5000,240,35,1,,,,,,,Elevation estimated from Google Maps Street View.
 4708,Kingfisher Close,51.8144, -0.2949,None,2011-08-31,Kinve KV240-60M,4000,SMA Sunny Boy SB4000-TL,4000,90,30,0.5,270,30,0.5,,,,
-82517,Crofthead,55.6722, -4.0724,Low,2018-12-31,LG365Q1C-V5,9875,SolarEdge 6000H,6000,170,30,1,,,,,,,
-36019,Arlington,53.6012,-3.0529,None,2015-02-09,Seraphim,5000,Solaredge SE5000,5000,180,20,1,,,,,,,
-42248,Llanrhidian,51.6087, -4.1706,Medium,2015-12-05,Mono JAsolar ,3975,Solar Edge,4000,170,43,1,,,,,,,Elevation estimated from Google Maps Street View.
+82517,Crofthead Street,55.6722, -4.0724,Low,2018-12-31,LG365Q1C-V5,9875,SolarEdge 6000H,6000,170,30,1,,,,,,,
+36019,Arlington Close,53.6012,-3.0529,None,2015-02-09,Seraphim,5000,Solaredge SE5000,5000,180,20,1,,,,,,,
+42248,Mill Lane,51.6087, -4.1706,Medium,2015-12-05,Mono JAsolar ,3975,Solar Edge,4000,170,43,1,,,,,,,Elevation estimated from Google Maps Street View.
