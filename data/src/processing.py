@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 
 @dataclass
@@ -11,6 +11,15 @@ class ProcessingStats:
     skipped_dry_run: int = 0
     failed: int = 0
     failures: List[Tuple[str, date, int, str, str]] = field(default_factory=list)
+    failure_log_path: Optional[str] = field(default=None, init=False)
+
+    def __post_init__(self):
+        """Create failure log file upon initialization."""
+        self.failure_log_path = f"failure_details_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        # Create the log file (empty initially)
+        with open(self.failure_log_path, 'w') as f:
+            f.write(f"Failure Log - Created {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("=" * 80 + "\n\n")
 
     def record_success(self):
         """Record a successful processing operation."""
@@ -25,29 +34,23 @@ class ProcessingStats:
         self.skipped_dry_run += 1
 
     def record_failure(self, source: str, date_: date, system_id: int, site_name: str, error: str):
-        """Record a failed operation with details."""
+        """Record a failed operation with details and write to log immediately."""
         self.failed += 1
         self.failures.append((source, date_, system_id, site_name, error))
+
+        # Write to log file immediately
+        with open(self.failure_log_path, 'a') as f:
+            f.write(f"Failure #{self.failed} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Source: {source}\n")
+            f.write(f"Date: {date_}\n")
+            f.write(f"System ID: {system_id}\n")
+            f.write(f"Site: {site_name}\n")
+            f.write(f"Error: {error}\n")
+            f.write("-" * 80 + "\n\n")
 
     def total(self) -> int:
         """Calculate total number of items processed."""
         return self.processed + self.skipped_existing + self.skipped_dry_run + self.failed
-
-    def write_failure_log(self) -> str:
-        """Write failure details to a timestamped log file. Returns the log file path."""
-        if not self.failures:
-            return None
-
-        log_file = f"failure_details_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        with open(log_file, 'w') as f:
-            for source, date_, system_id, site_name, error in self.failures:
-                f.write(f"Source: {source}\n")
-                f.write(f"Date: {date_}\n")
-                f.write(f"System ID: {system_id}\n")
-                f.write(f"Site: {site_name}\n")
-                f.write(f"Error: {error}\n")
-                f.write("-" * 80 + "\n")
-        return log_file
 
     def print_summary(self, dry_run: bool = False):
         """Print a summary of the processing results to the console."""
@@ -65,7 +68,6 @@ class ProcessingStats:
         print(f"  ✗ Failed: {self.failed}")
 
         if self.failures:
-            log_file = self.write_failure_log()
-            print(f"Failure details written to log file: {log_file}")
+            print(f"\nFailure details have been written to: {self.failure_log_path}")
 
         print("=" * 80)
