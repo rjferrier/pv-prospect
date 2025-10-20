@@ -40,7 +40,7 @@ def get_csv_file_path(data_source: DataSource, pv_site: PVSite, date_: date) -> 
     """Generate CSV filename using site name and data source"""
     filename_parts = [
         data_source.descriptor.replace('/', '-'),
-        str(pv_site.pvoutput_system_id),
+        str(pv_site.pvo_sys_id),
         "%04d%02d%02d" % (date_.year, date_.month, date_.day)
     ]
     filename = '_'.join(filename_parts) + '.csv'

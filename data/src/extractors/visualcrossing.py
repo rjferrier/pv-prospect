@@ -77,7 +77,7 @@ class VCWeatherDataExtractor:
 
         url = '/'.join((
             BASE_URL,
-            str(site.location),
+            site.location.get_coordinates(),
             start_datetime.strftime('%Y-%m-%d'),
             end_datetime.strftime('%Y-%m-%d')
         ))

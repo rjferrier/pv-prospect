@@ -1,5 +1,6 @@
 import csv
 from dataclasses import dataclass
+from datetime import date
 from typing import Optional, List
 from importlib_resources import files
 
@@ -17,17 +18,18 @@ class PanelGeometry:
 @dataclass
 class System:
     brand: str
-    rated_output: int
+    capacity: int
 
 
 @dataclass
 class PVSite:
+    pvo_sys_id: int
     name: str
     location: Location
-    pvoutput_system_id: int
     panel_system: System
     panel_geometries: List[PanelGeometry]
     inverter_system: System
+    installation_date: Optional[date] = None
 
 
 def _create_panel_geometry_from_row(row: dict, index: int) -> Optional[PanelGeometry]:
@@ -69,18 +71,19 @@ def _create_pv_site_from_csv_row(row: dict) -> PVSite:
     # Convert string values to appropriate types
     location = Location(
         latitude=float(row['latitude']),
-        longitude=float(row['longitude'])
+        longitude=float(row['longitude']),
+        shading=row['shading']
     )
 
     # Create panel and inverter systems
     panel_system = System(
         brand=row['panel_brand'],
-        rated_output=int(row['panel_rating'])
+        capacity=int(row['panels_capacity'])
     )
 
     inverter_system = System(
         brand=row['inverter_brand'],
-        rated_output=int(row['inverter_rating'])
+        capacity=int(row['inverter_capacity'])
     )
 
     # Create panel geometries
@@ -92,13 +95,17 @@ def _create_pv_site_from_csv_row(row: dict) -> PVSite:
     if not panel_geometries:
         raise ValueError("At least one panel geometry must be defined in the CSV row")
 
+    installation_date_str = row.get('installation_date')
+    installation_date = date.fromisoformat(installation_date_str) if installation_date_str else None
+
     return PVSite(
+        pvo_sys_id=int(row['pvoutput_system_id']),
         name=row['name'],
         location=location,
-        pvoutput_system_id=int(row['pvoutput_system_id']),
         panel_system=panel_system,
         panel_geometries=panel_geometries,
-        inverter_system=inverter_system
+        inverter_system=inverter_system,
+        installation_date=installation_date
     )
 
 
