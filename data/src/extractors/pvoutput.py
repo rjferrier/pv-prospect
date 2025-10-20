@@ -2,6 +2,7 @@ from datetime import date
 
 import requests
 
+from src.domain.pv_site import PVSite
 from src.util.env_mapper import map_from_env, VarMapping
 
 
@@ -43,9 +44,9 @@ class PVOutputExtractor:
             'system_id': VarMapping('PVO_SYSTEM_ID', str)
         })
 
-    def extract(self, system_id: int, date_: date) -> list[list[str]]:
-        if not system_id:
-            raise ValueError("System ID must be provided and non-zero")
+    def extract(self, pv_site: PVSite, date_: date) -> list[list[str]]:
+        if not pv_site or not pv_site.pvo_sys_id:
+            raise ValueError("PVSite must be provided with a valid system ID")
 
         headers = {
             API_KEY_HEADER_NAME: self.api_key,
@@ -53,8 +54,8 @@ class PVOutputExtractor:
         }
 
         params = {
-            'sid1': system_id,              # Target system ID
-            'd': date_.strftime('%Y%m%d'),  # Date in YYYYMMDD format
+            'sid1': pv_site.pvo_sys_id,        # Target system ID from PVSite
+            'd': date_.strftime('%Y%m%d'),     # Date in YYYYMMDD format
             **CONSTANT_QUERY_PARAMS
         }
 

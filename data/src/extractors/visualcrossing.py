@@ -6,7 +6,7 @@ from io import StringIO
 
 import requests
 
-from src.domain.pv_site import get_pv_site_by_system_id
+from src.domain.pv_site import PVSite
 from src.util.env_mapper import map_from_env, VarMapping
 
 BASE_URL = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
@@ -67,17 +67,16 @@ class VCWeatherDataExtractor:
             'api_key': VarMapping('VC_API_KEY', str)
         }, mode=mode)
 
-    def extract(self, system_id: int, date_: date) -> list[list[str]]:
-        site = get_pv_site_by_system_id(system_id)
-        if site is None:
-            raise ValueError(f"No PV site found with system ID {system_id}")
+    def extract(self, pv_site: PVSite, date_: date) -> list[list[str]]:
+        if not pv_site:
+            raise ValueError("PVSite must be provided")
 
         start_datetime = datetime.combine(date_, MIN_TIME)
         end_datetime = datetime.combine(date_, MAX_TIME)
 
         url = '/'.join((
             BASE_URL,
-            site.location.get_coordinates(),
+            pv_site.location.get_coordinates(),
             start_datetime.strftime('%Y-%m-%d'),
             end_datetime.strftime('%Y-%m-%d')
         ))

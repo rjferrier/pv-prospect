@@ -109,22 +109,80 @@ def _create_pv_site_from_csv_row(row: dict) -> PVSite:
     )
 
 
-def get_pv_site_by_system_id(system_id: int) -> Optional[PVSite]:
+def get_all_system_ids() -> List[int]:
     """
-    Look up a PV site by system ID from the pv_sites.csv file.
-
-    Args:
-        system_id (int): The PVO system ID to search for
+    Retrieve a list of all PV site system IDs from the pv_sites.csv file.
 
     Returns:
-        Optional[PVSite]: The PVSite object if found, None otherwise
+        List[int]: List of all PVO system IDs
     """
     source = files(resources).joinpath("pv_sites.csv")
+    system_ids = []
 
     with source.open('r') as file:
         reader = csv.DictReader(file)
         for row in reader:
-            if int(row['pvoutput_system_id']) == system_id:
-                return _create_pv_site_from_csv_row(row)
+            system_ids.append(int(row['pvoutput_system_id']))
 
-    return None
+    return system_ids
+
+
+class PVSiteRepository:
+    """Repository for managing PVSite objects loaded from pv_sites.csv."""
+
+    def __init__(self, sites_by_id: dict[int, PVSite]):
+        """
+        Initialize the repository with a dictionary of PV sites.
+
+        Args:
+            sites_by_id: Dictionary mapping system IDs to PVSite objects
+        """
+        self._sites_by_id = sites_by_id
+
+    @classmethod
+    def from_csv(cls) -> 'PVSiteRepository':
+        """
+        Factory method to create a repository by loading all PV sites from the CSV file.
+
+        Returns:
+            PVSiteRepository: A new repository instance with all sites loaded
+        """
+        source = files(resources).joinpath("pv_sites.csv")
+        sites_by_id = {}
+
+        with source.open('r') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                pv_site = _create_pv_site_from_csv_row(row)
+                sites_by_id[pv_site.pvo_sys_id] = pv_site
+
+        return cls(sites_by_id)
+
+    def get_by_system_ids(self, system_ids: List[int]) -> List[PVSite]:
+        """
+        Get PVSite objects for the given system IDs.
+
+        Args:
+            system_ids (List[int]): List of PVO system IDs to retrieve
+
+        Returns:
+            List[PVSite]: List of PVSite objects corresponding to the system IDs,
+                         in the same order as requested
+
+        Raises:
+            ValueError: If any system ID is not found in the repository
+        """
+        missing_ids = [sid for sid in system_ids if sid not in self._sites_by_id]
+        if missing_ids:
+            raise ValueError(f"System ID(s) not found in pv_sites.csv: {sorted(missing_ids)}")
+
+        return [self._sites_by_id[sid] for sid in system_ids]
+
+    def get_all(self) -> List[PVSite]:
+        """
+        Get all PVSite objects, ordered by system ID.
+
+        Returns:
+            List[PVSite]: List of all PVSite objects, sorted by system ID
+        """
+        return [self._sites_by_id[sid] for sid in sorted(self._sites_by_id.keys())]
