@@ -8,6 +8,7 @@ import requests
 
 from src.domain.location import Location
 from src.domain.pv_site import PVSite
+from src.util.retry import retry_on_429
 
 MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)
@@ -81,6 +82,7 @@ class OpenMeteoWeatherDataExtractor:
     def __init__(self, mode: Mode) -> None:
         self.mode = mode
 
+    @retry_on_429
     def extract(self, pv_site: PVSite, date_: date) -> list[list[str]]:
         if not pv_site:
             raise ValueError("PVSite must be provided")
@@ -89,6 +91,7 @@ class OpenMeteoWeatherDataExtractor:
         end_datetime = datetime.combine(date_, MAX_TIME)
 
         api_helper = API_HELPERS_BY_MODE[self.mode]
+
         response = requests.get(
             url=api_helper.base_url,
             params=api_helper.get_query_params(pv_site.location, start_datetime, end_datetime)

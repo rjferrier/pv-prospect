@@ -1,8 +1,6 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
 from datetime import date, timedelta
 
-from requests import HTTPError
-
 from src.domain.data_source import DataSource
 from src.domain.pv_site import PVSiteRepository, PVSite
 from src.extractors.openmeteo import OpenMeteoWeatherDataExtractor, Mode as OMMode
@@ -134,14 +132,9 @@ def main(args):
                     entries = extractor.extract(pv_site, date_)
                     upload_csv(client, file_path, entries)
                     stats.record_success()
-                except HTTPError as e:
-                    error_msg = str(e)
-                    print(f"    HTTP ERROR: {error_msg}")
-                    stats.record_failure(data_source.descriptor, date_, pv_site.pvo_sys_id, pv_site.name, error_msg)
                 except Exception as e:
-                    error_msg = str(e)
-                    print(f"    ERROR: {error_msg}")
-                    stats.record_failure(data_source.descriptor, date_, pv_site.pvo_sys_id, pv_site.name, error_msg)
+                    print(f"    ERROR: {e}")
+                    stats.record_failure(data_source.descriptor, date_, pv_site.pvo_sys_id, pv_site.name, str(e))
 
     # Print summary report
     stats.print_summary(dry_run=args.dry_run)

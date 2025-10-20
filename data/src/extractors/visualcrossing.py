@@ -63,9 +63,10 @@ class VCWeatherDataExtractor:
 
     @classmethod
     def from_env(cls, mode: Mode) -> 'VCWeatherDataExtractor':
-        return map_from_env(VCWeatherDataExtractor, {
+        extractor = map_from_env(VCWeatherDataExtractor, {
             'api_key': VarMapping('VC_API_KEY', str)
         }, mode=mode)
+        return extractor
 
     def extract(self, pv_site: PVSite, date_: date) -> list[list[str]]:
         if not pv_site:
