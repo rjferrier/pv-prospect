@@ -97,6 +97,8 @@ class PVOutputRateLimiter:
 
 
 class PVOutputExtractor:
+    multi_date = False  # This extractor processes one date at a time
+
     def __init__(self, api_key: str, system_id: str, rate_limiter: Optional[PVOutputRateLimiter] = None) -> None:
         self.api_key = api_key
         self.system_id = system_id
@@ -111,9 +113,12 @@ class PVOutputExtractor:
         }, rate_limiter=rate_limiter)
         return extractor
 
-    def extract(self, pv_site: PVSite, date_: date) -> ExtractionResult:
+    def extract(self, pv_site: PVSite, date_: date, end_date: date = None) -> ExtractionResult:
         if not pv_site or not pv_site.pvo_sys_id:
             raise ValueError("PVSite must be provided with a valid system ID")
+
+        # PVOutput API only supports single-date queries, so ignore end_date
+        # If multi-date support is needed in the future, multiple API calls would be required
 
         headers = {
             API_KEY_HEADER_NAME: self.api_key,

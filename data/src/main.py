@@ -82,14 +82,14 @@ def parse_args():
                         help="system ID or comma-separated list of system IDs (e.g. 123 or 123,456). If omitted, all systems will be processed.")
     parser.add_argument(
         '-d', '--start-date',
-        type=_parse_date,
-        help="start date: 'today', 'yesterday', or YYYY-MM-DD format (default: yesterday)",
-        default=yesterday
+        type=str,
+        help="start date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: yesterday)",
+        default=None
     )
     parser.add_argument(
         '-e', '--end-date',
-        type=_parse_date,
-        help="end date: 'today', 'yesterday', or YYYY-MM-DD format (default: start date plus one day)"
+        type=str,
+        help="end date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: start date plus one day)"
     )
     parser.add_argument(
         '-r', '--reverse',
@@ -102,14 +102,39 @@ def parse_args():
         help='Show what would be done, but do not upload or modify any files.'
     )
     parser.add_argument(
-        '-m', '--write-metadata',
+        '-m', '--by-month',
+        action='store_true',
+        help="Process one month at a time instead of one day at a time."
+    )
+    parser.add_argument(
+        '-x', '--write-metadata',
         action='store_true',
         help='Write extractor metadata as a JSON file next to the CSV when present.'
     )
     args = parser.parse_args()
 
-    if not args.end_date:
-        args.end_date = args.start_date + timedelta(days=1)
+    # Parse start date
+    if args.start_date is None:
+        args.start_date = yesterday
+        start_is_month = False
+    else:
+        start_is_month = _is_month_format(args.start_date)
+        args.start_date = _parse_date(args.start_date)
+
+    # Parse end date
+    if args.end_date is None:
+        if start_is_month:
+            # If start date was a month, default end date to end of that month
+            args.end_date = _get_last_day_of_month(args.start_date)
+        else:
+            args.end_date = args.start_date + timedelta(days=1)
+    else:
+        if _is_month_format(args.end_date):
+            # Parse as first day of month, then convert to last day
+            temp_date = _parse_date(args.end_date)
+            args.end_date = _get_last_day_of_month(temp_date)
+        else:
+            args.end_date = _parse_date(args.end_date)
 
     return args
 
@@ -137,60 +162,144 @@ def main(args):
         data_source = DATA_SOURCES[source]
         extractor = data_source.extractor_factory()
 
-        # run ETL
-        for date_ in _get_date_range(args):
-            print(f"Processing {data_source.descriptor} for {date_}")
+        # Determine the iteration strategy based on period and extractor type
+        if args.by_month:
+            if not extractor.multi_date:
+                raise ValueError(f"Extractor for source '{source}' does not support multi-date extraction "
+                                 f"required for --by-month option.")
 
-            # Innermost loop: iterate over each PV site
+            # Process month by month
+            for month_start, month_end in _get_month_ranges(args):
+                print(f"Processing {data_source.descriptor} for month {month_start.strftime('%Y-%m')}")
+
+                for pv_site in pv_sites:
+                    print(f"  Processing site: {pv_site.name} (system_id={pv_site.pvo_sys_id})")
+                    _process_extraction(
+                        client, extractor, data_source, pv_site, month_start,
+                        args, stats, end_date=month_end, whole_month=True
+                    )
+
+        elif extractor.multi_date:
+            # Multi-date extractor: call once with full date range
+            print(f"Processing {data_source.descriptor} for date range {args.start_date} to {args.end_date}")
+
+            # Process each PV site with the full date range
             for pv_site in pv_sites:
                 print(f"  Processing site: {pv_site.name} (system_id={pv_site.pvo_sys_id})")
+                _process_extraction(
+                    client, extractor, data_source, pv_site, args.start_date,
+                    args, stats, end_date=args.end_date
+                )
+        else:
+            # Single-date extractor: iterate through dates (day by day)
+            for date_ in _get_date_range(args):
+                print(f"Processing {data_source.descriptor} for {date_}")
 
-                # Check if file already exists
-                file_path = get_csv_file_path(data_source, pv_site, date_)
-                resolved_file_path = client.resolve_path(file_path)
-
-                existing_files = client.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
-
-                if existing_files and not ALLOW_DUPLICATE_FILES:
-                    print(f"    File already exists: {file_path}")
-                    stats.record_skip_existing()
-                    continue
-
-                if args.dry_run:
-                    print(f"    Dry run - not uploading: {file_path}")
-                    stats.record_skip_dry_run()
-                    continue
-
-                try:
-                    extraction_result = extractor.extract(pv_site, date_)
-                    upload_csv(client, file_path, extraction_result.data)
-
-                    # Optionally write metadata JSON if requested and available
-                    if args.write_metadata and extraction_result.metadata:
-                        try:
-                            upload_metadata(client, file_path, extraction_result.metadata)
-                        except Exception as meta_e:
-                            print(f"    WARNING: failed to upload metadata for {file_path}: {meta_e}")
-
-                    stats.record_success()
-
-                except Exception as e:
-                    print(f"    ERROR: {e}")
-
-                    stats.record_failure(data_source.descriptor, date_, pv_site.pvo_sys_id, pv_site.name, str(e))
+                # Process each PV site for this date
+                for pv_site in pv_sites:
+                    print(f"  Processing site: {pv_site.name} (system_id={pv_site.pvo_sys_id})")
+                    _process_extraction(
+                        client, extractor, data_source, pv_site, date_, args, stats
+                    )
 
     # Print summary report
     stats.print_summary(dry_run=args.dry_run)
 
 
+def _process_extraction(
+        client: GDriveClient,
+        extractor,
+        data_source: DataSource,
+        pv_site: PVSite,
+        date_: date,
+        args,
+        stats: ProcessingStats,
+        end_date: date = None,
+        whole_month: bool = False
+) -> None:
+    """
+    Process a single extraction for a given PV site and date (or date range).
+
+    Args:
+        client: Google Drive client
+        extractor: The data extractor instance
+        data_source: Data source configuration
+        pv_site: PV site to extract data for
+        date_: Start date (or single date for single-date extractors)
+        args: Command-line arguments
+        stats: Statistics tracker
+        end_date: End date (for multi-date extractors), None for single-date
+    """
+    # Check if file already exists
+    file_path = get_csv_file_path(data_source, pv_site, date_, end_date, whole_month)
+    resolved_file_path = client.resolve_path(file_path)
+
+    existing_files = client.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
+
+    if existing_files and not ALLOW_DUPLICATE_FILES:
+        print(f"    File already exists: {file_path}")
+        stats.record_skip_existing()
+        return
+
+    if args.dry_run:
+        print(f"    Dry run - not uploading: {file_path}")
+        stats.record_skip_dry_run()
+        return
+
+    try:
+        # Call extractor with appropriate arguments
+        extraction_result = extractor.extract(pv_site, date_, end_date)
+
+        upload_csv(client, file_path, extraction_result.data)
+
+        # Optionally write metadata JSON if requested and available
+        if args.write_metadata and extraction_result.metadata:
+            try:
+                upload_metadata(client, file_path, extraction_result.metadata)
+            except Exception as meta_e:
+                print(f"    WARNING: failed to upload metadata for {file_path}: {meta_e}")
+
+        stats.record_success()
+
+    except Exception as e:
+        print(f"    ERROR: {e}")
+        stats.record_failure(data_source.descriptor, date_, pv_site.pvo_sys_id, pv_site.name, str(e))
+
+
 def _parse_date(date_str: str) -> date:
-    """Parse date string supporting 'today', 'yesterday', or ISO format (YYYY-MM-DD)."""
+    """Parse date string supporting 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format."""
     if date_str.lower() == 'today':
         return date.today()
     elif date_str.lower() == 'yesterday':
         return date.today() - timedelta(days=1)
 
+    # Try YYYY-MM format (month specification)
+    if len(date_str) == 7 and date_str[4] == '-':
+        try:
+            year, month = date_str.split('-')
+            year = int(year)
+            month = int(month)
+            # Return the first day of the month
+            return date(year, month, 1)
+        except (ValueError, IndexError):
+            pass
+
+    # Default to ISO format (YYYY-MM-DD)
     return date.fromisoformat(date_str)
+
+
+def _is_month_format(date_str: str) -> bool:
+    """Check if a date string is in YYYY-MM format."""
+    return len(date_str) == 7 and date_str[4] == '-' and date_str.count('-') == 1
+
+
+def _get_last_day_of_month(year_month_date: date) -> date:
+    """Given a date in YYYY-MM format, return the last day of that month."""
+    next_month = year_month_date.month % 12 + 1
+    year = year_month_date.year + (year_month_date.month // 12)
+    first_of_next_month = date(year, next_month, 1)
+    last_day_of_month = first_of_next_month - timedelta(days=1)
+    return last_day_of_month
 
 
 def _get_date_range(args) -> list[date]:
@@ -201,6 +310,28 @@ def _get_date_range(args) -> list[date]:
         dates.reverse()
 
     return dates
+
+
+def _get_month_ranges(args) -> list[tuple[date, date]]:
+    """Generate month start and end dates between start_date and end_date."""
+    current = args.start_date
+    month_ranges = []
+
+    while current <= args.end_date:
+        # Calculate the first day of the next month
+        next_month = current.month % 12 + 1
+        year = current.year + (current.month // 12)
+        first_of_next_month = date(year, next_month, 1)
+
+        # End date is either the first of next month or the overall end date, whichever is earlier
+        month_end = min(first_of_next_month, args.end_date + timedelta(days=1))
+
+        month_ranges.append((current, month_end))
+
+        # Move to the next month
+        current = first_of_next_month
+
+    return month_ranges
 
 
 def _load_pv_sites(system_ids: str) -> list[PVSite]:

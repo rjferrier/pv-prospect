@@ -40,6 +40,7 @@ class APISelectorData:
     base_url: str
     time_limit_suffix_supplier: Callable[[TimeResolution], str]
     time_stringifier: Callable[[datetime], str]
+    multi_date: bool = False
     other_parameters: dict[str, str] = None
 
 
@@ -55,6 +56,7 @@ class APISelector(Enum):
         base_url="https://historical-forecast-api.open-meteo.com/v1/forecast",
         time_limit_suffix_supplier=lambda time_res: 'date',
         time_stringifier=lambda dt: dt.strftime("%Y-%m-%d"),
+        multi_date=True,
     )
     SATELLITE = APISelectorData(
         base_url="https://satellite-api.open-meteo.com/v1/archive",
@@ -144,6 +146,10 @@ class APIHelper:
             **CONSTANT_QUERY_PARAMS,
         }
 
+    @property
+    def multi_date(self) -> bool:
+        return self.api_selector.value.multi_date
+
     @staticmethod
     def _get_location_params(location: Location) -> dict[str, str]:
         return {
@@ -204,13 +210,19 @@ class OpenMeteoWeatherDataExtractor:
             fields=fields,
         ))
 
+    @property
+    def multi_date(self):
+        return self.api_helper.api_selector.value.multi_date
+
     @retry_on_429
-    def extract(self, pv_site: PVSite, date_: date) -> ExtractionResult:
+    def extract(self, pv_site: PVSite, date_: date, end_date: date = None) -> ExtractionResult:
         if not pv_site:
             raise ValueError("PVSite must be provided")
 
         start_datetime = datetime.combine(date_, MIN_TIME)
-        end_datetime = datetime.combine(date_, MAX_TIME)
+
+        # For multi-date extractors, use end_date if provided; otherwise use same day
+        end_datetime = datetime.combine(end_date if end_date else date_, MAX_TIME)
 
         url = self.api_helper.get_url()
         params = self.api_helper.get_query_params(pv_site.location, start_datetime, end_datetime)
@@ -239,7 +251,7 @@ class OpenMeteoWeatherDataExtractor:
 
         # Ensure all arrays have the same length
         if not arrays or not arrays[0]:
-            return []
+            return ExtractionResult(data=[], metadata=metadata)
 
         num_rows = len(arrays[0])
 
