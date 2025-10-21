@@ -3,10 +3,12 @@ from datetime import date, timedelta
 
 from src.domain.data_source import DataSource
 from src.domain.pv_site import PVSiteRepository, PVSite
-from src.extractors.openmeteo import OpenMeteoWeatherDataExtractor, Mode as OMMode
+from src.extractors.openmeteo import (
+    OpenMeteoWeatherDataExtractor, Mode as OMMode, APISelector, TimeResolution, Fields, Models
+)
 from src.extractors.pvoutput import PVOutputExtractor
 from src.extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
-from src.loaders.csv_helpers import upload_csv, get_csv_file_path
+from src.loaders.upload_helpers import upload_csv, get_csv_file_path, upload_metadata
 from src.loaders.gdrive import GDriveClient, CSV_MIME_TYPE
 from src.processing import ProcessingStats
 
@@ -17,13 +19,40 @@ DATA_SOURCES = {
         descriptor='pvoutput',
         extractor_factory=lambda: PVOutputExtractor.from_env()
     ),
+    'weather-om-15-v1': DataSource(
+        descriptor='openmeteo/quarterhourly/v1',
+        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
+            api_selector=APISelector.FORECAST,
+            time_resolution=TimeResolution.QUARTERHOURLY,
+            fields=Fields.FORECAST,
+            models=Models.ALL_FORECAST,
+        )
+    ),
+    'weather-om-60-v1': DataSource(
+        descriptor='openmeteo/hourly/v1',
+        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
+            api_selector=APISelector.FORECAST,
+            time_resolution=TimeResolution.HOURLY,
+            fields=Fields.FORECAST,
+            models=Models.ALL_FORECAST,
+        )
+    ),
+    'weather-om-historical': DataSource(
+        descriptor='openmeteo/historical',
+        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
+            api_selector=APISelector.HISTORICAL,
+            time_resolution=TimeResolution.HOURLY,
+            fields=Fields.FORECAST,
+            models=Models.ALL_FORECAST,
+        )
+    ),
     'weather-om-15': DataSource(
         descriptor='openmeteo/quarterhourly',
-        extractor_factory=lambda: OpenMeteoWeatherDataExtractor(OMMode.QUARTERHOURLY)
+        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_mode(OMMode.QUARTERHOURLY)
     ),
     'weather-om-60': DataSource(
         descriptor='openmeteo/hourly',
-        extractor_factory=lambda: OpenMeteoWeatherDataExtractor(OMMode.HOURLY)
+        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_mode(OMMode.HOURLY)
     ),
     'weather-vc-15': DataSource(
         descriptor='visualcrossing/quarterhourly',
@@ -71,6 +100,11 @@ def parse_args():
         '-n', '--dry-run',
         action='store_true',
         help='Show what would be done, but do not upload or modify any files.'
+    )
+    parser.add_argument(
+        '-m', '--write-metadata',
+        action='store_true',
+        help='Write extractor metadata as a JSON file next to the CSV when present.'
     )
     args = parser.parse_args()
 
@@ -127,13 +161,22 @@ def main(args):
                     stats.record_skip_dry_run()
                     continue
 
-                # Extract and upload
                 try:
-                    entries = extractor.extract(pv_site, date_)
-                    upload_csv(client, file_path, entries)
+                    extraction_result = extractor.extract(pv_site, date_)
+                    upload_csv(client, file_path, extraction_result.data)
+
+                    # Optionally write metadata JSON if requested and available
+                    if args.write_metadata and extraction_result.metadata:
+                        try:
+                            upload_metadata(client, file_path, extraction_result.metadata)
+                        except Exception as meta_e:
+                            print(f"    WARNING: failed to upload metadata for {file_path}: {meta_e}")
+
                     stats.record_success()
+
                 except Exception as e:
                     print(f"    ERROR: {e}")
+
                     stats.record_failure(data_source.descriptor, date_, pv_site.pvo_sys_id, pv_site.name, str(e))
 
     # Print summary report
@@ -167,7 +210,7 @@ def _load_pv_sites(system_ids: str) -> list[PVSite]:
         # User didn't specify IDs, so we're processing all systems
         return repository.get_all()
 
-    system_ids_list = [int(s.strip()) for s in args.system_ids.split(',') if s.strip()]
+    system_ids_list = [int(s.strip()) for s in system_ids.split(',') if s.strip()]
     return repository.get_by_system_ids(system_ids_list)
 
 

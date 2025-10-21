@@ -5,6 +5,7 @@ import time
 import requests
 
 from src.domain.pv_site import PVSite
+from src.extractors.base import ExtractionResult
 from src.util.env_mapper import map_from_env, VarMapping
 
 
@@ -110,7 +111,7 @@ class PVOutputExtractor:
         }, rate_limiter=rate_limiter)
         return extractor
 
-    def extract(self, pv_site: PVSite, date_: date) -> list[list[str]]:
+    def extract(self, pv_site: PVSite, date_: date) -> ExtractionResult:
         if not pv_site or not pv_site.pvo_sys_id:
             raise ValueError("PVSite must be provided with a valid system ID")
 
@@ -136,8 +137,9 @@ class PVOutputExtractor:
         self.rate_limiter.update_from_headers(response.headers)
 
         entries = _to_clean_entries(response.text)
-        # Prepend header row
-        return [HEADER] + entries
+        data = [HEADER] + entries
+
+        return ExtractionResult(data=data)
 
 
 def _to_clean_entries(text: str) -> list[list[str]]:
