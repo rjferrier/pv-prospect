@@ -7,6 +7,7 @@ from io import StringIO
 import requests
 
 from src.domain.pv_site import PVSite
+from src.extractors.base import ExtractionResult
 from src.util.env_mapper import map_from_env, VarMapping
 
 BASE_URL = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
@@ -68,7 +69,7 @@ class VCWeatherDataExtractor:
         }, mode=mode)
         return extractor
 
-    def extract(self, pv_site: PVSite, date_: date) -> list[list[str]]:
+    def extract(self, pv_site: PVSite, date_: date) -> ExtractionResult:
         if not pv_site:
             raise ValueError("PVSite must be provided")
 
@@ -88,4 +89,4 @@ class VCWeatherDataExtractor:
 
         # Parse CSV text into list of lists
         csv_reader = csv.reader(StringIO(response.text))
-        return list(csv_reader)
+        return ExtractionResult(list(csv_reader))

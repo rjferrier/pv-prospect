@@ -3,6 +3,7 @@ from io import StringIO
 from datetime import date
 from tempfile import SpooledTemporaryFile
 from typing import Iterable
+import json
 
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -34,6 +35,33 @@ def upload_csv(client: GDriveClient, file_path: str, rows: Iterable[Iterable[str
         media_body = MediaIoBaseUpload(tmp, mimetype=CSV_MIME_TYPE, resumable=True)
         resolved_file_path = client.resolve_path(file_path)
         client.upload_file(media_body, resolved_file_path, CSV_MIME_TYPE)
+
+
+def upload_metadata(client: GDriveClient, csv_file_path: str, metadata: dict) -> None:
+    """
+    Upload JSON metadata to Google Drive alongside the corresponding CSV file.
+
+    The metadata filename is derived from the CSV filename by replacing the .csv extension with .json.
+
+    Args:
+        client (GDriveClient): The Google Drive client instance.
+        csv_file_path (str): The CSV file path (used to derive the metadata filename and folder).
+        metadata (dict): The metadata to write as JSON.
+    """
+    # Derive metadata filename from CSV path (replace .csv with .json)
+    if csv_file_path.lower().endswith('.csv'):
+        metadata_path = csv_file_path[:-4] + '.json'
+    else:
+        metadata_path = csv_file_path + '.json'
+
+    with SpooledTemporaryFile(mode='w+b') as tmp:
+        text = json.dumps(metadata, indent=2, ensure_ascii=False)
+        tmp.write(text.encode('utf-8'))
+        tmp.seek(0)
+
+        media_body = MediaIoBaseUpload(tmp, mimetype='application/json', resumable=True)
+        resolved_file_path = client.resolve_path(metadata_path)
+        client.upload_file(media_body, resolved_file_path, 'application/json')
 
 
 def get_csv_file_path(data_source: DataSource, pv_site: PVSite, date_: date) -> str:
