@@ -102,9 +102,9 @@ def parse_args():
         help='Show what would be done, but do not upload or modify any files.'
     )
     parser.add_argument(
-        '-m', '--by-month',
+        '-w', '--by-week',
         action='store_true',
-        help="Process one month at a time instead of one day at a time."
+        help="Process one week at a time instead of one day at a time."
     )
     parser.add_argument(
         '-x', '--write-metadata',
@@ -163,20 +163,20 @@ def main(args):
         extractor = data_source.extractor_factory()
 
         # Determine the iteration strategy based on period and extractor type
-        if args.by_month:
+        if args.by_week:
             if not extractor.multi_date:
                 raise ValueError(f"Extractor for source '{source}' does not support multi-date extraction "
-                                 f"required for --by-month option.")
+                                 f"required for --by-week option.")
 
-            # Process month by month
-            for month_start, month_end in _get_month_ranges(args):
-                print(f"Processing {data_source.descriptor} for month {month_start.strftime('%Y-%m')}")
+            # Process week by week
+            for week_start, week_end in _get_week_ranges(args):
+                print(f"Processing {data_source.descriptor} for week {week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
 
                 for pv_site in pv_sites:
                     print(f"  Processing site: {pv_site.name} (system_id={pv_site.pvo_sys_id})")
                     _process_extraction(
-                        client, extractor, data_source, pv_site, month_start,
-                        args, stats, end_date=month_end, whole_month=True
+                        client, extractor, data_source, pv_site, week_start,
+                        args, stats, end_date=week_end
                     )
 
         elif extractor.multi_date:
@@ -215,7 +215,6 @@ def _process_extraction(
         args,
         stats: ProcessingStats,
         end_date: date = None,
-        whole_month: bool = False
 ) -> None:
     """
     Process a single extraction for a given PV site and date (or date range).
@@ -231,7 +230,7 @@ def _process_extraction(
         end_date: End date (for multi-date extractors), None for single-date
     """
     # Check if file already exists
-    file_path = get_csv_file_path(data_source, pv_site, date_, end_date, whole_month)
+    file_path = get_csv_file_path(data_source, pv_site, date_, end_date)
     resolved_file_path = client.resolve_path(file_path)
 
     existing_files = client.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
@@ -312,26 +311,27 @@ def _get_date_range(args) -> list[date]:
     return dates
 
 
-def _get_month_ranges(args) -> list[tuple[date, date]]:
-    """Generate month start and end dates between start_date and end_date."""
+def _get_week_ranges(args) -> list[tuple[date, date]]:
+    """Generate week start and end dates between start_date and end_date."""
     current = args.start_date
-    month_ranges = []
+    week_ranges = []
 
     while current <= args.end_date:
-        # Calculate the first day of the next month
-        next_month = current.month % 12 + 1
-        year = current.year + (current.month // 12)
-        first_of_next_month = date(year, next_month, 1)
+        # Calculate the first day of the next week (assuming week starts on Monday)
+        next_week = current + timedelta(days=(7 - current.weekday()))
 
-        # End date is either the first of next month or the overall end date, whichever is earlier
-        month_end = min(first_of_next_month, args.end_date + timedelta(days=1))
+        # End date is either the first of next week or the overall end date, whichever is earlier
+        week_end = min(next_week, args.end_date + timedelta(days=1))
 
-        month_ranges.append((current, month_end))
+        week_ranges.append((current, week_end))
 
-        # Move to the next month
-        current = first_of_next_month
+        # Move to the next week
+        current = next_week
 
-    return month_ranges
+    if args.reverse:
+        week_ranges.reverse()
+
+    return week_ranges
 
 
 def _load_pv_sites(system_ids: str) -> list[PVSite]:
