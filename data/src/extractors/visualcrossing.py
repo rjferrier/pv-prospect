@@ -58,6 +58,8 @@ API_HELPERS_BY_MODE = {
 
 
 class VCWeatherDataExtractor:
+    multi_date = False  # This extractor processes one date at a time
+
     def __init__(self, api_key: str, mode: Mode) -> None:
         self.api_key = api_key
         self.mode = mode
@@ -69,12 +71,14 @@ class VCWeatherDataExtractor:
         }, mode=mode)
         return extractor
 
-    def extract(self, pv_site: PVSite, date_: date) -> ExtractionResult:
+    def extract(self, pv_site: PVSite, date_: date, end_date: date = None) -> ExtractionResult:
         if not pv_site:
             raise ValueError("PVSite must be provided")
 
         start_datetime = datetime.combine(date_, MIN_TIME)
-        end_datetime = datetime.combine(date_, MAX_TIME)
+
+        # Use end_date if provided, otherwise default to same day
+        end_datetime = datetime.combine(end_date if end_date else date_, MAX_TIME)
 
         url = '/'.join((
             BASE_URL,

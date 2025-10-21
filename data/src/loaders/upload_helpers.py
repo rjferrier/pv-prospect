@@ -64,12 +64,23 @@ def upload_metadata(client: GDriveClient, csv_file_path: str, metadata: dict) ->
         client.upload_file(media_body, resolved_file_path, 'application/json')
 
 
-def get_csv_file_path(data_source: DataSource, pv_site: PVSite, date_: date) -> str:
+def get_csv_file_path(
+        data_source: DataSource, pv_site: PVSite, date_: date, end_date: date = None, whole_month: bool = False
+) -> str:
     """Generate CSV filename using site name and data source"""
     filename_parts = [
         data_source.descriptor.replace('/', '-'),
         str(pv_site.pvo_sys_id),
-        "%04d%02d%02d" % (date_.year, date_.month, date_.day)
+        _format_date(date_, whole_month)
     ]
+    if end_date and not whole_month:
+        filename_parts.append(_format_date(end_date))
     filename = '_'.join(filename_parts) + '.csv'
     return '/'.join((DATA_FOLDER_NAME, data_source.descriptor, filename))
+
+
+def _format_date(date_: date, whole_month: bool = False) -> str:
+    if whole_month:
+        return "%04d%02d" % (date_.year, date_.month)
+
+    return "%04d%02d%02d" % (date_.year, date_.month, date_.day)
