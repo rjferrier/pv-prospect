@@ -62,6 +62,7 @@ class APISelector(Enum):
         base_url="https://satellite-api.open-meteo.com/v1/archive",
         time_limit_suffix_supplier=lambda time_res: 'date',
         time_stringifier=lambda dt: dt.strftime("%Y-%m-%d"),
+        multi_date=True,
     )
 
     @property
@@ -90,6 +91,9 @@ class Fields(Enum):
         'wind_speed_80m', 'wind_direction_80m', 'wind_speed_180m', 'wind_direction_180m',
         'direct_normal_irradiance', 'diffuse_radiation',
         'visibility', 'weather_code',
+    )
+    SOLAR_RADIATION = (
+        'direct_normal_irradiance', 'diffuse_radiation',
     )
     FORECAST_DEPRECATED = (
         'temperature_2m', 'visibility',

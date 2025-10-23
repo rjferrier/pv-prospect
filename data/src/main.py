@@ -19,8 +19,8 @@ DATA_SOURCES = {
         descriptor='pvoutput',
         extractor_factory=lambda: PVOutputExtractor.from_env()
     ),
-    'weather-om-15-v1': DataSource(
-        descriptor='openmeteo/quarterhourly/v1',
+    'weather-om-15': DataSource(
+        descriptor='openmeteo/quarterhourly',
         extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
             api_selector=APISelector.FORECAST,
             time_resolution=TimeResolution.QUARTERHOURLY,
@@ -28,13 +28,22 @@ DATA_SOURCES = {
             models=Models.ALL_FORECAST,
         )
     ),
-    'weather-om-60-v1': DataSource(
-        descriptor='openmeteo/hourly/v1',
+    'weather-om-60': DataSource(
+        descriptor='openmeteo/hourly',
         extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
             api_selector=APISelector.FORECAST,
             time_resolution=TimeResolution.HOURLY,
             fields=Fields.FORECAST,
             models=Models.ALL_FORECAST,
+        )
+    ),
+    'weather-om-satellite': DataSource(
+        descriptor='openmeteo/satellite',
+        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
+            api_selector=APISelector.SATELLITE,
+            time_resolution=TimeResolution.HOURLY,
+            fields=Fields.SOLAR_RADIATION,
+            models=Models.ALL_SATELLITE,
         )
     ),
     'weather-om-historical': DataSource(
@@ -46,12 +55,12 @@ DATA_SOURCES = {
             models=Models.ALL_FORECAST,
         )
     ),
-    'weather-om-15': DataSource(
-        descriptor='openmeteo/quarterhourly',
+    'weather-om-15-v0': DataSource(
+        descriptor='openmeteo/v0/quarterhourly',
         extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_mode(OMMode.QUARTERHOURLY)
     ),
-    'weather-om-60': DataSource(
-        descriptor='openmeteo/hourly',
+    'weather-om-60-v0': DataSource(
+        descriptor='openmeteo/v0/hourly',
         extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_mode(OMMode.HOURLY)
     ),
     'weather-vc-15': DataSource(
@@ -230,7 +239,7 @@ def _process_extraction(
         end_date: End date (for multi-date extractors), None for single-date
     """
     # Check if file already exists
-    file_path = get_csv_file_path(data_source, pv_site, date_, end_date)
+    file_path = get_csv_file_path(data_source, pv_site, date_)
     resolved_file_path = client.resolve_path(file_path)
 
     existing_files = client.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
@@ -312,21 +321,41 @@ def _get_date_range(args) -> list[date]:
 
 
 def _get_week_ranges(args) -> list[tuple[date, date]]:
-    """Generate week start and end dates between start_date and end_date."""
-    current = args.start_date
+    """Generate week start and end dates between start_date and end_date.
+    Only processes whole weeks (Monday to Sunday) that fall entirely within the user-specified date range."""
+
+    # Find the first Monday on or after start_date
+    start_offset = args.start_date.weekday()  # 0=Monday, 6=Sunday
+    if start_offset == 0:
+        # Already a Monday
+        first_monday = args.start_date
+    else:
+        # Move to next Monday
+        first_monday = args.start_date + timedelta(days=(7 - start_offset))
+
+    # Find the last Sunday on or before end_date
+    end_offset = args.end_date.weekday()  # 0=Monday, 6=Sunday
+    if end_offset == 6:
+        # Already a Sunday
+        last_sunday = args.end_date
+    else:
+        # Move back to previous Sunday
+        last_sunday = args.end_date - timedelta(days=(end_offset + 1))
+
+    # Generate week ranges
+    current = first_monday
     week_ranges = []
 
-    while current <= args.end_date:
-        # Calculate the first day of the next week (assuming week starts on Monday)
-        next_week = current + timedelta(days=(7 - current.weekday()))
+    while current <= last_sunday:
+        # Each week runs from Monday (current) to Sunday (current + 6 days)
+        week_end_date = current + timedelta(days=6)
 
-        # End date is either the first of next week or the overall end date, whichever is earlier
-        week_end = min(next_week, args.end_date + timedelta(days=1))
+        # Only include if the full week (ending on Sunday) fits within range
+        if week_end_date <= last_sunday:
+            week_ranges.append((current, week_end_date + timedelta(days=1)))  # +1 to make end exclusive
 
-        week_ranges.append((current, week_end))
-
-        # Move to the next week
-        current = next_week
+        # Move to next Monday
+        current = current + timedelta(days=7)
 
     if args.reverse:
         week_ranges.reverse()
