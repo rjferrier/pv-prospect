@@ -6,9 +6,9 @@ from io import StringIO
 
 import requests
 
-from src.domain.pv_site import PVSite
-from src.extractors.base import ExtractionResult
-from src.util.env_mapper import map_from_env, VarMapping
+from domain.pv_site import PVSite
+from extractors.base import ExtractionResult
+from util.env_mapper import map_from_env, VarMapping
 
 BASE_URL = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
 MIN_TIME = time(4, 0)

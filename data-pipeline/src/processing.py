@@ -13,14 +13,6 @@ class ProcessingStats:
     failures: List[Tuple[str, date, int, str, str]] = field(default_factory=list)
     failure_log_path: Optional[str] = field(default=None, init=False)
 
-    def __post_init__(self):
-        """Create failure log file upon initialization."""
-        self.failure_log_path = f"failure_details_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        # Create the log file (empty initially)
-        with open(self.failure_log_path, 'w') as f:
-            f.write(f"Failure Log - Created {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("=" * 80 + "\n\n")
-
     def record_success(self):
         """Record a successful processing operation."""
         self.processed += 1
@@ -35,6 +27,13 @@ class ProcessingStats:
 
     def record_failure(self, source: str, date_: date, system_id: int, site_name: str, error: str):
         """Record a failed operation with details and write to log immediately."""
+        # Create log file on first failure
+        if self.failed == 0:
+            self.failure_log_path = f"failure_details_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            with open(self.failure_log_path, 'w') as f:
+                f.write(f"Failure Log - Created {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("=" * 80 + "\n\n")
+
         self.failed += 1
         self.failures.append((source, date_, system_id, site_name, error))
 
