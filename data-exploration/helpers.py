@@ -1,25 +1,5 @@
 import pandas as pd
 from pathlib import Path
-from src.loaders.gdrive import DATA_FOLDER_NAME, GDriveClient
-
-
-def load_csv(path: str) -> pd.DataFrame:
-    """
-    Load a CSV file from Google Drive into a pandas DataFrame.
-
-    Args:
-        path (str): The path to the file in Google Drive (e.g., 'pvoutput/12345.csv').
-        The 'data' folder is assumed to be the root.
-
-    Returns:
-        pd.DataFrame: The loaded CSV data.
-    """
-    client = GDriveClient.build_service()
-    resolved_file_path = client.resolve_path(f'{DATA_FOLDER_NAME}/{path}')
-
-    # Download the file to a stream and read it with pandas
-    with client.download_to_stream(resolved_file_path) as stream:
-        return pd.read_csv(stream)
 
 
 def load_folder_as_dataframe(folder_path: str) -> pd.DataFrame:

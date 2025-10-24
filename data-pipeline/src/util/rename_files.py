@@ -1,6 +1,6 @@
 import re
 import argparse
-from src.loaders.gdrive import GDriveClient, ResolvedFilePath
+from loaders.gdrive import GDriveClient, ResolvedFilePath
 
 
 def get_folder_id(client: GDriveClient, folder_path: str | None) -> str | None:
@@ -27,7 +27,6 @@ def list_files_recursive(client: GDriveClient, folder_id: str | None, mime_type:
     Returns list of dicts with 'id', 'name', 'path' (relative path from search root), and 'parent_id'.
     If folder_id is None, searches from root.
     """
-    from src.loaders.gdrive import ResolvedFilePath
     files_with_paths = []
 
     # Get all files in current folder

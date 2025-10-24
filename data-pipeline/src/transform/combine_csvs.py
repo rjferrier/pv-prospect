@@ -3,7 +3,7 @@ import argparse
 from collections import defaultdict
 import re
 
-import pandas as pd
+import csv
 
 
 def combine_csvs_in_folder(folder_path: Path, output_path: Path | None = None, base_folder: Path | None = None) -> list[str]:
@@ -54,22 +54,57 @@ def combine_csvs_in_folder(folder_path: Path, output_path: Path | None = None, b
             output_path.mkdir(parents=True, exist_ok=True)
             output_file = output_path / output_name
 
-        # Load each CSV file and collect into a list of DataFrames
-        dataframes = []
+        # Stream each CSV file and write rows to output, preserving header from first file
+        writer = None
+        out_f = None
+        seen_header = None
+        data_rows_total = 0
+
         for csv_file in sorted(files):
             print(f"Loading {csv_file.name}...")
-            df = pd.read_csv(csv_file)
-            dataframes.append(df)
+            try:
+                with open(csv_file, newline='', encoding='utf-8') as in_f:
+                    reader = csv.reader(in_f)
+                    try:
+                        header = next(reader)
+                    except StopIteration:
+                        # empty file
+                        print(f"Skipping empty file {csv_file.name}")
+                        continue
 
-        # Combine all DataFrames for this family
-        print(f"Combining {len(dataframes)} CSV files for family '{prefix}' in {folder_path}...")
-        combined_df = pd.concat(dataframes, ignore_index=True)
+                    if writer is None:
+                        # open output file for writing when we have first non-empty input
+                        out_f = open(output_file, 'w', newline='', encoding='utf-8')
+                        writer = csv.writer(out_f)
+                        writer.writerow(header)
+                        seen_header = header
 
-        # Write to CSV
-        print(f"Writing to {output_file}...")
-        combined_df.to_csv(output_file, index=False)
+                    else:
+                        if header != seen_header:
+                            print(f"Warning: header mismatch in {csv_file.name}; appending rows without aligning columns")
 
-        print(f"Successfully created {output_file} with {len(combined_df)} rows")
+                    rows_written = 0
+                    for row in reader:
+                        writer.writerow(row)
+                        rows_written += 1
+
+                    data_rows_total += rows_written
+            except Exception as e:
+                print(f"Error processing {csv_file}: {e}")
+
+        # Close output file if it was opened
+        if out_f is not None:
+            out_f.close()
+
+        # If we never opened an output file (all files empty), create an empty file with no rows
+        if writer is None:
+            # create an empty file
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            output_file.write_text('')
+            print(f"Created empty output file {output_file}")
+        else:
+            print(f"Successfully created {output_file} with {data_rows_total} data rows")
+
         created_files.append(str(output_file))
 
     return created_files

@@ -1,16 +1,16 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
 from datetime import date, timedelta
 
-from src.domain.data_source import DataSource
-from src.domain.pv_site import PVSiteRepository, PVSite
-from src.extractors.openmeteo import (
+from domain.data_source import DataSource
+from domain.pv_site import PVSiteRepository, PVSite
+from extractors.openmeteo import (
     OpenMeteoWeatherDataExtractor, Mode as OMMode, APISelector, TimeResolution, Fields, Models
 )
-from src.extractors.pvoutput import PVOutputExtractor
-from src.extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
-from src.loaders.upload_helpers import upload_csv, get_csv_file_path, upload_metadata
-from src.loaders.gdrive import GDriveClient, CSV_MIME_TYPE
-from src.processing import ProcessingStats
+from extractors.pvoutput import PVOutputExtractor
+from extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
+from loaders.upload_helpers import upload_csv, get_csv_file_path, upload_metadata
+from loaders.gdrive import GDriveClient, CSV_MIME_TYPE
+from processing import ProcessingStats
 
 ALLOW_DUPLICATE_FILES = False
 

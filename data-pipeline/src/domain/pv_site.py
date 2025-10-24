@@ -2,10 +2,11 @@ import csv
 from dataclasses import dataclass
 from datetime import date
 from typing import Optional, List
+
+import resources
 from importlib_resources import files
 
-from src.domain.location import Location
-import resources
+from domain.location import Location
 
 
 @dataclass
@@ -116,6 +117,7 @@ def get_all_system_ids() -> List[int]:
     Returns:
         List[int]: List of all PVO system IDs
     """
+    # noinspection PyTypeChecker
     source = files(resources).joinpath("pv_sites.csv")
     system_ids = []
 
@@ -147,6 +149,7 @@ class PVSiteRepository:
         Returns:
             PVSiteRepository: A new repository instance with all sites loaded
         """
+        # noinspection PyTypeChecker
         source = files(resources).joinpath("pv_sites.csv")
         sites_by_id = {}
 

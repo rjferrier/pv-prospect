@@ -32,23 +32,39 @@ T = TypeVar('T')
 
 
 def get_credentials() -> Credentials:
-    creds = None
-    if os.path.exists(TOKEN_FILENAME):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILENAME, SCOPES)
+    creds = _read_creds_from_token_file()
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except RefreshError:
-                print("Credentials have been revoked or expired, need to re-authenticate.")
-                creds = _get_new_creds()
+    # If we have valid credentials, return them
+    if creds and creds.valid:
+        return creds
 
-        # Save the credentials for the next run
-        with open(TOKEN_FILENAME, "w") as token:
-            token.write(creds.to_json())
+    # Try to refresh expired credentials
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+        except RefreshError:
+            print("Credentials have been revoked or expired, need to re-authenticate.")
+            creds = _get_new_creds()
+    else:
+        # No valid credentials exist, get new ones
+        creds = _get_new_creds()
+
+    # Save the credentials for the next run
+    with open(TOKEN_FILENAME, "w") as token:
+        token.write(creds.to_json())
 
     return creds
+
+
+def _read_creds_from_token_file() -> Optional[Credentials]:
+    if not os.path.exists(TOKEN_FILENAME):
+        return None
+
+    try:
+        return Credentials.from_authorized_user_file(TOKEN_FILENAME, SCOPES)
+    except (ValueError, KeyError, json.JSONDecodeError):
+        # Token file exists but is empty or malformed
+        return None
 
 
 def _get_new_creds() -> Credentials:
@@ -75,6 +91,7 @@ def retry_on_500(func: Callable[..., T]) -> Callable[..., T]:
                     time.sleep(delay)
                 else:
                     raise
+        # raise RuntimeError(f"Retry logic failed unexpectedly for {func.__name__}")
     return wrapper
 
 
@@ -201,11 +218,11 @@ class GDriveClient:
             return results.get("files", []), results.get("nextPageToken", None)
 
         try:
-            files, next_page_token = search_files()
+            files_, next_page_token = search_files()
             while next_page_token:
                 more_files, next_page_token = search_files(next_page_token)
-                files.extend(more_files)
-            return files
+                files_.extend(more_files)
+            return files_
         except HttpError as error:
             print(f"Error while searching files with query '{query_str}': {error}")
             raise
@@ -351,10 +368,10 @@ class GDriveClient:
         Raises:
             FileNotFoundError: If the file is not found.
         """
-        files = self.search(file_path, mime_type=mime_type)
-        if not files:
+        files_ = self.search(file_path, mime_type=mime_type)
+        if not files_:
             raise FileNotFoundError(f"File '{file_path.name}' not found in the specified Google Drive folder.")
-        return files[0]['id']
+        return files_[0]['id']
 
     def _download_to_stream(self, file_id: str, stream: io.IOBase) -> None:
         """

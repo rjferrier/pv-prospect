@@ -7,10 +7,10 @@ from typing import Callable
 import requests
 from typing_extensions import deprecated
 
-from src.domain.location import Location
-from src.domain.pv_site import PVSite
-from src.extractors.base import ExtractionResult
-from src.util.retry import retry_on_429
+from domain.location import Location
+from domain.pv_site import PVSite
+from extractors.base import ExtractionResult
+from util.retry import retry_on_429
 
 
 MIN_TIME = time(4, 0)

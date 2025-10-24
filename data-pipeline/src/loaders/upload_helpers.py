@@ -7,9 +7,9 @@ import json
 
 from googleapiclient.http import MediaIoBaseUpload
 
-from src.domain.data_source import DataSource
-from src.domain.pv_site import PVSite
-from src.loaders.gdrive import GDriveClient, DATA_FOLDER_NAME, CSV_MIME_TYPE
+from domain.data_source import DataSource
+from domain.pv_site import PVSite
+from loaders.gdrive import GDriveClient, DATA_FOLDER_NAME, CSV_MIME_TYPE
 
 
 def upload_csv(client: GDriveClient, file_path: str, rows: Iterable[Iterable[str]]) -> None:
