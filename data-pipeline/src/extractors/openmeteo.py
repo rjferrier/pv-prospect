@@ -17,7 +17,7 @@ MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)
 
 CONSTANT_QUERY_PARAMS = {
-    'timezone': 'Europe/London',
+    # 'timezone': 'Europe/London',
 }
 
 
