@@ -2,8 +2,12 @@ import io
 import json
 import os
 import time
+import csv
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
+from io import StringIO
+from tempfile import SpooledTemporaryFile
 from typing import Optional, Any, Callable, TypeVar, Iterator
 
 from google.auth.transport.requests import Request
@@ -409,6 +413,62 @@ class GDriveClient:
             The media request object for downloading.
         """
         return self.service.files().get_media(fileId=file_id)
+
+    # Polymorphic interface methods for compatibility with LocalStorageClient
+    def get_csv_file_path(self, data_source, pv_site, date_: date) -> str:
+        """Generate CSV filename using site name and data source"""
+        filename_parts = [
+            data_source.descriptor.replace('/', '-'),
+            str(pv_site.pvo_sys_id),
+            _format_date(date_)
+        ]
+        filename = '_'.join(filename_parts) + '.csv'
+        return '/'.join((DATA_FOLDER_NAME, data_source.descriptor, filename))
+
+    def file_exists(self, file_path: str) -> bool:
+        """Check if a file exists in Google Drive."""
+        resolved_file_path = self.resolve_path(file_path)
+        existing_files = self.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
+        return len(existing_files) > 0
+
+    def write_csv(self, file_path: str, rows) -> None:
+        """Upload CSV data to Google Drive."""
+        with SpooledTemporaryFile(mode='w+b') as tmp:
+            # Write CSV data as text first
+            text_stream = StringIO()
+            writer = csv.writer(text_stream)
+            for row in rows:
+                writer.writerow(row)
+
+            # Convert to bytes and write to the binary temp file
+            tmp.write(text_stream.getvalue().encode('utf-8'))
+            tmp.seek(0)
+
+            media_body = MediaIoBaseUpload(tmp, mimetype=CSV_MIME_TYPE, resumable=True)
+            resolved_file_path = self.resolve_path(file_path)
+            self.upload_file(media_body, resolved_file_path, CSV_MIME_TYPE)
+
+    def write_metadata(self, csv_file_path: str, metadata: dict) -> None:
+        """Upload JSON metadata to Google Drive."""
+        # Derive metadata filename from CSV path (replace .csv with .json)
+        if csv_file_path.lower().endswith('.csv'):
+            metadata_path = csv_file_path[:-4] + '.json'
+        else:
+            metadata_path = csv_file_path + '.json'
+
+        with SpooledTemporaryFile(mode='w+b') as tmp:
+            text = json.dumps(metadata, indent=2, ensure_ascii=False)
+            tmp.write(text.encode('utf-8'))
+            tmp.seek(0)
+
+            media_body = MediaIoBaseUpload(tmp, mimetype='application/json', resumable=True)
+            resolved_file_path = self.resolve_path(metadata_path)
+            self.upload_file(media_body, resolved_file_path, 'application/json')
+
+
+def _format_date(date_: date) -> str:
+    """Format date as YYYYMMDD string"""
+    return "%04d%02d%02d" % (date_.year, date_.month, date_.day)
 
 
 def _build_query_string(

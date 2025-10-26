@@ -8,8 +8,8 @@ from extractors.openmeteo import (
 )
 from extractors.pvoutput import PVOutputExtractor
 from extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
-from loaders.upload_helpers import upload_csv, get_csv_file_path, upload_metadata
-from loaders.gdrive import GDriveClient, CSV_MIME_TYPE
+from loaders.gdrive import GDriveClient
+from loaders.local import LocalStorageClient
 from processing import ProcessingStats
 
 ALLOW_DUPLICATE_FILES = False
@@ -120,6 +120,12 @@ def parse_args():
         action='store_true',
         help='Write extractor metadata as a JSON file next to the CSV when present.'
     )
+    parser.add_argument(
+        '-l', '--local-dir',
+        type=str,
+        default=None,
+        help='Write files to a local directory instead of uploading to Google Drive. Specify the directory path.'
+    )
     args = parser.parse_args()
 
     # Parse start date
@@ -164,8 +170,12 @@ def main(args):
     # Track processing results
     stats = ProcessingStats()
 
-    # initialise client once
-    client = GDriveClient.build_service()
+    # Initialize client based on local-dir option
+    if args.local_dir:
+        print(f"Using local directory: {args.local_dir}\n")
+        client = LocalStorageClient(args.local_dir)
+    else:
+        client = GDriveClient.build_service()
 
     for source in sources:
         data_source = DATA_SOURCES[source]
@@ -216,7 +226,7 @@ def main(args):
 
 
 def _process_extraction(
-        client: GDriveClient,
+        client,
         extractor,
         data_source: DataSource,
         pv_site: PVSite,
@@ -229,7 +239,7 @@ def _process_extraction(
     Process a single extraction for a given PV site and date (or date range).
 
     Args:
-        client: Google Drive client
+        client: Storage client (LocalStorageClient or GDriveClientWrapper)
         extractor: The data extractor instance
         data_source: Data source configuration
         pv_site: PV site to extract data for
@@ -238,19 +248,17 @@ def _process_extraction(
         stats: Statistics tracker
         end_date: End date (for multi-date extractors), None for single-date
     """
-    # Check if file already exists
-    file_path = get_csv_file_path(data_source, pv_site, date_)
-    resolved_file_path = client.resolve_path(file_path)
+    # Use polymorphic method to get file path
+    file_path = client.get_csv_file_path(data_source, pv_site, date_)
 
-    existing_files = client.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
-
-    if existing_files and not ALLOW_DUPLICATE_FILES:
+    # Check if file already exists using polymorphic method
+    if client.file_exists(file_path) and not ALLOW_DUPLICATE_FILES:
         print(f"    File already exists: {file_path}")
         stats.record_skip_existing()
         return
 
     if args.dry_run:
-        print(f"    Dry run - not uploading: {file_path}")
+        print(f"    Dry run - not writing: {file_path}")
         stats.record_skip_dry_run()
         return
 
@@ -258,14 +266,15 @@ def _process_extraction(
         # Call extractor with appropriate arguments
         extraction_result = extractor.extract(pv_site, date_, end_date)
 
-        upload_csv(client, file_path, extraction_result.data)
+        # Write CSV data using polymorphic method
+        client.write_csv(file_path, extraction_result.data)
 
         # Optionally write metadata JSON if requested and available
         if args.write_metadata and extraction_result.metadata:
             try:
-                upload_metadata(client, file_path, extraction_result.metadata)
+                client.write_metadata(file_path, extraction_result.metadata)
             except Exception as meta_e:
-                print(f"    WARNING: failed to upload metadata for {file_path}: {meta_e}")
+                print(f"    WARNING: failed to write metadata for {file_path}: {meta_e}")
 
         stats.record_success()
 
