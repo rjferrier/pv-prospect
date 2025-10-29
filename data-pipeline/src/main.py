@@ -1,83 +1,25 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
-from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Callable
+from types import SimpleNamespace
 
-from domain import DateRange, PVSiteRepository, PVSite
+from domain import DateRange
 from domain.date_range import Period
-from extractors.openmeteo import (
-    OpenMeteoWeatherDataExtractor, Mode as OMMode, APISelector, TimeResolution, Fields, Models
-)
-from extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
-from extractors.pvoutput import PVOutputExtractor
-from loaders.gdrive import GDriveClient
-from loaders.local import LocalStorageClient
+from extractors import SourceDescriptor, get_extractor
 from processing import extract_and_load, ProcessingStats
+from processing.pv_site_repo import get_all_pv_system_ids
+from celery.result import ResultSet
 
 
-@dataclass(frozen=True)
-class DataSource:
-    descriptor: str
-    extractor_factory: Callable
-
-
-DATA_SOURCES = {
-    'pv': DataSource(
-        descriptor='pvoutput',
-        extractor_factory=lambda: PVOutputExtractor.from_env()
-    ),
-    'weather-om-15': DataSource(
-        descriptor='openmeteo/quarterhourly',
-        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
-            api_selector=APISelector.FORECAST,
-            time_resolution=TimeResolution.QUARTERHOURLY,
-            fields=Fields.FORECAST,
-            models=Models.ALL_FORECAST,
-        )
-    ),
-    'weather-om-60': DataSource(
-        descriptor='openmeteo/hourly',
-        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
-            api_selector=APISelector.FORECAST,
-            time_resolution=TimeResolution.HOURLY,
-            fields=Fields.FORECAST,
-            models=Models.ALL_FORECAST,
-        )
-    ),
-    'weather-om-satellite': DataSource(
-        descriptor='openmeteo/satellite',
-        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
-            api_selector=APISelector.SATELLITE,
-            time_resolution=TimeResolution.HOURLY,
-            fields=Fields.SOLAR_RADIATION,
-            models=Models.ALL_SATELLITE,
-        )
-    ),
-    'weather-om-historical': DataSource(
-        descriptor='openmeteo/historical',
-        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_components(
-            api_selector=APISelector.HISTORICAL,
-            time_resolution=TimeResolution.HOURLY,
-            fields=Fields.FORECAST,
-            models=Models.ALL_FORECAST,
-        )
-    ),
-    'weather-om-15-v0': DataSource(
-        descriptor='openmeteo/v0/quarterhourly',
-        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_mode(OMMode.QUARTERHOURLY)
-    ),
-    'weather-om-60-v0': DataSource(
-        descriptor='openmeteo/v0/hourly',
-        extractor_factory=lambda: OpenMeteoWeatherDataExtractor.from_mode(OMMode.HOURLY)
-    ),
-    'weather-vc-15': DataSource(
-        descriptor='visualcrossing/quarterhourly',
-        extractor_factory=lambda: VCWeatherDataExtractor.from_env(mode=VCMode.QUARTERHOURLY),
-    ),
-    'weather-vc-60': DataSource(
-        descriptor='visualcrossing/hourly',
-        extractor_factory=lambda: VCWeatherDataExtractor.from_env(mode=VCMode.HOURLY),
-    ),
+SOURCE_DESCRIPTORS = {
+    'pv': SourceDescriptor.PVOUTPUT,
+    'weather-om-15': SourceDescriptor.OPENMETEO_QUARTERHOURLY,
+    'weather-om-60': SourceDescriptor.OPENMETEO_HOURLY,
+    'weather-om-satellite': SourceDescriptor.OPENMETEO_SATELLITE,
+    'weather-om-historical': SourceDescriptor.OPENMETEO_HISTORICAL,
+    'weather-om-15-v0': SourceDescriptor.OPENMETEO_V0_QUARTERHOURLY,
+    'weather-om-60-v0': SourceDescriptor.OPENMETEO_V0_HOURLY,
+    'weather-vc-15': SourceDescriptor.VISUALCROSSING_QUARTERHOURLY,
+    'weather-vc-60': SourceDescriptor.VISUALCROSSING_HOURLY,
 }
 
 
@@ -88,7 +30,7 @@ def _parse_args():
     parser.format_help()
     parser.add_argument(
         'source',
-        help="data source (comma-separated from: {} )".format(', '.join(DATA_SOURCES.keys()))
+        help="data source (comma-separated from: {} )".format(', '.join(SOURCE_DESCRIPTORS.keys()))
     )
     parser.add_argument('system_ids',
                         nargs='?',
@@ -208,73 +150,74 @@ def _get_complete_date_range(args) -> DateRange:
     return DateRange(start, end)
 
 
-def main(args):
+def _get_pv_system_id_list(system_ids: str) -> list[int]:
+    if not system_ids:
+        # User didn't specify IDs, so we're processing all systems
+        return get_all_pv_system_ids()
+
+    return [int(s.strip()) for s in system_ids.split(',') if s.strip()]
+
+
+def _main(args):
     # Parse comma-separated sources
     source_args = [s.strip() for s in args.source.split(',')]
     # Validate sources
-    invalid = [s for s in source_args if s not in DATA_SOURCES]
+    invalid = [s for s in source_args if s not in SOURCE_DESCRIPTORS]
     if invalid:
-        raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(DATA_SOURCES.keys())}")
+        raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(SOURCE_DESCRIPTORS.keys())}")
     sources = source_args
 
-    # Get the appropriate PV sites based on whether system IDs were specified
-    pv_sites = _load_pv_sites(args.system_ids)
-    print(f"Successfully loaded {len(pv_sites)} PV site(s).\n")
+    pv_system_ids = _get_pv_system_id_list(args.system_ids)
+    print(f"Processing {len(pv_system_ids)} PV site(s).\n")
 
-    # Track processing results
-    stats = ProcessingStats()
-
-    # Initialize client based on local-dir option
-    if args.local_dir:
-        print(f"Using local directory: {args.local_dir}\n")
-        storage_client = LocalStorageClient(args.local_dir)
-    else:
-        storage_client = GDriveClient.build_service()
+    results_async = []
 
     complete_date_range = _get_complete_date_range(args)
 
     for source in sources:
-        data_source = DATA_SOURCES[source]
-        extractor = data_source.extractor_factory()
+        source_descriptor = SOURCE_DESCRIPTORS[source]
 
-        if args.by_week and not extractor.multi_date:
+        if args.by_week and not get_extractor(source_descriptor).multi_date:
             raise ValueError(f"Extractor for source '{source}' does not support multi-date extraction "
                              f"required for --by-week option.")
 
         sub_date_ranges = complete_date_range.split_by(Period.WEEK if args.by_week else Period.DAY)
 
         for date_range in sub_date_ranges:
-            print(f"Processing {data_source.descriptor} for {date_range}")
-            for pv_site in pv_sites:
-                print(f"  Processing site: {pv_site.name} (system_id={pv_site.pvo_sys_id})")
+            print(f"Adding {source_descriptor} for {date_range}")
+            for pv_system_id in pv_system_ids:
+                print(f"  Adding System {pv_system_id}")
 
-                result = extract_and_load(
-                    extractor,
-                    storage_client,
-                    data_source.descriptor,
-                    pv_site,
+                # Submit the task immediately and collect the AsyncResult
+                ar = extract_and_load.delay(
+                    source_descriptor,
+                    pv_system_id,
                     date_range,
-                    args.dry_run,
+                    args.local_dir,
                     args.write_metadata,
+                    args.dry_run,
                 )
+                results_async.append(ar)
 
-                stats.record(result)
+    if not results_async:
+        print("No tasks/results were generated.")
+        return
 
-    # Print summary report
+    # join() blocks until all tasks finish. propagate=False prevents
+    # task exceptions from being re-raised here so we can inspect results.
+    try:
+        results = ResultSet(results_async).join(propagate=False, timeout=JOIN_TIMEOUT_SECONDS)
+    except Exception as e:
+        # If join times out or another error occurs, collect whatever completed results are available.
+        print(f"Warning: timeout or error while waiting for task results (waited {JOIN_TIMEOUT_SECONDS}s): {e}")
+        results = [ar.get(propagate=False) for ar in results_async if ar.ready()]
+
+    # Print summary report using processing stats
+    stats = ProcessingStats()
+    stats.record(results)
     stats.print_summary(dry_run=args.dry_run)
-
-
-def _load_pv_sites(system_ids: str) -> list[PVSite]:
-    repository = PVSiteRepository.from_csv()
-
-    if not system_ids:
-        # User didn't specify IDs, so we're processing all systems
-        return repository.get_all()
-
-    system_ids_list = [int(s.strip()) for s in system_ids.split(',') if s.strip()]
-    return repository.get_by_system_ids(system_ids_list)
 
 
 if __name__ == '__main__':
     args = _parse_args()
-    main(args)
+    _main(args)
