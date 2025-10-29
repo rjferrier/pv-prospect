@@ -19,13 +19,13 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from importlib_resources import files
 
+
 import resources
 
 CREDS_FILENAME = "gdrive_credentials.json"
 TOKEN_FILENAME = "token.json"
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
-DATA_FOLDER_NAME = "data"
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 CSV_MIME_TYPE = 'text/csv'
 
@@ -413,17 +413,6 @@ class GDriveClient:
             The media request object for downloading.
         """
         return self.service.files().get_media(fileId=file_id)
-
-    # Polymorphic interface methods for compatibility with LocalStorageClient
-    def get_csv_file_path(self, data_source, pv_site, date_: date) -> str:
-        """Generate CSV filename using site name and data source"""
-        filename_parts = [
-            data_source.descriptor.replace('/', '-'),
-            str(pv_site.pvo_sys_id),
-            _format_date(date_)
-        ]
-        filename = '_'.join(filename_parts) + '.csv'
-        return '/'.join((DATA_FOLDER_NAME, data_source.descriptor, filename))
 
     def file_exists(self, file_path: str) -> bool:
         """Check if a file exists in Google Drive."""

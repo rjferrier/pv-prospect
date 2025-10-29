@@ -1,18 +1,25 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
+from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Callable
 
-from domain.data_source import DataSource
-from domain.pv_site import PVSiteRepository, PVSite
+from domain import DateRange, PVSiteRepository, PVSite
+from domain.date_range import Period
 from extractors.openmeteo import (
     OpenMeteoWeatherDataExtractor, Mode as OMMode, APISelector, TimeResolution, Fields, Models
 )
-from extractors.pvoutput import PVOutputExtractor
 from extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
+from extractors.pvoutput import PVOutputExtractor
 from loaders.gdrive import GDriveClient
 from loaders.local import LocalStorageClient
-from processing import ProcessingStats
+from processing import extract_and_load, ProcessingStats
 
-ALLOW_DUPLICATE_FILES = False
+
+@dataclass(frozen=True)
+class DataSource:
+    descriptor: str
+    extractor_factory: Callable
+
 
 DATA_SOURCES = {
     'pv': DataSource(
@@ -74,9 +81,7 @@ DATA_SOURCES = {
 }
 
 
-def parse_args():
-    yesterday = date.today() - timedelta(days=1)
-
+def _parse_args():
     parser = ArgumentParser(
         prog='etl', formatter_class=lambda prog: RawTextHelpFormatter(prog, width=120)
     )
@@ -126,161 +131,7 @@ def parse_args():
         default=None,
         help='Write files to a local directory instead of uploading to Google Drive. Specify the directory path.'
     )
-    args = parser.parse_args()
-
-    # Parse start date
-    if args.start_date is None:
-        args.start_date = yesterday
-        start_is_month = False
-    else:
-        start_is_month = _is_month_format(args.start_date)
-        args.start_date = _parse_date(args.start_date)
-
-    # Parse end date
-    if args.end_date is None:
-        if start_is_month:
-            # If start date was a month, default end date to end of that month
-            args.end_date = _get_last_day_of_month(args.start_date)
-        else:
-            args.end_date = args.start_date + timedelta(days=1)
-    else:
-        if _is_month_format(args.end_date):
-            # Parse as first day of month, then convert to last day
-            temp_date = _parse_date(args.end_date)
-            args.end_date = _get_last_day_of_month(temp_date)
-        else:
-            args.end_date = _parse_date(args.end_date)
-
-    return args
-
-
-def main(args):
-    # Parse comma-separated sources
-    source_args = [s.strip() for s in args.source.split(',')]
-    # Validate sources
-    invalid = [s for s in source_args if s not in DATA_SOURCES]
-    if invalid:
-        raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(DATA_SOURCES.keys())}")
-    sources = source_args
-
-    # Get the appropriate PV sites based on whether system IDs were specified
-    pv_sites = _load_pv_sites(args.system_ids)
-    print(f"Successfully loaded {len(pv_sites)} PV site(s).\n")
-
-    # Track processing results
-    stats = ProcessingStats()
-
-    # Initialize client based on local-dir option
-    if args.local_dir:
-        print(f"Using local directory: {args.local_dir}\n")
-        client = LocalStorageClient(args.local_dir)
-    else:
-        client = GDriveClient.build_service()
-
-    for source in sources:
-        data_source = DATA_SOURCES[source]
-        extractor = data_source.extractor_factory()
-
-        # Determine the iteration strategy based on period and extractor type
-        if args.by_week:
-            if not extractor.multi_date:
-                raise ValueError(f"Extractor for source '{source}' does not support multi-date extraction "
-                                 f"required for --by-week option.")
-
-            # Process week by week
-            for week_start, week_end in _get_week_ranges(args):
-                print(f"Processing {data_source.descriptor} for week {week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
-
-                for pv_site in pv_sites:
-                    print(f"  Processing site: {pv_site.name} (system_id={pv_site.pvo_sys_id})")
-                    _process_extraction(
-                        client, extractor, data_source, pv_site, week_start,
-                        args, stats, end_date=week_end
-                    )
-
-        elif extractor.multi_date:
-            # Multi-date extractor: call once with full date range
-            print(f"Processing {data_source.descriptor} for date range {args.start_date} to {args.end_date}")
-
-            # Process each PV site with the full date range
-            for pv_site in pv_sites:
-                print(f"  Processing site: {pv_site.name} (system_id={pv_site.pvo_sys_id})")
-                _process_extraction(
-                    client, extractor, data_source, pv_site, args.start_date,
-                    args, stats, end_date=args.end_date
-                )
-        else:
-            # Single-date extractor: iterate through dates (day by day)
-            for date_ in _get_date_range(args):
-                print(f"Processing {data_source.descriptor} for {date_}")
-
-                # Process each PV site for this date
-                for pv_site in pv_sites:
-                    print(f"  Processing site: {pv_site.name} (system_id={pv_site.pvo_sys_id})")
-                    _process_extraction(
-                        client, extractor, data_source, pv_site, date_, args, stats
-                    )
-
-    # Print summary report
-    stats.print_summary(dry_run=args.dry_run)
-
-
-def _process_extraction(
-        client,
-        extractor,
-        data_source: DataSource,
-        pv_site: PVSite,
-        date_: date,
-        args,
-        stats: ProcessingStats,
-        end_date: date = None,
-) -> None:
-    """
-    Process a single extraction for a given PV site and date (or date range).
-
-    Args:
-        client: Storage client (LocalStorageClient or GDriveClientWrapper)
-        extractor: The data extractor instance
-        data_source: Data source configuration
-        pv_site: PV site to extract data for
-        date_: Start date (or single date for single-date extractors)
-        args: Command-line arguments
-        stats: Statistics tracker
-        end_date: End date (for multi-date extractors), None for single-date
-    """
-    # Use polymorphic method to get file path
-    file_path = client.get_csv_file_path(data_source, pv_site, date_)
-
-    # Check if file already exists using polymorphic method
-    if client.file_exists(file_path) and not ALLOW_DUPLICATE_FILES:
-        print(f"    File already exists: {file_path}")
-        stats.record_skip_existing()
-        return
-
-    if args.dry_run:
-        print(f"    Dry run - not writing: {file_path}")
-        stats.record_skip_dry_run()
-        return
-
-    try:
-        # Call extractor with appropriate arguments
-        extraction_result = extractor.extract(pv_site, date_, end_date)
-
-        # Write CSV data using polymorphic method
-        client.write_csv(file_path, extraction_result.data)
-
-        # Optionally write metadata JSON if requested and available
-        if args.write_metadata and extraction_result.metadata:
-            try:
-                client.write_metadata(file_path, extraction_result.metadata)
-            except Exception as meta_e:
-                print(f"    WARNING: failed to write metadata for {file_path}: {meta_e}")
-
-        stats.record_success()
-
-    except Exception as e:
-        print(f"    ERROR: {e}")
-        stats.record_failure(data_source.descriptor, date_, pv_site.pvo_sys_id, pv_site.name, str(e))
+    return parser.parse_args()
 
 
 def _parse_date(date_str: str) -> date:
@@ -319,57 +170,98 @@ def _get_last_day_of_month(year_month_date: date) -> date:
     return last_day_of_month
 
 
-def _get_date_range(args) -> list[date]:
-    day_count = (args.end_date - args.start_date).days
-    dates = [args.start_date + timedelta(days=i) for i in range(day_count)]
+def _get_complete_date_range(args) -> DateRange:
+    """
+    Parse and convert the command-line date arguments into a DateRange.
 
-    if args.reverse:
-        dates.reverse()
+    Args:
+        args: Parsed command-line arguments with start_date and end_date as strings
 
-    return dates
+    Returns:
+        DateRange with parsed start and end dates
+    """
+    yesterday = date.today() - timedelta(days=1)
 
-
-def _get_week_ranges(args) -> list[tuple[date, date]]:
-    """Generate week start and end dates between start_date and end_date.
-    Only processes whole weeks (Monday to Sunday) that fall entirely within the user-specified date range."""
-
-    # Find the first Monday on or after start_date
-    start_offset = args.start_date.weekday()  # 0=Monday, 6=Sunday
-    if start_offset == 0:
-        # Already a Monday
-        first_monday = args.start_date
+    # Parse start date
+    if args.start_date is None:
+        start = yesterday
+        start_is_month = False
     else:
-        # Move to next Monday
-        first_monday = args.start_date + timedelta(days=(7 - start_offset))
+        start_is_month = _is_month_format(args.start_date)
+        start = _parse_date(args.start_date)
 
-    # Find the last Sunday on or before end_date
-    end_offset = args.end_date.weekday()  # 0=Monday, 6=Sunday
-    if end_offset == 6:
-        # Already a Sunday
-        last_sunday = args.end_date
+    # Parse end date
+    if args.end_date is None:
+        if start_is_month:
+            # If start date was a month, default end date to end of that month
+            end = _get_last_day_of_month(start)
+        else:
+            end = start + timedelta(days=1)
     else:
-        # Move back to previous Sunday
-        last_sunday = args.end_date - timedelta(days=(end_offset + 1))
+        if _is_month_format(args.end_date):
+            # Parse as first day of month, then convert to last day
+            temp_date = _parse_date(args.end_date)
+            end = _get_last_day_of_month(temp_date)
+        else:
+            end = _parse_date(args.end_date)
 
-    # Generate week ranges
-    current = first_monday
-    week_ranges = []
+    return DateRange(start, end)
 
-    while current <= last_sunday:
-        # Each week runs from Monday (current) to Sunday (current + 6 days)
-        week_end_date = current + timedelta(days=6)
 
-        # Only include if the full week (ending on Sunday) fits within range
-        if week_end_date <= last_sunday:
-            week_ranges.append((current, week_end_date + timedelta(days=1)))  # +1 to make end exclusive
+def main(args):
+    # Parse comma-separated sources
+    source_args = [s.strip() for s in args.source.split(',')]
+    # Validate sources
+    invalid = [s for s in source_args if s not in DATA_SOURCES]
+    if invalid:
+        raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(DATA_SOURCES.keys())}")
+    sources = source_args
 
-        # Move to next Monday
-        current = current + timedelta(days=7)
+    # Get the appropriate PV sites based on whether system IDs were specified
+    pv_sites = _load_pv_sites(args.system_ids)
+    print(f"Successfully loaded {len(pv_sites)} PV site(s).\n")
 
-    if args.reverse:
-        week_ranges.reverse()
+    # Track processing results
+    stats = ProcessingStats()
 
-    return week_ranges
+    # Initialize client based on local-dir option
+    if args.local_dir:
+        print(f"Using local directory: {args.local_dir}\n")
+        storage_client = LocalStorageClient(args.local_dir)
+    else:
+        storage_client = GDriveClient.build_service()
+
+    complete_date_range = _get_complete_date_range(args)
+
+    for source in sources:
+        data_source = DATA_SOURCES[source]
+        extractor = data_source.extractor_factory()
+
+        if args.by_week and not extractor.multi_date:
+            raise ValueError(f"Extractor for source '{source}' does not support multi-date extraction "
+                             f"required for --by-week option.")
+
+        sub_date_ranges = complete_date_range.split_by(Period.WEEK if args.by_week else Period.DAY)
+
+        for date_range in sub_date_ranges:
+            print(f"Processing {data_source.descriptor} for {date_range}")
+            for pv_site in pv_sites:
+                print(f"  Processing site: {pv_site.name} (system_id={pv_site.pvo_sys_id})")
+
+                result = extract_and_load(
+                    extractor,
+                    storage_client,
+                    data_source.descriptor,
+                    pv_site,
+                    date_range,
+                    args.dry_run,
+                    args.write_metadata,
+                )
+
+                stats.record(result)
+
+    # Print summary report
+    stats.print_summary(dry_run=args.dry_run)
 
 
 def _load_pv_sites(system_ids: str) -> list[PVSite]:
@@ -384,5 +276,5 @@ def _load_pv_sites(system_ids: str) -> list[PVSite]:
 
 
 if __name__ == '__main__':
-    args = parse_args()
+    args = _parse_args()
     main(args)

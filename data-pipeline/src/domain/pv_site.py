@@ -32,6 +32,9 @@ class PVSite:
     inverter_system: System
     installation_date: Optional[date] = None
 
+    def __str__(self) -> str:
+        return f"{self.name} (system_id={self.pvo_sys_id})"
+
 
 def _create_panel_geometry_from_row(row: dict, index: int) -> Optional[PanelGeometry]:
     """
