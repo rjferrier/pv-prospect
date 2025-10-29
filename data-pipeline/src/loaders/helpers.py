@@ -1,20 +1,32 @@
 from datetime import date
+import os
 
-from domain.data_source import DataSource
 from domain.pv_site import PVSite
-from loaders.gdrive import DATA_FOLDER_NAME
+
+DATA_FOLDER_NAME = "data"
 
 
-def get_csv_file_path(data_source: DataSource, pv_site: PVSite, date_: date) -> str:
-    """Generate CSV filename using site name and data source"""
+def build_csv_file_path(source_descriptor: str, pv_site: PVSite, date_: date) -> str:
+    """
+    Build the full CSV file path for a given data source, site, and date.
+
+    Args:
+        source_descriptor: The data source descriptor string
+        pv_site: The PV site
+        date_: The date for the data
+
+    Returns:
+        The full CSV file path (e.g., 'data/openmeteo-hourly/openmeteo-hourly_12345_20231029.csv')
+    """
     filename_parts = [
-        data_source.descriptor.replace('/', '-'),
+        source_descriptor.replace('/', '-'),
         str(pv_site.pvo_sys_id),
-        _format_date(date_)
+        format_date(date_)
     ]
     filename = '_'.join(filename_parts) + '.csv'
-    return '/'.join((DATA_FOLDER_NAME, data_source.descriptor, filename))
+    return os.path.join(DATA_FOLDER_NAME, source_descriptor, filename)
 
 
-def _format_date(date_: date) -> str:
+def format_date(date_: date) -> str:
+    """Format a date as YYYYMMDD string."""
     return "%04d%02d%02d" % (date_.year, date_.month, date_.day)

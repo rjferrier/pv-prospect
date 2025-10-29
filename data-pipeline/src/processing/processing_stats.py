@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
-from datetime import date, datetime
-from typing import List, Tuple, Optional
+from datetime import datetime
+from typing import List, Optional
+
+from .value_objects import Task, Result, ResultType, FailureDetails
 
 
 @dataclass
@@ -10,8 +12,19 @@ class ProcessingStats:
     skipped_existing: int = 0
     skipped_dry_run: int = 0
     failed: int = 0
-    failures: List[Tuple[str, date, int, str, str]] = field(default_factory=list)
+    failures: List[tuple[Task, FailureDetails]] = field(default_factory=list)
     failure_log_path: Optional[str] = field(default=None, init=False)
+
+    def record(self, result: Result):
+        """Record the result of a task execution."""
+        if result.type == ResultType.SUCCESS:
+            self.record_success()
+        elif result.type == ResultType.FAILURE:
+            self.record_failure(result.task, result.failure_details)
+        elif result.type == ResultType.SKIPPED_EXISTING:
+            self.record_skip_existing()
+        elif result.type == ResultType.SKIPPED_DRY_RUN:
+            self.record_skip_dry_run()
 
     def record_success(self):
         """Record a successful processing operation."""
@@ -25,7 +38,7 @@ class ProcessingStats:
         """Record a skipped operation due to dry-run mode."""
         self.skipped_dry_run += 1
 
-    def record_failure(self, source: str, date_: date, system_id: int, site_name: str, error: str):
+    def record_failure(self, task: Task, failure_details: FailureDetails):
         """Record a failed operation with details and write to log immediately."""
         # Create log file on first failure
         if self.failed == 0:
@@ -35,16 +48,16 @@ class ProcessingStats:
                 f.write("=" * 80 + "\n\n")
 
         self.failed += 1
-        self.failures.append((source, date_, system_id, site_name, error))
+        self.failures.append((task, failure_details))
 
         # Write to log file immediately
         with open(self.failure_log_path, 'a') as f:
             f.write(f"Failure #{self.failed} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Source: {source}\n")
-            f.write(f"Date: {date_}\n")
-            f.write(f"System ID: {system_id}\n")
-            f.write(f"Site: {site_name}\n")
-            f.write(f"Error: {error}\n")
+            f.write(f"Source: {task.source_descriptor}\n")
+            f.write(f"Date: {task.date_range.start}\n")
+            f.write(f"System ID: {task.pv_site.pvo_sys_id}\n")
+            f.write(f"Site: {task.pv_site.name}\n")
+            f.write(f"Error: {failure_details.error}\n")
             f.write("-" * 80 + "\n\n")
 
     def total(self) -> int:

@@ -1,15 +1,7 @@
 import csv
 import json
-import os
-from datetime import date
 from pathlib import Path
 from typing import Iterable
-
-from domain.data_source import DataSource
-from domain.pv_site import PVSite
-
-# Import the same constants as gdrive for consistency
-DATA_FOLDER_NAME = "data"
 
 
 class LocalStorageClient:
@@ -25,16 +17,6 @@ class LocalStorageClient:
         self.base_dir = Path(base_dir).resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
     
-    def get_csv_file_path(self, data_source: DataSource, pv_site: PVSite, date_: date) -> str:
-        """Generate CSV filename using site name and data source"""
-        filename_parts = [
-            data_source.descriptor.replace('/', '-'),
-            str(pv_site.pvo_sys_id),
-            _format_date(date_)
-        ]
-        filename = '_'.join(filename_parts) + '.csv'
-        return os.path.join(DATA_FOLDER_NAME, data_source.descriptor, filename)
-
     def file_exists(self, file_path: str) -> bool:
         """
         Check if a file exists in the local storage.
@@ -93,7 +75,3 @@ class LocalStorageClient:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
         
         print(f"    Written metadata to: {full_path}")
-
-
-def _format_date(date_: date) -> str:
-    return "%04d%02d%02d" % (date_.year, date_.month, date_.day)
