@@ -10,7 +10,10 @@ class Task:
     """Represents a data extraction task for a specific site, source, and date range."""
     source_descriptor: str
     date_range: DateRange
-    pv_site: PVSite
+    pv_system_id: int
+
+    def __str__(self) -> str:
+        return ','.join((self.source_descriptor, self.pv_system_id, self.date_range))
 
 
 class ResultType(Enum):

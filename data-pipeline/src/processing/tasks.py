@@ -1,50 +1,61 @@
 from domain import DateRange
-from domain.pv_site import PVSite
-from loaders.helpers import build_csv_file_path
+from extractors import get_extractor, SourceDescriptor
+from loaders import build_csv_file_path
+from loaders.gdrive import GDriveClient
+from loaders.local import LocalStorageClient
+from .celery import app
+from .pv_site_repo import get_pv_site_by_system_id
 
 from .value_objects import Task, Result
 
 ALLOW_DUPLICATE_FILES = False
 
 
+@app.task
 def extract_and_load(
-        extractor,
-        storage_client,
-        source_descriptor: str,
-        pv_site: PVSite,
+        source_descriptor: SourceDescriptor,
+        pv_system_id: int,
         date_range: DateRange,
-        dry_run: bool,
-        write_metadata: bool
+        local_dir: str | None,
+        write_metadata: bool,
+        dry_run: bool
 ) -> Result:
     """
-    Process a single extraction for a given PV site and date (or date range).
+    Process a single extraction and load for a given PV system and date (or date range).
 
     Args:
-        storage_client: Storage client (LocalStorageClient or GDriveClient)
-        extractor: The data extractor instance
-        source_descriptor: Data source descriptor string (e.g., 'openmeteo/hourly')
-        pv_site: PV site to extract data for
-        date_range: DateRange containing start date and optional end date
-        dry_run: If True, don't actually write files
-        write_metadata: If True, write metadata JSON alongside CSV
+        source_descriptor: The source descriptor enum identifying the extractor to use.
+        pv_system_id: The integer PV system identifier to extract data for.
+        date_range: DateRange containing start date and optional end date.
+        local_dir: If provided, a local directory path where files will be written instead of Google Drive.
+        write_metadata: If True, write metadata JSON alongside the CSV when available.
+        dry_run: If True, perform a dry run (do not write files).
 
     Returns:
-        Result: The result of the extraction and load operation
+        Result: The result of the extraction and load operation.
     """
-    task = Task(source_descriptor=source_descriptor, date_range=date_range, pv_site=pv_site)
-    file_path = build_csv_file_path(source_descriptor, pv_site, date_range.start)
+
+    task = Task(source_descriptor=source_descriptor, date_range=date_range, pv_system_id=pv_system_id)
+    file_path = build_csv_file_path(source_descriptor, pv_system_id, date_range.start)
+
+    if local_dir:
+        storage_client = LocalStorageClient(local_dir)
+    else:
+        storage_client = GDriveClient.build_service()
 
     # Check if file already exists using polymorphic method
     if storage_client.file_exists(file_path) and not ALLOW_DUPLICATE_FILES:
-        print(f"    File already exists: {file_path}")
+        print(f"    {task}: File already exists")
         return Result.skipped_existing(task)
 
     if dry_run:
-        print(f"    Dry run - not writing: {file_path}")
+        print(f"    {task}: Dry run - not writing")
         return Result.skipped_dry_run(task)
 
     try:
         # Call extractor with appropriate arguments
+        extractor = get_extractor(source_descriptor)
+        pv_site = get_pv_site_by_system_id(pv_system_id)
         extraction_result = extractor.extract(pv_site, date_range.start, date_range.end)
 
         # Write CSV data using polymorphic method
@@ -55,10 +66,11 @@ def extract_and_load(
             try:
                 storage_client.write_metadata(file_path, extraction_result.metadata)
             except Exception as meta_e:
-                print(f"    WARNING: failed to write metadata for {file_path}: {meta_e}")
+                print(f"    {task}: WARNING - failed to write metadata: {meta_e}")
 
+        print(f"    {task}: Success")
         return Result.success(task)
 
     except Exception as e:
-        print(f"    ERROR: {e}")
+        print(f"    {task}: ERROR: {e}")
         return Result.failure(task, e)

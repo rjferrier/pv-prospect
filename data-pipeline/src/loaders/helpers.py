@@ -1,26 +1,24 @@
 from datetime import date
 import os
 
-from domain.pv_site import PVSite
-
 DATA_FOLDER_NAME = "data"
 
 
-def build_csv_file_path(source_descriptor: str, pv_site: PVSite, date_: date) -> str:
+def build_csv_file_path(source_descriptor: str, pv_system_id: int, date_: date) -> str:
     """
     Build the full CSV file path for a given data source, site, and date.
 
     Args:
-        source_descriptor: The data source descriptor string
-        pv_site: The PV site
+        source_descriptor: The data source descriptor string (e.g. 'openmeteo/hourly')
+        pv_system_id: The PV system identifier (integer)
         date_: The date for the data
 
     Returns:
-        The full CSV file path (e.g., 'data/openmeteo-hourly/openmeteo-hourly_12345_20231029.csv')
+        The full CSV file path (e.g., 'data/openmeteo/hourly/openmeteo-hourly_12345_20231029.csv')
     """
     filename_parts = [
         source_descriptor.replace('/', '-'),
-        str(pv_site.pvo_sys_id),
+        str(pv_system_id),
         format_date(date_)
     ]
     filename = '_'.join(filename_parts) + '.csv'

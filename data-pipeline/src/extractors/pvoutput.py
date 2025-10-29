@@ -52,7 +52,7 @@ class PVOutputRateLimiter:
         self.reset_time: Optional[datetime] = None
         self._first_update = True
 
-    def update_from_headers(self, headers: dict):
+    def update_from_headers(self, headers: dict[str, str]):
         """
         Update rate limit info from API response headers.
 
@@ -114,6 +114,21 @@ class PVOutputExtractor:
         return extractor
 
     def extract(self, pv_site: PVSite, date_: date, end_date: date = None) -> ExtractionResult:
+        """
+        Extract PV output status data for a single date from the PVOutput API for the given site.
+
+        Args:
+            pv_site: PVSite object containing the target system id and site metadata.
+            date_: The date to extract (only a single date is supported by the API).
+            end_date: Optional end date (ignored by this extractor since PVOutput only supports single-date queries).
+
+        Returns:
+            ExtractionResult: Object containing extracted CSV-style rows in `data` and optional `metadata`.
+
+        Raises:
+            ValueError: If pv_site is missing or does not contain a valid system id.
+            requests.HTTPError: If the HTTP request to the PVOutput API fails.
+        """
         if not pv_site or not pv_site.pvo_sys_id:
             raise ValueError("PVSite must be provided with a valid system ID")
 

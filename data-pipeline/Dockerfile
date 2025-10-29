@@ -4,25 +4,40 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
+# Install build-time tools and set Poetry to install into the system environment
+ENV POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_HOME="/opt/poetry"
+
 COPY pyproject.toml poetry.lock ./
+
+# Install poetry and project dependencies into the container Python environment
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --upgrade pip && \
     pip install poetry && \
-    poetry install --with=dev --no-root --no-interaction
+    poetry install --no-root --no-interaction
 
+# Copy application source
 COPY ./src ./src
 
-FROM builder as dev-envs
+# Final runtime image
+FROM python:3.12-slim AS runtime-common
 
-RUN <<EOF
-apt-get update
-apt-get install -y --no-install-recommends git
-EOF
+WORKDIR /app
 
-RUN <<EOF
-useradd -s /bin/bash -m devuser
-groupadd docker
-usermod -aG docker devuser
-EOF
-# install Docker tools (cli, buildx, compose)
-COPY --from=gloursdocker/docker / /
+# Copy installed packages from builder and source code
+# (poetry was configured to install packages into the system Python location)
+COPY --from=builder /usr/local /usr/local
+COPY --from=builder /app/src /app/src
+COPY pyproject.toml poetry.lock /app/
+
+ENV PYTHONPATH=/app
+
+
+# Runtime image for CLI (default runs the CLI)
+FROM runtime-common AS cli
+CMD ["python", "src/main.py", "--help"]
+
+
+# Runtime image for Celery worker (default runs the worker process)
+FROM runtime-common AS worker
+CMD ["celery", "-A", "processing.celery", "worker", "--loglevel=info"]
