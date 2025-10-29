@@ -3,7 +3,7 @@ from extractors import get_extractor, SourceDescriptor
 from loaders import build_csv_file_path
 from loaders.gdrive import GDriveClient
 from loaders.local import LocalStorageClient
-from .celery import app
+from .worker import app
 from .pv_site_repo import get_pv_site_by_system_id
 
 from .value_objects import Task, Result

@@ -1,14 +1,16 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
 from datetime import date, timedelta
-from types import SimpleNamespace
+
+from celery.result import ResultSet
 
 from domain import DateRange
 from domain.date_range import Period
 from extractors import SourceDescriptor, get_extractor
 from processing import extract_and_load, ProcessingStats
 from processing.pv_site_repo import get_all_pv_system_ids
-from celery.result import ResultSet
 
+
+JOIN_TIMEOUT_SECONDS = 30
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -160,12 +162,12 @@ def _get_pv_system_id_list(system_ids: str) -> list[int]:
 
 def _main(args):
     # Parse comma-separated sources
-    source_args = [s.strip() for s in args.source.split(',')]
+    sources = [s.strip() for s in args.source.split(',')]
     # Validate sources
-    invalid = [s for s in source_args if s not in SOURCE_DESCRIPTORS]
+    source_descriptor_keys = SOURCE_DESCRIPTORS.keys()
+    invalid = [s for s in sources if s not in source_descriptor_keys]
     if invalid:
-        raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(SOURCE_DESCRIPTORS.keys())}")
-    sources = source_args
+        raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(source_descriptor_keys)}")
 
     pv_system_ids = _get_pv_system_id_list(args.system_ids)
     print(f"Processing {len(pv_system_ids)} PV site(s).\n")

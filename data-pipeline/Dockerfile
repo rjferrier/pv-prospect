@@ -2,7 +2,7 @@
 
 FROM python:3.12-slim AS builder
 
-WORKDIR /app
+WORKDIR /data_pipeline
 
 # Install build-time tools and set Poetry to install into the system environment
 ENV POETRY_VIRTUALENVS_CREATE=false \
@@ -17,27 +17,28 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     poetry install --no-root --no-interaction
 
 # Copy application source
-COPY ./src ./src
+COPY ./data_pipeline/ ./
+
 
 # Final runtime image
 FROM python:3.12-slim AS runtime-common
 
-WORKDIR /app
+WORKDIR /data_pipeline
 
 # Copy installed packages from builder and source code
 # (poetry was configured to install packages into the system Python location)
 COPY --from=builder /usr/local /usr/local
-COPY --from=builder /app/src /app/src
-COPY pyproject.toml poetry.lock /app/
+COPY --from=builder /data_pipeline /data_pipeline
+COPY pyproject.toml poetry.lock /data_pipeline/
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/data_pipeline
 
 
 # Runtime image for CLI (default runs the CLI)
 FROM runtime-common AS cli
-CMD ["python", "src/main.py", "--help"]
+CMD ["python", "main.py", "--help"]
 
 
 # Runtime image for Celery worker (default runs the worker process)
 FROM runtime-common AS worker
-CMD ["celery", "-A", "processing.celery", "worker", "--loglevel=info"]
+CMD ["celery", "-A", "processing.worker", "worker", "--loglevel=info"]

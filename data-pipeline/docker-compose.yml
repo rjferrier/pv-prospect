@@ -1,11 +1,10 @@
-version: '3.8'
-
 services:
   rabbitmq:
     image: rabbitmq:3-management
-    container_name: pvprospect-rabbitmq
+    container_name: pvprospect-datapipeline-rabbitmq
     ports:
-      - "5672:5672"     # AMQP
+      # Do NOT bind AMQP port (5672) to the host to avoid host port clashes.
+      # The broker is reachable by other services in the compose network at rabbitmq:5672.
       - "15672:15672"   # Management UI
     environment:
       RABBITMQ_DEFAULT_USER: "user"
@@ -17,19 +16,35 @@ services:
       context: .
       dockerfile: Dockerfile
       target: worker
-    container_name: pvprospect-worker
-    command: ["celery", "-A", "processing.celery", "worker", "--loglevel=info"]
+    container_name: pvprospect-datapipeline-worker
+    command: ["celery", "-A", "processing.worker", "worker", "--loglevel=info"]
     env_file:
-      - .env
+      - worker.env
     environment:
-      # Point Celery at the RabbitMQ service on the default AMQP port using the
-      # credentials configured above. The RPC result backend uses the broker
-      # under the rpc:// scheme which is supported when using RabbitMQ.
       CELERY_BROKER_URL: "amqp://user:password@rabbitmq:5672//"
       CELERY_RESULT_BACKEND: "rpc://"
     depends_on:
       - rabbitmq
     volumes:
-      - ./:/app
-    working_dir: /app
+      - ./data_pipeline:/data_pipeline:rw
+    working_dir: /data_pipeline
     restart: on-failure
+
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: cli
+    container_name: pvprospect-datapipeline-producer
+    environment:
+      CELERY_BROKER_URL: "amqp://user:password@rabbitmq:5672//"
+      CELERY_RESULT_BACKEND: "rpc://"
+    depends_on:
+      - rabbitmq
+      - worker
+    volumes:
+      - ./data_pipeline:/data_pipeline:rw
+    working_dir: /data_pipeline
+    # Don't auto-start - run on demand with: docker-compose run producer python processing/producer.py <args>
+    profiles:
+      - manual
