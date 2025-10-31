@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import Enum
 from typing import NamedTuple, Callable
@@ -8,7 +9,8 @@ class Period(Enum):
     WEEK = 2
 
 
-class DateRange(NamedTuple):
+@dataclass(frozen=True)
+class DateRange:
     """Represents a date range with start, end, and description."""
     start: date
     end: date | None = None

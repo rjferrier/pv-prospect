@@ -19,6 +19,9 @@ class SourceDescriptor(str, Enum):
     VISUALCROSSING_QUARTERHOURLY = 'visualcrossing/quarterhourly'
     VISUALCROSSING_HOURLY = 'visualcrossing/hourly'
 
+    def __str__(self) -> str:
+        return self.value
+
 
 @lru_cache(maxsize=None)
 def get_extractor(source_descriptor: SourceDescriptor):

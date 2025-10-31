@@ -13,7 +13,12 @@ class Task:
     pv_system_id: int
 
     def __str__(self) -> str:
-        return ','.join((self.source_descriptor, self.pv_system_id, self.date_range))
+        return (
+            "Task("
+            f"source_descriptor={self.source_descriptor}, "
+            f"pv_system_id={self.pv_system_id}, "
+            f"date_range={self.date_range}"
+            ")")
 
 
 class ResultType(Enum):
