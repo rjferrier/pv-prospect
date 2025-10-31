@@ -420,8 +420,27 @@ class GDriveClient:
         existing_files = self.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
         return len(existing_files) > 0
 
-    def write_csv(self, file_path: str, rows) -> None:
-        """Upload CSV data to Google Drive."""
+    def write_csv(self, file_path: str, rows, overwrite: bool = False) -> None:
+        """Upload CSV data to Google Drive.
+
+        If overwrite is False and a matching CSV already exists, raise FileExistsError.
+        If overwrite is True, existing matching files are trashed before upload.
+        """
+        resolved_file_path = self.resolve_path(file_path)
+
+        # Check for existing files
+        existing_files = self.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
+        if existing_files and not overwrite:
+            raise FileExistsError(f"File already exists on Google Drive: {file_path}")
+
+        # If overwrite requested, trash existing files
+        if existing_files and overwrite:
+            for f in existing_files:
+                try:
+                    self.trash_file(f['id'])
+                except Exception as e:
+                    print(f"Warning: failed to trash existing file {f.get('id')}: {e}")
+
         with SpooledTemporaryFile(mode='w+b') as tmp:
             # Write CSV data as text first
             text_stream = StringIO()
@@ -434,7 +453,7 @@ class GDriveClient:
             tmp.seek(0)
 
             media_body = MediaIoBaseUpload(tmp, mimetype=CSV_MIME_TYPE, resumable=True)
-            resolved_file_path = self.resolve_path(file_path)
+            # resolved_file_path = self.resolve_path(file_path)  # already resolved above
             self.upload_file(media_body, resolved_file_path, CSV_MIME_TYPE)
 
     def write_metadata(self, csv_file_path: str, metadata: dict) -> None:
