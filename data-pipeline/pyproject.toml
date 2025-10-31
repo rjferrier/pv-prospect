@@ -18,6 +18,8 @@ google-auth-oauthlib = "^1.2.2"
 importlib_resources = "^6.5.2"
 celery = "^5.5.3"
 flower = "^2.0.1"
+pytest = "^8.4.2"
+precisely = "^0.1.9"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }
