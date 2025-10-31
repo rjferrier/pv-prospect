@@ -42,3 +42,8 @@ CMD ["python", "main.py", "--help"]
 # Runtime image for Celery worker (default runs the worker process)
 FROM runtime-common AS worker
 CMD ["celery", "-A", "processing.worker", "worker", "--loglevel=info"]
+
+
+# Runtime image for Flower monitoring
+FROM runtime-common AS flower
+CMD ["celery", "-A", "processing.worker", "flower"]

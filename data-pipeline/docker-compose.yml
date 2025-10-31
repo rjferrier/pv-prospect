@@ -30,6 +30,25 @@ services:
     working_dir: /data_pipeline
     restart: on-failure
 
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: flower
+    container_name: pvprospect-datapipeline-flower
+    ports:
+      - "5555:5555"   # Flower web UI
+    environment:
+      CELERY_BROKER_URL: "amqp://user:password@rabbitmq:5672//"
+      CELERY_RESULT_BACKEND: "rpc://"
+    depends_on:
+      - rabbitmq
+      - worker
+    volumes:
+      - ./data_pipeline:/data_pipeline:rw
+    working_dir: /data_pipeline
+    restart: on-failure
+
   producer:
     build:
       context: .
