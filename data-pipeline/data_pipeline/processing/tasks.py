@@ -34,8 +34,7 @@ def extract_and_load(
     Returns:
         Result: The result of the extraction and load operation.
     """
-
-    task = Task(source_descriptor=source_descriptor, date_range=date_range, pv_system_id=pv_system_id)
+    task = Task(source_descriptor, pv_system_id, date_range)
     file_path = build_csv_file_path(source_descriptor, pv_system_id, date_range.start)
 
     if local_dir:
