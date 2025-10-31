@@ -2,15 +2,15 @@ from dataclasses import dataclass
 from enum import Enum
 
 from domain import DateRange
-from domain.pv_site import PVSite
+from extractors import SourceDescriptor
 
 
 @dataclass(frozen=True)
 class Task:
     """Represents a data extraction task for a specific site, source, and date range."""
-    source_descriptor: str
-    date_range: DateRange
+    source_descriptor: SourceDescriptor
     pv_system_id: int
+    date_range: DateRange
 
     def __str__(self) -> str:
         return (

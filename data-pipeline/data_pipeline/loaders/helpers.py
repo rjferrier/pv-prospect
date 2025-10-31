@@ -1,10 +1,12 @@
 from datetime import date
 import os
 
+from extractors import SourceDescriptor
+
 DATA_FOLDER_NAME = "data"
 
 
-def build_csv_file_path(source_descriptor: str, pv_system_id: int, date_: date) -> str:
+def build_csv_file_path(source_descriptor: SourceDescriptor, pv_system_id: int, date_: date) -> str:
     """
     Build the full CSV file path for a given data source, site, and date.
 
@@ -17,7 +19,7 @@ def build_csv_file_path(source_descriptor: str, pv_system_id: int, date_: date) 
         The full CSV file path (e.g., 'data/openmeteo/hourly/openmeteo-hourly_12345_20231029.csv')
     """
     filename_parts = [
-        source_descriptor.replace('/', '-'),
+        str(source_descriptor).replace('/', '-'),
         str(pv_system_id),
         format_date(date_)
     ]
