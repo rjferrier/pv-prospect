@@ -9,8 +9,7 @@ from extractors import SourceDescriptor, get_extractor
 from processing import extract_and_load, ProcessingStats
 from processing.pv_site_repo import get_all_pv_system_ids
 
-
-JOIN_TIMEOUT_SECONDS = 30
+JOIN_TIMEOUT_SECONDS = 300
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -74,6 +73,11 @@ def _parse_args():
         type=str,
         default=None,
         help='Write files to a local directory instead of uploading to Google Drive. Specify the directory path.'
+    )
+    parser.add_argument(
+        '-o', '--overwrite',
+        action='store_true',
+        help='Overwrite existing CSV files. By default, existing files are skipped.'
     )
     return parser.parse_args()
 
@@ -184,6 +188,8 @@ def _main(args):
                              f"required for --by-week option.")
 
         sub_date_ranges = complete_date_range.split_by(Period.WEEK if args.by_week else Period.DAY)
+        if args.reverse:
+            sub_date_ranges.reverse()
 
         for date_range in sub_date_ranges:
             print(f"Adding {source_descriptor} for {date_range}")
@@ -191,14 +197,15 @@ def _main(args):
                 print(f"  Adding System {pv_system_id}")
 
                 # Submit the task immediately and collect the AsyncResult
-                ar = extract_and_load.delay(
+                ar = extract_and_load.apply_async(args=(
                     source_descriptor,
                     pv_system_id,
                     date_range,
                     args.local_dir,
                     args.write_metadata,
+                    args.overwrite,
                     args.dry_run,
-                )
+                ))
                 results_async.append(ar)
 
     if not results_async:
@@ -208,11 +215,11 @@ def _main(args):
     # join() blocks until all tasks finish. propagate=False prevents
     # task exceptions from being re-raised here so we can inspect results.
     try:
-        results = ResultSet(results_async).join(propagate=False, timeout=JOIN_TIMEOUT_SECONDS)
+        results = ResultSet(results_async).join(propagate=True, timeout=JOIN_TIMEOUT_SECONDS)
     except Exception as e:
         # If join times out or another error occurs, collect whatever completed results are available.
         print(f"Warning: timeout or error while waiting for task results (waited {JOIN_TIMEOUT_SECONDS}s): {e}")
-        results = [ar.get(propagate=False) for ar in results_async if ar.ready()]
+        results = [ar.get(propagate=True) for ar in results_async if ar.ready()]
 
     # Print summary report using processing stats
     stats = ProcessingStats()

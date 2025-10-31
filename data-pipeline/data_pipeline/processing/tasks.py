@@ -8,8 +8,6 @@ from .pv_site_repo import get_pv_site_by_system_id
 
 from .value_objects import Task, Result
 
-ALLOW_DUPLICATE_FILES = False
-
 
 @app.task
 def extract_and_load(
@@ -18,7 +16,8 @@ def extract_and_load(
         date_range: DateRange,
         local_dir: str | None,
         write_metadata: bool,
-        dry_run: bool
+        overwrite: bool,
+        dry_run: bool,
 ) -> Result:
     """
     Process a single extraction and load for a given PV system and date (or date range).
@@ -30,6 +29,7 @@ def extract_and_load(
         local_dir: If provided, a local directory path where files will be written instead of Google Drive.
         write_metadata: If True, write metadata JSON alongside the CSV when available.
         dry_run: If True, perform a dry run (do not write files).
+        overwrite: If True, overwrite existing files. Otherwise, skip existing files.
 
     Returns:
         Result: The result of the extraction and load operation.
@@ -43,7 +43,7 @@ def extract_and_load(
         storage_client = GDriveClient.build_service()
 
     # Check if file already exists using polymorphic method
-    if storage_client.file_exists(file_path) and not ALLOW_DUPLICATE_FILES:
+    if storage_client.file_exists(file_path) and not overwrite:
         print(f"    {task}: File already exists")
         return Result.skipped_existing(task)
 
@@ -73,3 +73,8 @@ def extract_and_load(
     except Exception as e:
         print(f"    {task}: ERROR: {e}")
         return Result.failure(task, e)
+
+
+@app.task
+def error_handler(request, exc, traceback):
+    print('Task {0} raised exception: {1!r}\n{2!r}'.format(request.id, exc, traceback))

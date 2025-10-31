@@ -22,14 +22,14 @@ def _encode_date_range(obj):
     return {
         '__type__': 'DateRange',
         'start': obj.start.isoformat(),
-        'end': obj.end.isoformat() if obj.end else None
+        'end': obj.end.isoformat()
     }
 
 
 def _decode_date_range(obj):
     """Decode a DateRange from a dict."""
     start = date.fromisoformat(obj['start'])
-    end = date.fromisoformat(obj['end']) if obj['end'] else None
+    end = date.fromisoformat(obj['end'])
     return DateRange(start, end)
 
 
@@ -61,7 +61,7 @@ def _encode_task(obj):
         'pv_system_id': obj.pv_system_id,
         'date_range': {
             'start': obj.date_range.start.isoformat(),
-            'end': obj.date_range.end.isoformat() if obj.date_range.end else None
+            'end': obj.date_range.end.isoformat()
         }
     }
 
@@ -77,7 +77,7 @@ def _decode_task(obj):
 
     date_range = DateRange(
         date.fromisoformat(obj['date_range']['start']),
-        date.fromisoformat(obj['date_range']['end']) if obj['date_range']['end'] else None
+        date.fromisoformat(obj['date_range']['end'])
     )
     return Task(
         source_descriptor=source_descriptor,
@@ -112,7 +112,7 @@ def _encode_result(obj):
             'pv_system_id': obj.task.pv_system_id,
             'date_range': {
                 'start': obj.task.date_range.start.isoformat(),
-                'end': obj.task.date_range.end.isoformat() if obj.task.date_range.end else None
+                'end': obj.task.date_range.end.isoformat()
             }
         },
         'type': obj.type.value if hasattr(obj.type, 'value') else obj.type,
@@ -129,7 +129,7 @@ def _decode_result(obj):
         pv_system_id=obj['task']['pv_system_id'],
         date_range=DateRange(
             date.fromisoformat(obj['task']['date_range']['start']),
-            date.fromisoformat(obj['task']['date_range']['end']) if obj['task']['date_range']['end'] else None
+            date.fromisoformat(obj['task']['date_range']['end'])
         )
     )
     result_type = ResultType(obj['type'])
