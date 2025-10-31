@@ -57,8 +57,8 @@ def extract_and_load(
         pv_site = get_pv_site_by_system_id(pv_system_id)
         extraction_result = extractor.extract(pv_site, date_range.start, date_range.end)
 
-        # Write CSV data using polymorphic method
-        storage_client.write_csv(file_path, extraction_result.data)
+        # Write CSV data using polymorphic method, pass overwrite flag
+        storage_client.write_csv(file_path, extraction_result.data, overwrite=overwrite)
 
         # Optionally write metadata JSON if requested and available
         if write_metadata and extraction_result.metadata:
