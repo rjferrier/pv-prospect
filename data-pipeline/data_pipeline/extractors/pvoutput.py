@@ -94,8 +94,6 @@ class PVOutputRateLimiter:
 
 
 class PVOutputExtractor:
-    multi_date = False  # This extractor processes one date at a time
-
     def __init__(self, api_key: str, system_id: str, rate_limiter: Optional[PVOutputRateLimiter] = None) -> None:
         self.api_key = api_key
         self.system_id = system_id

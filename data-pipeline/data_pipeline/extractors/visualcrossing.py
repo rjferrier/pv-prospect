@@ -58,8 +58,6 @@ API_HELPERS_BY_MODE = {
 
 
 class VCWeatherDataExtractor:
-    multi_date = False  # This extractor processes one date at a time
-
     def __init__(self, api_key: str, mode: Mode) -> None:
         self.api_key = api_key
         self.mode = mode

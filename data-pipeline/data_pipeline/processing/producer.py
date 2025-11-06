@@ -5,7 +5,7 @@ from celery.result import ResultSet
 
 from domain import DateRange
 from domain.date_range import Period
-from extractors import SourceDescriptor, get_extractor
+from extractors import SourceDescriptor, supports_multi_date
 from processing import extract_and_load, ProcessingStats
 from processing.pv_site_repo import get_all_pv_system_ids
 
@@ -180,33 +180,43 @@ def _main(args):
 
     complete_date_range = _get_complete_date_range(args)
 
-    for source in sources:
-        source_descriptor = SOURCE_DESCRIPTORS[source]
+    # Split into date ranges first (by week or by day)
+    sub_date_ranges = complete_date_range.split_by(Period.WEEK if args.by_week else Period.DAY)
+    if args.reverse:
+        sub_date_ranges.reverse()
 
-        if args.by_week and not get_extractor(source_descriptor).multi_date:
-            raise ValueError(f"Extractor for source '{source}' does not support multi-date extraction "
-                             f"required for --by-week option.")
+    # Loop over dates first, then sources
+    for date_range in sub_date_ranges:
+        print(f"Processing {date_range}")
 
-        sub_date_ranges = complete_date_range.split_by(Period.WEEK if args.by_week else Period.DAY)
-        if args.reverse:
-            sub_date_ranges.reverse()
+        for source in sources:
+            source_descriptor = SOURCE_DESCRIPTORS[source]
 
-        for date_range in sub_date_ranges:
-            print(f"Adding {source_descriptor} for {date_range}")
-            for pv_system_id in pv_system_ids:
-                print(f"  Adding System {pv_system_id}")
+            # Determine which date ranges to use for this source
+            if args.by_week and not supports_multi_date(source_descriptor):
+                # Extractor doesn't support multi-date, decompose week into single days
+                daily_ranges = date_range.split_by(Period.DAY)
+                print(f"  {source_descriptor}: decomposing week into {len(daily_ranges)} days")
+                date_ranges_to_process = daily_ranges
+            else:
+                # Use the date range as-is
+                date_ranges_to_process = [date_range]
 
-                # Submit the task immediately and collect the AsyncResult
-                ar = extract_and_load.apply_async(args=(
-                    source_descriptor,
-                    pv_system_id,
-                    date_range,
-                    args.local_dir,
-                    args.write_metadata,
-                    args.overwrite,
-                    args.dry_run,
-                ))
-                results_async.append(ar)
+            for dr in date_ranges_to_process:
+                for pv_system_id in pv_system_ids:
+                    print(f"    Adding {source_descriptor} for System {pv_system_id}, {dr}")
+
+                    # Submit the task immediately and collect the AsyncResult
+                    ar = extract_and_load.apply_async(args=(
+                        source_descriptor,
+                        pv_system_id,
+                        dr,
+                        args.local_dir,
+                        args.write_metadata,
+                        args.overwrite,
+                        args.dry_run,
+                    ))
+                    results_async.append(ar)
 
     if not results_async:
         print("No tasks/results were generated.")

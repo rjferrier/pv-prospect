@@ -39,6 +39,16 @@ def get_extractor(source_descriptor: SourceDescriptor):
     return factory()
 
 
+_MULTI_DATE_EXTRACTORS = {
+    SourceDescriptor.OPENMETEO_HISTORICAL,
+    SourceDescriptor.OPENMETEO_SATELLITE,
+}
+
+
+def supports_multi_date(source_descriptor: SourceDescriptor) -> bool:
+    return source_descriptor in _MULTI_DATE_EXTRACTORS
+
+
 _EXTRACTOR_FACTORIES = {
     SourceDescriptor.PVOUTPUT: lambda: PVOutputExtractor.from_env(),
     SourceDescriptor.OPENMETEO_QUARTERHOURLY: lambda: OpenMeteoWeatherDataExtractor.from_components(
