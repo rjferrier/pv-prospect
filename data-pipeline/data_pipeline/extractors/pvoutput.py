@@ -44,11 +44,13 @@ HEADER = [
 class PVOutputRateLimiter:
     """
     Rate limiter that uses PVOutput API response headers to track rate limits.
+    Note: This is designed for use across multiple workers, so we only track
+    the reset_time (which is shared across all workers) and not remaining_requests
+    (which would be unreliable since each worker maintains its own instance).
     """
 
     def __init__(self):
         self.rate_limit: Optional[int] = None
-        self.remaining_requests: Optional[int] = None
         self.reset_time: Optional[datetime] = None
         self._first_update = True
 
@@ -62,9 +64,6 @@ class PVOutputRateLimiter:
         if RATE_LIMIT_HEADER in headers:
             self.rate_limit = int(headers[RATE_LIMIT_HEADER])
 
-        if RATE_LIMIT_REMAINING_HEADER in headers:
-            self.remaining_requests = int(headers[RATE_LIMIT_REMAINING_HEADER])
-
         if RATE_LIMIT_RESET_HEADER in headers:
             # The reset time is in Unix timestamp (seconds since epoch)
             reset_timestamp = int(headers[RATE_LIMIT_RESET_HEADER])
@@ -73,27 +72,25 @@ class PVOutputRateLimiter:
         # Print rate limit info on first update
         if self._first_update and self.rate_limit is not None:
             reset_time_str = self.reset_time.strftime('%H:%M:%S') if self.reset_time else 'unknown'
-            print(f"ℹ️  Rate limit info: {self.remaining_requests}/{self.rate_limit} requests remaining (resets at {reset_time_str})")
+            print(f"ℹ️  Rate limit: {self.rate_limit} requests per hour (resets at {reset_time_str})")
             self._first_update = False
 
     def wait_if_needed(self):
         """
         Check if we need to wait for rate limit to reset.
-        If remaining requests is 0 or very low, sleep until reset time.
+        This should be called when a rate limit error (HTTP 403) is encountered.
         """
-        if self.remaining_requests is not None and self.remaining_requests <= 0:
-            if self.reset_time:
-                current_time = datetime.now()
-                if current_time < self.reset_time:
-                    sleep_seconds = (self.reset_time - current_time).total_seconds()
-                    if sleep_seconds > 0:
-                        limit_info = f" (limit: {self.rate_limit})" if self.rate_limit else ""
-                        print(f"\n⚠️  Rate limit reached{limit_info} - 0 requests remaining.")
-                        print(f"   Sleeping for {sleep_seconds:.1f} seconds until {self.reset_time.strftime('%H:%M:%S')}...\n")
-                        time.sleep(sleep_seconds)
-                        # Reset after sleeping
-                        self.remaining_requests = None
-                        self.reset_time = None
+        if self.reset_time:
+            current_time = datetime.now()
+            if current_time < self.reset_time:
+                sleep_seconds = (self.reset_time - current_time).total_seconds()
+                if sleep_seconds > 0:
+                    limit_info = f" (limit: {self.rate_limit})" if self.rate_limit else ""
+                    print(f"\n⚠️  Rate limit reached{limit_info}.")
+                    print(f"   Sleeping for {sleep_seconds:.1f} seconds until {self.reset_time.strftime('%H:%M:%S')}...\n")
+                    time.sleep(sleep_seconds)
+                    # Reset after sleeping
+                    self.reset_time = None
 
 
 class PVOutputExtractor:
@@ -151,6 +148,16 @@ class PVOutputExtractor:
         self.rate_limiter.wait_if_needed()
 
         response = requests.get(URL, headers=headers, params=params)
+
+        # Handle rate limit errors specially
+        if response.status_code == 403:
+            # Update rate limiter from the 403 response headers to get reset time
+            self.rate_limiter.update_from_headers(response.headers)
+            # Wait until rate limit resets
+            self.rate_limiter.wait_if_needed()
+            # Retry the request
+            response = requests.get(URL, headers=headers, params=params)
+
         response.raise_for_status()
 
         # Update rate limiter from response headers
