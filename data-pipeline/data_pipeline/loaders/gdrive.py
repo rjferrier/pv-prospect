@@ -134,14 +134,14 @@ class GDriveClient:
 
         for part in parts[:-1]:
             folder_path = ResolvedFilePath(name=part, parent_id=parent_id)
-            parent_id = self.create_or_get_folder(folder_path)
+            parent_id = self.get_folder(folder_path)
 
         return ResolvedFilePath(name=file_name, parent_id=parent_id)
 
-    def create_or_get_folder(self, folder_path: ResolvedFilePath) -> str:
+    def get_folder(self, folder_path: ResolvedFilePath) -> str:
         """
-        Creates a folder in Google Drive if it doesn't exist, or returns existing folder ID.
-        Raises an error if more than one such folder exists.
+        Gets a folder ID from Google Drive.
+        Raises an error if the folder doesn't exist or if more than one such folder exists.
 
         Args:
             folder_path (ResolvedFilePath): The folder path with name and parent_id.
@@ -152,15 +152,70 @@ class GDriveClient:
         Raises:
             HttpError: If the API request fails
             RuntimeError: If more than one folder with the same name and parent exists
+            FileNotFoundError: If the folder doesn't exist
         """
-
         existing_folders = self.search(folder_path, mime_type=FOLDER_MIME_TYPE)
         if len(existing_folders) > 1:
             raise RuntimeError(f"More than one folder named '{folder_path.name}' exists in the specified location.")
-        if existing_folders:
-            return existing_folders[0]["id"]
+        if not existing_folders:
+            raise FileNotFoundError(f"Folder '{folder_path.name}' not found in the specified location.")
 
-        return self._create_folder(folder_path)
+        return existing_folders[0]["id"]
+
+    def create_folder(self, folder_path: str) -> None:
+        """
+        Creates a folder path in Google Drive (e.g., 'data/pvoutput').
+        Creates all intermediate folders if they don't exist.
+
+        Args:
+            folder_path: The folder path as a string (e.g., 'data/pvoutput')
+
+        Raises:
+            HttpError: If the API request fails
+        """
+        if not folder_path:
+            return
+
+        parts = [p for p in folder_path.split('/') if p]
+        parent_id = None
+
+        for part in parts:
+            resolved_path = ResolvedFilePath(name=part, parent_id=parent_id)
+
+            # Try to get existing folder, create if it doesn't exist
+            try:
+                parent_id = self.get_folder(resolved_path)
+            except FileNotFoundError:
+                parent_id = self._create_folder_internal(resolved_path)
+                print(f"    Created folder: {part}")
+
+    def _create_folder_internal(self, folder_path: ResolvedFilePath) -> str:
+        """
+        Internal method to create a single folder in Google Drive.
+
+        Args:
+            folder_path (ResolvedFilePath): The folder path with name and parent_id.
+
+        Returns:
+            str: The folder ID.
+
+        Raises:
+            HttpError: If the API request fails
+        """
+        folder_metadata = {
+            "name": folder_path.name,
+            "mimeType": FOLDER_MIME_TYPE,
+            "parents": [folder_path.parent_id] if folder_path.parent_id else []
+        }
+        try:
+            folder = self.service.files().create(
+                body=folder_metadata,
+                fields="id"
+            ).execute()
+            return folder.get("id")
+        except HttpError as error:
+            print(f"Error while creating folder {folder_path.name}: {error}")
+            raise
 
     @retry_on_500
     def upload_file(self, media_body: MediaIoBaseUpload, file_path: ResolvedFilePath, mimetype: str) -> str:
@@ -332,31 +387,6 @@ class GDriveClient:
         finally:
             stream.close()
 
-    @retry_on_500
-    def _create_folder(self, folder_path: ResolvedFilePath) -> str:
-        """
-        Creates a folder in Google Drive and returns its ID.
-
-        Args:
-            folder_path (ResolvedFilePath): The folder path with name and parent_id.
-
-        Returns:
-            str: The folder ID.
-        """
-        folder_metadata = {
-            "name": folder_path.name,
-            "mimeType": FOLDER_MIME_TYPE,
-            "parents": [folder_path.parent_id] if folder_path.parent_id else []
-        }
-        try:
-            folder = self.service.files().create(
-                body=folder_metadata,
-                fields="id"
-            ).execute()
-            return folder.get("id")
-        except HttpError as error:
-            print(f"Error while creating folder {folder_path.name}: {error}")
-            raise
 
     def _get_file_id(self, file_path: ResolvedFilePath, mime_type: Optional[str] = None) -> str:
         """

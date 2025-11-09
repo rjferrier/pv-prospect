@@ -16,7 +16,7 @@ def get_folder_id(client: GDriveClient, folder_path: str | None) -> str | None:
 
     for part in parts:
         resolved_path = ResolvedFilePath(name=part, parent_id=parent_id)
-        parent_id = client.create_or_get_folder(resolved_path)
+        parent_id = client.get_folder(resolved_path)
 
     return parent_id
 

@@ -1,6 +1,7 @@
 import csv
 import io
-from loaders.gdrive import GDriveClient, DATA_FOLDER_NAME, ResolvedFilePath
+from loaders import DATA_FOLDER_NAME
+from loaders.gdrive import GDriveClient, ResolvedFilePath
 
 HEADER = [
     'date', 'time', 'energy', 'efficiency', 'power',
@@ -10,9 +11,9 @@ HEADER = [
 
 def get_pvoutput_folder_id(client):
     data_folder = ResolvedFilePath(name=DATA_FOLDER_NAME, parent_id=None)
-    parent_id = client.create_or_get_folder(data_folder)
+    parent_id = client.get_folder(data_folder)
     pvoutput_folder = ResolvedFilePath(name='pvoutput', parent_id=parent_id)
-    return client.create_or_get_folder(pvoutput_folder)
+    return client.get_folder(pvoutput_folder)
 
 def list_csv_files(client, folder_id):
     search_path = ResolvedFilePath(name=None, parent_id=folder_id)

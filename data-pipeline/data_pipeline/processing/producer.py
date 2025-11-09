@@ -8,7 +8,7 @@ from config import EtlConfig
 from domain import DateRange
 from domain.date_range import Period
 from extractors import SourceDescriptor, supports_multi_date
-from processing import extract_and_load, ProcessingStats
+from processing import extract_and_load, create_folder, ProcessingStats
 from processing.pv_site_repo import get_all_pv_system_ids
 
 
@@ -165,6 +165,22 @@ def _get_pv_system_id_list(system_ids: str) -> list[int]:
     return [int(s.strip()) for s in system_ids.split(',') if s.strip()]
 
 
+def _create_folders(config: EtlConfig, source_descriptors: list[SourceDescriptor], local_dir: str | None) -> None:
+    results_async = []
+    for sd in source_descriptors:
+        folder_result = create_folder.apply_async(args=(sd, local_dir))
+        results_async.append(folder_result)
+
+    try:
+        results = ResultSet(results_async).join(propagate=True, timeout=config.join_timeout_seconds)
+    except Exception as e:
+        # If join times out or another error occurs, collect whatever completed results are available.
+        print(f"Warning: timeout or error while waiting for task results (waited {config.join_timeout_seconds}s): {e}")
+        results = [ar.get(propagate=True) for ar in results_async if ar.ready()]
+
+    print(f"Created folders: {results}")
+
+
 def _main(config, args):
 
     # Parse comma-separated sources
@@ -174,6 +190,9 @@ def _main(config, args):
     invalid = [s for s in sources if s not in source_descriptor_keys]
     if invalid:
         raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(source_descriptor_keys)}")
+
+    source_descriptors = [SOURCE_DESCRIPTORS[source] for source in sources]
+    _create_folders(config, source_descriptors, args.local_dir)
 
     pv_system_ids = _get_pv_system_id_list(args.system_ids)
     print(f"Processing {len(pv_system_ids)} PV site(s).\n")
@@ -193,12 +212,13 @@ def _main(config, args):
 
         for source in sources:
             source_descriptor = SOURCE_DESCRIPTORS[source]
+            print(f"  Processing {source_descriptor}")
 
             # Determine which date ranges to use for this source
             if args.by_week and not supports_multi_date(source_descriptor):
                 # Extractor doesn't support multi-date, decompose week into single days
                 daily_ranges = date_range.split_by(Period.DAY)
-                print(f"  {source_descriptor}: decomposing week into {len(daily_ranges)} days")
+                print(f"  Decomposing week into {len(daily_ranges)} days")
                 date_ranges_to_process = daily_ranges
             else:
                 # Use the date range as-is

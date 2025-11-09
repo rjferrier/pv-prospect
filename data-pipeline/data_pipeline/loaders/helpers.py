@@ -6,6 +6,19 @@ from extractors import SourceDescriptor
 DATA_FOLDER_NAME = "data"
 
 
+def build_folder_path(source_descriptor: SourceDescriptor) -> str:
+    """
+    Build the folder path for a given data source.
+
+    Args:
+        source_descriptor: The data source descriptor (e.g. SourceDescriptor.PVOUTPUT)
+
+    Returns:
+        The folder path (e.g., 'data/pvoutput' or 'data/openmeteo/hourly')
+    """
+    return os.path.join(DATA_FOLDER_NAME, str(source_descriptor))
+
+
 def build_csv_file_path(source_descriptor: SourceDescriptor, pv_system_id: int, date_: date) -> str:
     """
     Build the full CSV file path for a given data source, site, and date.
