@@ -1,15 +1,16 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
 from datetime import date, timedelta
+import random
 
 from celery.result import ResultSet
 
+from config import EtlConfig
 from domain import DateRange
 from domain.date_range import Period
 from extractors import SourceDescriptor, supports_multi_date
 from processing import extract_and_load, ProcessingStats
 from processing.pv_site_repo import get_all_pv_system_ids
 
-JOIN_TIMEOUT_SECONDS = 300
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -164,7 +165,8 @@ def _get_pv_system_id_list(system_ids: str) -> list[int]:
     return [int(s.strip()) for s in system_ids.split(',') if s.strip()]
 
 
-def _main(args):
+def _main(config, args):
+
     # Parse comma-separated sources
     sources = [s.strip() for s in args.source.split(',')]
     # Validate sources
@@ -206,29 +208,40 @@ def _main(args):
                 for pv_system_id in pv_system_ids:
                     print(f"    Adding {source_descriptor} for System {pv_system_id}, {dr}")
 
-                    # Submit the task immediately and collect the AsyncResult
-                    ar = extract_and_load.apply_async(args=(
-                        source_descriptor,
-                        pv_system_id,
-                        dr,
-                        args.local_dir,
-                        args.write_metadata,
-                        args.overwrite,
-                        args.dry_run,
-                    ))
+                    # Calculate delay with spacing and random jitter to avoid hammering APIs
+                    base_delay = len(results_async) * config.task_spacing
+                    jitter = random.uniform(0, config.task_jitter)
+                    delay = base_delay + jitter
+
+                    ar = extract_and_load.apply_async(
+                        args=(
+                            source_descriptor,
+                            pv_system_id,
+                            dr,
+                            args.local_dir,
+                            args.write_metadata,
+                            args.overwrite,
+                            args.dry_run,
+                        ),
+                        countdown=delay
+                    )
                     results_async.append(ar)
 
     if not results_async:
         print("No tasks/results were generated.")
         return
 
+    if config.fire_and_forget:
+        print(f"Generated {len(results_async)} tasks/results asynchronously.")
+        return
+
     # join() blocks until all tasks finish. propagate=False prevents
     # task exceptions from being re-raised here so we can inspect results.
     try:
-        results = ResultSet(results_async).join(propagate=True, timeout=JOIN_TIMEOUT_SECONDS)
+        results = ResultSet(results_async).join(propagate=True, timeout=config.join_timeout_seconds)
     except Exception as e:
         # If join times out or another error occurs, collect whatever completed results are available.
-        print(f"Warning: timeout or error while waiting for task results (waited {JOIN_TIMEOUT_SECONDS}s): {e}")
+        print(f"Warning: timeout or error while waiting for task results (waited {config.join_timeout_seconds}s): {e}")
         results = [ar.get(propagate=True) for ar in results_async if ar.ready()]
 
     # Print summary report using processing stats
@@ -238,5 +251,6 @@ def _main(args):
 
 
 if __name__ == '__main__':
-    args = _parse_args()
-    _main(args)
+    config_ = EtlConfig.from_yaml()
+    args_ = _parse_args()
+    _main(config_, args_)

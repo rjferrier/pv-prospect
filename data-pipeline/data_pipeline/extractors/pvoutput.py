@@ -142,9 +142,6 @@ class PVOutputExtractor:
             **CONSTANT_QUERY_PARAMS
         }
 
-        # Check rate limit before making the request
-        self.rate_limiter.wait_if_needed()
-
         response = requests.get(URL, headers=headers, params=params)
 
         # Handle rate limit errors specially
