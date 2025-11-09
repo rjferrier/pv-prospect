@@ -1,16 +1,12 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
 from datetime import date, timedelta
-import random
-
-from celery.result import ResultSet
 
 from config import EtlConfig
 from domain import DateRange
 from domain.date_range import Period
 from extractors import SourceDescriptor, supports_multi_date
-from processing import extract_and_load, create_folder, ProcessingStats
 from processing.pv_site_repo import get_all_pv_system_ids
-
+from processing.task_queuer import TaskQueuer
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -165,23 +161,8 @@ def _get_pv_system_id_list(system_ids: str) -> list[int]:
     return [int(s.strip()) for s in system_ids.split(',') if s.strip()]
 
 
-def _create_folders(config: EtlConfig, source_descriptors: list[SourceDescriptor], local_dir: str | None) -> None:
-    results_async = []
-    for sd in source_descriptors:
-        folder_result = create_folder.apply_async(args=(sd, local_dir))
-        results_async.append(folder_result)
-
-    try:
-        results = ResultSet(results_async).join(propagate=True, timeout=config.join_timeout_seconds)
-    except Exception as e:
-        # If join times out or another error occurs, collect whatever completed results are available.
-        print(f"Warning: timeout or error while waiting for task results (waited {config.join_timeout_seconds}s): {e}")
-        results = [ar.get(propagate=True) for ar in results_async if ar.ready()]
-
-    print(f"Created folders: {results}")
-
-
 def _main(config, args):
+    task_queuer = TaskQueuer.from_config(config)
 
     # Parse comma-separated sources
     sources = [s.strip() for s in args.source.split(',')]
@@ -192,12 +173,10 @@ def _main(config, args):
         raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(source_descriptor_keys)}")
 
     source_descriptors = [SOURCE_DESCRIPTORS[source] for source in sources]
-    _create_folders(config, source_descriptors, args.local_dir)
+    task_queuer.create_folders(source_descriptors, args.local_dir).wait_for_completion()
 
     pv_system_ids = _get_pv_system_id_list(args.system_ids)
     print(f"Processing {len(pv_system_ids)} PV site(s).\n")
-
-    results_async = []
 
     complete_date_range = _get_complete_date_range(args)
 
@@ -224,50 +203,27 @@ def _main(config, args):
                 # Use the date range as-is
                 date_ranges_to_process = [date_range]
 
+            counter = 0
+
             for dr in date_ranges_to_process:
                 for pv_system_id in pv_system_ids:
                     print(f"    Adding {source_descriptor} for System {pv_system_id}, {dr}")
 
-                    # Calculate delay with spacing and random jitter to avoid hammering APIs
-                    base_delay = len(results_async) * config.task_spacing
-                    jitter = random.uniform(0, config.task_jitter)
-                    delay = base_delay + jitter
-
-                    ar = extract_and_load.apply_async(
-                        args=(
-                            source_descriptor,
-                            pv_system_id,
-                            dr,
-                            args.local_dir,
-                            args.write_metadata,
-                            args.overwrite,
-                            args.dry_run,
-                        ),
-                        countdown=delay
+                    task_queuer.extract_and_load(
+                        source_descriptor,
+                        pv_system_id,
+                        dr,
+                        args.local_dir,
+                        args.write_metadata,
+                        args.overwrite,
+                        args.dry_run,
+                        counter
                     )
-                    results_async.append(ar)
+                    counter += 1
 
-    if not results_async:
-        print("No tasks/results were generated.")
-        return
-
-    if config.fire_and_forget:
-        print(f"Generated {len(results_async)} tasks/results asynchronously.")
-        return
-
-    # join() blocks until all tasks finish. propagate=False prevents
-    # task exceptions from being re-raised here so we can inspect results.
-    try:
-        results = ResultSet(results_async).join(propagate=True, timeout=config.join_timeout_seconds)
-    except Exception as e:
-        # If join times out or another error occurs, collect whatever completed results are available.
-        print(f"Warning: timeout or error while waiting for task results (waited {config.join_timeout_seconds}s): {e}")
-        results = [ar.get(propagate=True) for ar in results_async if ar.ready()]
-
-    # Print summary report using processing stats
-    stats = ProcessingStats()
-    stats.record(results)
-    stats.print_summary(dry_run=args.dry_run)
+            if counter == 0:
+                print("No tasks/results were generated.")
+                return
 
 
 if __name__ == '__main__':

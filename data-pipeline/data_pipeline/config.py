@@ -10,11 +10,9 @@ import yaml
 @dataclass
 class EtlConfig:
     """Configuration for ETL processing behavior."""
-
-    fire_and_forget: bool
     task_spacing: float
     task_jitter: float
-    join_timeout_seconds: int
+    join_timeout: int
 
     @classmethod
     def from_yaml(cls, config_path: Optional[Path] = None) -> 'EtlConfig':
@@ -39,7 +37,7 @@ class EtlConfig:
             raise FileNotFoundError(
                 f"ETL configuration file not found at {config_path}. "
                 f"Please create the file with required settings: "
-                f"fire_and_forget, task_spacing, task_jitter, join_timeout_seconds"
+                f"task_spacing, task_jitter, join_timeout"
             )
 
         with open(config_path, 'r') as f:
@@ -49,21 +47,18 @@ class EtlConfig:
             raise ValueError(f"ETL configuration file at {config_path} is empty")
 
         # Environment variables override YAML values
-        fire_and_forget = cls._get_bool_env('ETL_FIRE_AND_FORGET', data.get('fire_and_forget'))
         task_spacing = cls._get_float_env('ETL_TASK_SPACING', data.get('task_spacing'))
         task_jitter = cls._get_float_env('ETL_TASK_JITTER', data.get('task_jitter'))
-        join_timeout_seconds = cls._get_int_env('ETL_JOIN_TIMEOUT_SECONDS', data.get('join_timeout_seconds'))
+        join_timeout = cls._get_int_env('ETL_JOIN_TIMEOUT', data.get('join_timeout'))
 
         # Validate that all required fields are present
         missing = []
-        if fire_and_forget is None:
-            missing.append('fire_and_forget')
         if task_spacing is None:
             missing.append('task_spacing')
         if task_jitter is None:
             missing.append('task_jitter')
-        if join_timeout_seconds is None:
-            missing.append('join_timeout_seconds')
+        if join_timeout is None:
+            missing.append('join_timeout')
 
         if missing:
             raise ValueError(
@@ -71,10 +66,9 @@ class EtlConfig:
             )
 
         return cls(
-            fire_and_forget=fire_and_forget,
             task_spacing=task_spacing,
             task_jitter=task_jitter,
-            join_timeout_seconds=join_timeout_seconds,
+            join_timeout=join_timeout,
         )
 
     @staticmethod

@@ -1,13 +1,8 @@
 # ETL Pipeline Configuration
 # These values can be overridden by environment variables:
-# - ETL_FIRE_AND_FORGET
 # - ETL_TASK_SPACING
 # - ETL_TASK_JITTER
-# - ETL_JOIN_TIMEOUT_SECONDS
-
-# If true, tasks are submitted and the producer exits immediately.
-# If false, the producer waits for all tasks to complete.
-fire_and_forget: true
+# - ETL_JOIN_TIMEOUT
 
 # Base spacing in seconds between scheduled tasks to avoid hammering APIs
 task_spacing: 0.1
@@ -16,5 +11,5 @@ task_spacing: 0.1
 # This helps prevent synchronized bursts from multiple workers
 task_jitter: 0.05
 
-# Timeout in seconds when waiting for all tasks to complete (when fire_and_forget is false)
-join_timeout_seconds: 300
+# Timeout in seconds when waiting for all tasks to complete
+join_timeout: 30
