@@ -41,12 +41,15 @@ class TaskQueuer:
             join_timeout=config.join_timeout,
         )
 
-    def create_folders(self, source_descriptors: list[SourceDescriptor], local_dir: str | None) -> AsyncResultsWrapper:
-        results_async = []
-        for sd in source_descriptors:
-            folder_result = create_folder.apply_async(args=(sd, local_dir))
-            results_async.append(folder_result)
+    @staticmethod
+    def get_pv_sites_by_system_id(file_path: str, local_dir: str | None) -> AsyncResult:
+        return get_pv_sites_by_system_id.apply_async(args=(file_path, local_dir))
 
+    def create_folders(self, source_descriptors: list[SourceDescriptor], local_dir: str | None) -> AsyncResultsWrapper:
+        results_async = [
+            create_folder.apply_async(args=(sd, local_dir), countdown=self._calculate_delay(i))
+            for i, sd in enumerate(source_descriptors)
+        ]
         return self._wrap_async_results(results_async, lambda results: print(f"Created folders: {results}"))
 
     def extract_and_load(
@@ -60,9 +63,7 @@ class TaskQueuer:
             dry_run: bool,
             counter: int
     ):
-        delay = self._calculate_delay(counter)
-
-        return extract_and_load.apply_async(
+        extract_and_load.apply_async(
             args=(
                 source_descriptor,
                 pv_system_id,
@@ -72,7 +73,7 @@ class TaskQueuer:
                 overwrite,
                 dry_run,
             ),
-            countdown=delay
+            countdown=self._calculate_delay(counter)
         )
 
     def _calculate_delay(self, counter: int) -> float:

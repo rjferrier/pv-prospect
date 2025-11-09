@@ -3,21 +3,6 @@ import os
 
 from extractors import SourceDescriptor
 
-DATA_FOLDER_NAME = "data"
-
-
-def build_folder_path(source_descriptor: SourceDescriptor) -> str:
-    """
-    Build the folder path for a given data source.
-
-    Args:
-        source_descriptor: The data source descriptor (e.g. SourceDescriptor.PVOUTPUT)
-
-    Returns:
-        The folder path (e.g., 'data/pvoutput' or 'data/openmeteo/hourly')
-    """
-    return os.path.join(DATA_FOLDER_NAME, str(source_descriptor))
-
 
 def build_csv_file_path(source_descriptor: SourceDescriptor, pv_system_id: int, date_: date) -> str:
     """
@@ -29,7 +14,7 @@ def build_csv_file_path(source_descriptor: SourceDescriptor, pv_system_id: int, 
         date_: The date for the data
 
     Returns:
-        The full CSV file path (e.g., 'data/openmeteo/hourly/openmeteo-hourly_12345_20231029.csv')
+        The full CSV file path (e.g., 'openmeteo/hourly/openmeteo-hourly_12345_20231029.csv')
     """
     filename_parts = [
         str(source_descriptor).replace('/', '-'),
@@ -37,7 +22,7 @@ def build_csv_file_path(source_descriptor: SourceDescriptor, pv_system_id: int, 
         format_date(date_)
     ]
     filename = '_'.join(filename_parts) + '.csv'
-    return os.path.join(DATA_FOLDER_NAME, source_descriptor, filename)
+    return os.path.join(source_descriptor, filename)
 
 
 def format_date(date_: date) -> str:

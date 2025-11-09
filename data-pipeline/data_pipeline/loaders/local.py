@@ -1,4 +1,5 @@
 import csv
+import io
 import json
 from pathlib import Path
 from typing import Iterable
@@ -41,6 +42,29 @@ class LocalStorageClient:
         full_path = self.base_dir / file_path
         return full_path.exists()
     
+    def read_file(self, file_path: str) -> io.BytesIO:
+        """
+        Read a file from local storage and return it as a BytesIO stream.
+
+        Args:
+            file_path: The relative path to the file (e.g., 'data/pvoutput/file.csv')
+
+        Returns:
+            io.BytesIO: A BytesIO stream containing the file content
+
+        Raises:
+            FileNotFoundError: If the file doesn't exist
+        """
+        full_path = self.base_dir / file_path
+
+        if not full_path.exists():
+            raise FileNotFoundError(f"File not found: {full_path}")
+
+        with open(full_path, 'rb') as f:
+            content = f.read()
+
+        return io.BytesIO(content)
+
     def write_csv(self, file_path: str, rows: Iterable[Iterable[str]], overwrite: bool = False) -> None:
         """
         Write CSV data to a local file.

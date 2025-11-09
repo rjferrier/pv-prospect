@@ -5,7 +5,9 @@ from config import EtlConfig
 from domain import DateRange
 from domain.date_range import Period
 from extractors import SourceDescriptor, supports_multi_date
-from processing.pv_site_repo import get_all_pv_system_ids
+from loaders import get_storage_client
+from loaders.factory import StorageClient
+from processing.pv_site_repo import get_all_pv_system_ids, build_pv_site_repo
 from processing.task_queuer import TaskQueuer
 
 SOURCE_DESCRIPTORS = {
@@ -153,12 +155,13 @@ def _get_complete_date_range(args) -> DateRange:
     return DateRange(start, end)
 
 
-def _get_pv_system_id_list(system_ids: str) -> list[int]:
-    if not system_ids:
-        # User didn't specify IDs, so we're processing all systems
-        return get_all_pv_system_ids()
+def _parse_pv_system_ids(system_ids_str: str):
+    return [int(s.strip()) for s in system_ids_str.split(',') if s.strip()]
 
-    return [int(s.strip()) for s in system_ids.split(',') if s.strip()]
+
+def _get_all_pv_system_ids(storage_client: StorageClient) -> list[int]:
+    build_pv_site_repo(storage_client)
+    return get_all_pv_system_ids()
 
 
 def _main(config, args):
@@ -175,7 +178,11 @@ def _main(config, args):
     source_descriptors = [SOURCE_DESCRIPTORS[source] for source in sources]
     task_queuer.create_folders(source_descriptors, args.local_dir).wait_for_completion()
 
-    pv_system_ids = _get_pv_system_id_list(args.system_ids)
+    pv_system_ids = (
+        _parse_pv_system_ids(args.system_ids) if args.system_ids else
+        _get_all_pv_system_ids(get_storage_client(args.local_dir))
+    )
+
     print(f"Processing {len(pv_system_ids)} PV site(s).\n")
 
     complete_date_range = _get_complete_date_range(args)

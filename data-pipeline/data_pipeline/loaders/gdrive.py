@@ -21,13 +21,13 @@ from importlib_resources import files
 
 import resources
 
-
 CREDS_FILENAME = "gdrive_credentials.json"
 TOKEN_FILENAME = "token.json"
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 CSV_MIME_TYPE = 'text/csv'
+DATA_FOLDER_NAME = "data"
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
@@ -125,7 +125,7 @@ class GDriveClient:
         Returns:
             ResolvedFilePath: The resolved file path with name and parent_id.
         """
-        parts = [p for p in path.split('/') if p]
+        parts = [p for p in _get_full_path(path).split('/') if p]
         if not parts:
             raise ValueError("Path must not be empty")
 
@@ -164,19 +164,16 @@ class GDriveClient:
 
     def create_folder(self, folder_path: str) -> None:
         """
-        Creates a folder path in Google Drive (e.g., 'data/pvoutput').
+        Creates a folder path in Google Drive (e.g., 'pvoutput').
         Creates all intermediate folders if they don't exist.
 
         Args:
-            folder_path: The folder path as a string (e.g., 'data/pvoutput')
+            folder_path: The folder path as a string (e.g., 'pvoutput')
 
         Raises:
             HttpError: If the API request fails
         """
-        if not folder_path:
-            return
-
-        parts = [p for p in folder_path.split('/') if p]
+        parts = [p for p in _get_full_path(folder_path).split('/') if p]
         parent_id = None
 
         for part in parts:
@@ -450,6 +447,29 @@ class GDriveClient:
         existing_files = self.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
         return len(existing_files) > 0
 
+    def read_file(self, file_path: str) -> io.BytesIO:
+        """
+        Read a file from Google Drive and return it as a BytesIO stream.
+
+        Args:
+            file_path: The file path as a string (e.g., 'pvoutput/file.csv')
+
+        Returns:
+            io.BytesIO: A BytesIO stream containing the file content
+
+        Raises:
+            FileNotFoundError: If the file doesn't exist
+            HttpError: If the API request fails
+        """
+        resolved_file_path = self.resolve_path(file_path)
+        file_id = self._get_file_id(resolved_file_path, mime_type=None)
+
+        stream = io.BytesIO()
+        self._download_to_stream(file_id, stream)
+        stream.seek(0)
+
+        return stream
+
     def write_csv(self, file_path: str, rows, overwrite: bool = False) -> None:
         """Upload CSV data to Google Drive.
 
@@ -502,6 +522,20 @@ class GDriveClient:
             media_body = MediaIoBaseUpload(tmp, mimetype='application/json', resumable=True)
             resolved_file_path = self.resolve_path(metadata_path)
             self.upload_file(media_body, resolved_file_path, 'application/json')
+
+
+def _get_full_path(suffix: object) -> str:
+    """
+    Get a file or folder path. Practically speaking, this prepends the root folder
+    name to the given suffix.
+
+    Args:
+        suffix: Anything that can be converted to a file path string
+
+    Returns:
+        The resulting file path
+    """
+    return os.path.join(DATA_FOLDER_NAME, str(suffix))
 
 
 def _format_date(date_: date) -> str:

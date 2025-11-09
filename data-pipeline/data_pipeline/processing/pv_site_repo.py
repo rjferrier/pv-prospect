@@ -1,12 +1,44 @@
-from datetime import date
-from functools import lru_cache
 import csv
+from datetime import date
+from io import BytesIO
 from typing import Optional
 
-from importlib_resources import files
-
-import resources
 from domain import PVSite, Location, System, PanelGeometry
+from loaders.factory import StorageClient
+
+PV_SITES_CSV_FILE = 'pv_sites.csv'
+
+pv_sites_by_system_id = {}
+
+
+def build_pv_site_repo(storage_client: StorageClient) -> None:
+    """
+    Build the PV site repository by loading PV site data from a CSV file in storage.
+    Or simply return if it is already built.
+
+    This function reads the pv_sites.csv file from the storage client, parses it,
+    and populates the module-level pv_sites_by_system_id dictionary with PVSite objects.
+
+    Args:
+        storage_client: Storage client (GDriveClient or LocalStorageClient) to read the CSV file from.
+
+    Raises:
+        FileNotFoundError: If pv_sites.csv is not found in storage.
+        ValueError: If CSV data is malformed or missing required fields.
+    """
+    if len(pv_sites_by_system_id) != 0:
+        return
+
+    csv_stream = storage_client.read_file(PV_SITES_CSV_FILE)
+
+    # Decode the BytesIO stream to text for csv.DictReader
+    csv_stream.seek(0)
+    text_stream = csv_stream.read().decode('utf-8')
+
+    reader = csv.DictReader(text_stream.splitlines())
+    for row in reader:
+        pv_site = _create_pv_site_from_csv_row(row)
+        pv_sites_by_system_id[pv_site.pvo_sys_id] = pv_site
 
 
 def get_all_pv_system_ids() -> list[int]:
@@ -16,8 +48,7 @@ def get_all_pv_system_ids() -> list[int]:
     Returns:
         list[int]: Sorted list of PV system IDs (integers).
     """
-    pv_sites = _get_pv_sites_dict()
-    return sorted(pv_sites.keys())
+    return sorted(pv_sites_by_system_id.keys())
 
 
 def get_pv_site_by_system_id(system_id: int) -> PVSite:
@@ -33,29 +64,16 @@ def get_pv_site_by_system_id(system_id: int) -> PVSite:
     Raises:
         KeyError: If the system_id is not present in the pv_sites CSV.
     """
-    pv_sites = _get_pv_sites_dict()
-    return pv_sites[system_id]
+    return pv_sites_by_system_id[system_id]
 
 
-@lru_cache(maxsize=1)
-def _get_pv_sites_dict() -> dict[int, PVSite]:
-    """
-    Load and cache PV site entries from the packaged `resources/pv_sites.csv` file.
+def create_pv_sites_by_system_id(pv_site_csv_stream: BytesIO) -> dict[int, PVSite]:
+    pv_site_csv_stream.seek(0)
+    text_stream = pv_site_csv_stream.read().decode('utf-8')
 
-    Returns:
-        dict[int, PVSite]: Mapping of pvo system id -> PVSite instance.
-    """
-    # noinspection PyTypeChecker
-    source = files(resources).joinpath("pv_sites.csv")
-    sites_by_id = {}
-
-    with source.open('r') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            pv_site = _create_pv_site_from_csv_row(row)
-            sites_by_id[pv_site.pvo_sys_id] = pv_site
-
-    return sites_by_id
+    reader = csv.DictReader(text_stream.splitlines())
+    pv_sites = (_create_pv_site_from_csv_row(row) for row in reader)
+    return {pv_site.pvo_sys_id: pv_site for pv_site in pv_sites}
 
 
 def _create_pv_site_from_csv_row(row: dict) -> PVSite:

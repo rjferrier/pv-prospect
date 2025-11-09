@@ -1,14 +1,9 @@
-import os
-
 from domain import DateRange
 from extractors import get_extractor, SourceDescriptor
-from loaders import build_csv_file_path, build_folder_path
-from loaders.gdrive import GDriveClient
-from loaders.local import LocalStorageClient
-from .worker import app
-from .pv_site_repo import get_pv_site_by_system_id
-
+from loaders import build_csv_file_path, get_storage_client
+from .pv_site_repo import get_pv_site_by_system_id, build_pv_site_repo
 from .value_objects import Task, Result
+from .worker import app
 
 
 @app.task
@@ -23,9 +18,8 @@ def create_folder(
         source_descriptor: The source descriptor enum identifying the data source folder.
         local_dir: If provided, a local directory path where folders will be created instead of Google Drive.
     """
-    storage_client = _get_storage_client(local_dir)
-    folder_path = build_folder_path(source_descriptor)
-    storage_client.create_folder(folder_path)
+    storage_client = get_storage_client(local_dir)
+    storage_client.create_folder(source_descriptor)
     print(f"Created folder structure for {source_descriptor}")
 
 
@@ -57,7 +51,8 @@ def extract_and_load(
     task = Task(source_descriptor, pv_system_id, date_range)
     file_path = build_csv_file_path(source_descriptor, pv_system_id, date_range.start)
 
-    storage_client = _get_storage_client(local_dir)
+    storage_client = get_storage_client(local_dir)
+    build_pv_site_repo(storage_client)
 
     # Check if file already exists using polymorphic method
     if storage_client.file_exists(file_path) and not overwrite:
@@ -92,8 +87,3 @@ def extract_and_load(
         return Result.failure(task, e)
 
 
-def _get_storage_client(local_dir: str | None) -> LocalStorageClient | GDriveClient:
-    if local_dir:
-        return LocalStorageClient(local_dir)
-    else:
-        return GDriveClient.build_service()
