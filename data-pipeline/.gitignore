@@ -1,3 +1,0 @@
-worker.env
-data_pipeline/resources/gdrive_credentials.json
-**/token.json

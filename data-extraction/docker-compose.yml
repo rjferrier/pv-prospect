@@ -1,7 +1,7 @@
 services:
   rabbitmq:
     image: rabbitmq:3-management
-    container_name: pvprospect-datapipeline-rabbitmq
+    container_name: pvprospect-dataextraction-rabbitmq
     ports:
       # Do NOT bind AMQP port (5672) to the host to avoid host port clashes.
       # The broker is reachable by other services in the compose network at rabbitmq:5672.
@@ -16,7 +16,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: worker
-    container_name: pvprospect-datapipeline-worker
+    container_name: pvprospect-dataextraction-worker
     command: ["celery", "-A", "processing.worker", "worker", "--loglevel=info"]
     env_file:
       - worker.env
@@ -26,8 +26,8 @@ services:
     depends_on:
       - rabbitmq
     volumes:
-      - ./data_pipeline:/data_pipeline:rw
-    working_dir: /data_pipeline
+      - ./data_extraction:/data_extraction:rw
+    working_dir: /data_extraction
     restart: on-failure
 
   flower:
@@ -35,7 +35,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: flower
-    container_name: pvprospect-datapipeline-flower
+    container_name: pvprospect-dataextraction-flower
     ports:
       - "5555:5555"   # Flower web UI
     environment:
@@ -45,8 +45,8 @@ services:
       - rabbitmq
       - worker
     volumes:
-      - ./data_pipeline:/data_pipeline:rw
-    working_dir: /data_pipeline
+      - ./data_extraction:/data_extraction:rw
+    working_dir: /data_extraction
     restart: on-failure
 
   producer:
@@ -54,7 +54,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: cli
-    container_name: pvprospect-datapipeline-producer
+    container_name: pvprospect-dataextraction-producer
     environment:
       CELERY_BROKER_URL: "amqp://user:password@rabbitmq:5672//"
       CELERY_RESULT_BACKEND: "rpc://"
@@ -62,8 +62,8 @@ services:
       - rabbitmq
       - worker
     volumes:
-      - ./data_pipeline:/data_pipeline:rw
-    working_dir: /data_pipeline
+      - ./data_extraction:/data_extraction:rw
+    working_dir: /data_extraction
     # Don't auto-start - run on demand with: docker-compose run producer python processing/producer.py <args>
     profiles:
       - manual

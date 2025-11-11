@@ -2,7 +2,7 @@
 
 FROM python:3.12-slim AS builder
 
-WORKDIR /data_pipeline
+WORKDIR /data_extraction
 
 # Install build-time tools and set Poetry to install into the system environment
 ENV POETRY_VIRTUALENVS_CREATE=false \
@@ -17,21 +17,21 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     poetry install --no-root --no-interaction
 
 # Copy application source
-COPY ./data_pipeline/ ./
+COPY ./data_extraction/ ./
 
 
 # Final runtime image
 FROM python:3.12-slim AS runtime-common
 
-WORKDIR /data_pipeline
+WORKDIR /data_extraction
 
 # Copy installed packages from builder and source code
 # (poetry was configured to install packages into the system Python location)
 COPY --from=builder /usr/local /usr/local
-COPY --from=builder /data_pipeline /data_pipeline
-COPY pyproject.toml poetry.lock /data_pipeline/
+COPY --from=builder /data_extraction /data_extraction
+COPY pyproject.toml poetry.lock /data_extraction/
 
-ENV PYTHONPATH=/data_pipeline
+ENV PYTHONPATH=/data_extraction
 
 
 # Runtime image for CLI (default runs the CLI)
