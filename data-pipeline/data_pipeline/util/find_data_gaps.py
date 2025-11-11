@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """
-Script to identify gaps in the dataset at data/data-0.
+Script to identify gaps in the dataset.
 
 Expected intervals:
 - openmeteo/historical: 7 days (weekly)
 - pvoutput, visualcrossing/*: 1 day (daily)
 """
 
-import os
 import re
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Tuple
+
+from loaders import get_storage_client
+from loaders.factory import StorageClient
 
 
 def parse_date_from_filename(filename: str) -> datetime | None:
@@ -69,7 +71,7 @@ def find_gaps(dates: List[datetime], interval_days: int) -> List[Tuple[datetime,
     return gaps
 
 
-def analyze_dataset(base_path: Path) -> Dict[str, Dict[str, List[Tuple[datetime, datetime, int]]]]:
+def analyze_dataset(storage_client: StorageClient) -> Dict[str, Dict[str, List[Tuple[datetime, datetime, int]]]]:
     """
     Analyze the entire dataset and find gaps.
     Returns nested dict: {dataset_path: {entity_id: [gaps]}}
@@ -86,9 +88,10 @@ def analyze_dataset(base_path: Path) -> Dict[str, Dict[str, List[Tuple[datetime,
     ]
     
     for dataset_path in dataset_paths:
-        full_path = base_path / dataset_path
-        
-        if not full_path.exists():
+        # Use polymorphic list_files method - works for both local and GDrive
+        files = storage_client.list_files(folder_path=dataset_path, pattern='*.csv')
+
+        if not files:
             continue
         
         interval_days = get_expected_interval(dataset_path)
@@ -96,10 +99,9 @@ def analyze_dataset(base_path: Path) -> Dict[str, Dict[str, List[Tuple[datetime,
         # Group files by entity ID
         entity_files = defaultdict(list)
         
-        for filename in os.listdir(full_path):
-            if not filename.endswith('.csv'):
-                continue
-            
+        for file_info in files:
+            filename = file_info['name']
+
             date = parse_date_from_filename(filename)
             if date is None:
                 continue
@@ -246,12 +248,12 @@ def get_source_name(dataset_path: str) -> str:
         return 'unknown'
 
 
-def generate_docker_commands(results: Dict[str, Dict[str, List[Tuple[datetime, datetime, int]]]]) -> str:
+def generate_docker_commands(results: Dict[str, Dict[str, List[Tuple[datetime, datetime, int]]]], local_dir: str | None) -> str:
     """
     Generate Docker Compose commands to rectify the identified gaps.
 
     Commands are in the format:
-    docker compose run --rm producer python processing/producer.py <source> <entities> -d <start> -e <end> [-w]
+    docker compose run --rm producer python processing/producer.py <source> <entities> -d <start> -e <end> [-w] [-l <local-dir>]
 
     Where:
     - <source> is the data source (pv, weather-om-15, weather-om-historical, etc.)
@@ -259,6 +261,7 @@ def generate_docker_commands(results: Dict[str, Dict[str, List[Tuple[datetime, d
     - <start> is the inclusive start date (YYYY-MM-DD)
     - <end> is the exclusive end date (YYYY-MM-DD)
     - -w flag is only included for weekly-spaced data
+    - -l <local-dir> is included if local_dir is specified
     """
     lines = []
     lines.append("=" * 80)
@@ -296,6 +299,10 @@ def generate_docker_commands(results: Dict[str, Dict[str, List[Tuple[datetime, d
             if interval_days == 7:
                 command += " -w"
 
+            # Add -l flag if local directory is specified
+            if local_dir:
+                command += f" -l {local_dir}"
+
             lines.append(command)
             total_commands += 1
 
@@ -313,27 +320,27 @@ def main():
     parser = argparse.ArgumentParser(description="Analyze dataset gaps and generate reports or commands.")
     parser.add_argument('--generate-commands', action='store_true',
                         help="Generate Docker Compose commands to rectify gaps")
+    parser.add_argument('-l', '--local-dir', type=str, default=None,
+                        help='Analyze files in a local directory instead of Google Drive. Specify the directory path.')
 
     args = parser.parse_args()
 
-    # Get the base data path
-    script_dir = Path(__file__).parent
-    data_path = script_dir.parent.parent.parent / "data" / "data-0"
-    
-    if not data_path.exists():
-        print(f"Error: Data path does not exist: {data_path}")
-        return 1
-    
-    print(f"Analyzing dataset at: {data_path}")
+    # Get the storage client
+    storage_client = get_storage_client(args.local_dir)
+
+    if args.local_dir:
+        print(f"Analyzing local dataset at: {args.local_dir}")
+    else:
+        print("Analyzing dataset on Google Drive")
+
     print("This may take a moment...\n")
     
     # Analyze the dataset
-    results = analyze_dataset(data_path)
-    
+    results = analyze_dataset(storage_client)
+
     if args.generate_commands:
         # Generate and print Docker commands
-        commands = generate_docker_commands(results)
-        print("Generated Docker Compose commands:")
+        commands = generate_docker_commands(results, args.local_dir)
         print(commands)
     else:
         # Generate and print report
@@ -341,6 +348,7 @@ def main():
         print(report)
 
         # Optionally save to file
+        script_dir = Path(__file__).parent
         output_file = script_dir / "data_gaps_report.txt"
         with open(output_file, 'w') as f:
             f.write(report)

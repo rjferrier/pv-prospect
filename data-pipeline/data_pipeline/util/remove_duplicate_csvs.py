@@ -5,8 +5,8 @@ from loaders.gdrive import GDriveClient, ResolvedFilePath
 
 def get_folder_id(client: GDriveClient, folder_path: str | None) -> str | None:
     """
-    Get folder ID from a path like 'data/pvoutput' or just 'pvoutput'.
-    Returns None if folder_path is None (searches from root).
+    Get folder ID from a path like 'pvoutput'.
+    Returns the root data folder ID  if folder_path is None.
     """
     if folder_path is None:
         return None
@@ -65,10 +65,10 @@ def remove_duplicate_csvs(folder_path: str | None, dry_run: bool = False):
         dry_run: If True, only print what would be deleted without actually deleting
     """
     client = GDriveClient.build_service()
-    root_folder_id = get_folder_id(client, folder_path)
+    parent_folder_id = get_folder_id(client, folder_path)
     
     # Only search for CSV files
-    files = list_files_recursive(client, root_folder_id, mime_type='text/csv')
+    files = list_files_recursive(client, parent_folder_id, mime_type='text/csv')
 
     # Group files by (parent_id, name) to find duplicates in the same folder
     files_by_location = defaultdict(list)
@@ -114,7 +114,7 @@ if __name__ == '__main__':
         'folder_path',
         nargs='?',
         default=None,
-        help='Path to folder in Google Drive (e.g., "data/pvoutput"). If omitted, searches from root.'
+        help='Path to folder in Google Drive (e.g., "pvoutput"). If omitted, searches from the root data folder.'
     )
     parser.add_argument(
         '--dry-run',

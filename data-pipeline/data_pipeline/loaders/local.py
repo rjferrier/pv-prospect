@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import shutil
 from pathlib import Path
 from typing import Iterable
 
@@ -124,3 +125,105 @@ class LocalStorageClient:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
         
         print(f"    Written metadata to: {full_path}")
+
+    def list_files(self, folder_path: str | None = None, pattern: str = "*", recursive: bool = False) -> list[dict]:
+        """
+        List files in a local directory.
+
+        Args:
+            folder_path: The relative path to the folder (e.g., 'data/pvoutput'). If None, lists from base_dir.
+            pattern: Glob pattern for matching files (e.g., '*.csv')
+            recursive: If True, recursively list files in subdirectories
+
+        Returns:
+            List of dicts with 'id' (path), 'name', 'path' (relative to base_dir), and 'parent_path'
+        """
+        if folder_path:
+            search_dir = self.base_dir / folder_path
+        else:
+            search_dir = self.base_dir
+
+        if not search_dir.exists():
+            return []
+
+        files = []
+        glob_pattern = f"**/{pattern}" if recursive else pattern
+
+        for file_path in search_dir.glob(glob_pattern):
+            if file_path.is_file():
+                relative_path = file_path.relative_to(self.base_dir)
+                parent_path = str(relative_path.parent) if relative_path.parent != Path('.') else ''
+
+                files.append({
+                    'id': str(relative_path),  # Use relative path as ID
+                    'name': file_path.name,
+                    'path': str(relative_path),
+                    'parent_path': parent_path,
+                    'created_time': file_path.stat().st_ctime,
+                })
+
+        return files
+
+    def rename_file(self, file_path: str, new_name: str) -> None:
+        """
+        Rename a file in local storage.
+
+        Args:
+            file_path: The current relative path to the file
+            new_name: The new name for the file (not a full path, just the filename)
+        """
+        full_path = self.base_dir / file_path
+
+        if not full_path.exists():
+            raise FileNotFoundError(f"File not found: {full_path}")
+
+        new_path = full_path.parent / new_name
+        full_path.rename(new_path)
+
+    def move_file(self, file_path: str, new_parent_path: str) -> None:
+        """
+        Move a file to a different directory in local storage.
+
+        Args:
+            file_path: The current relative path to the file
+            new_parent_path: The relative path to the new parent directory
+        """
+        full_path = self.base_dir / file_path
+
+        if not full_path.exists():
+            raise FileNotFoundError(f"File not found: {full_path}")
+
+        new_parent_full = self.base_dir / new_parent_path
+        new_parent_full.mkdir(parents=True, exist_ok=True)
+
+        new_path = new_parent_full / full_path.name
+        full_path.rename(new_path)
+
+    def trash_file(self, file_path: str) -> None:
+        """
+        Move a file to a .trash subdirectory in local storage.
+
+        Args:
+            file_path: The relative path to the file
+        """
+        full_path = self.base_dir / file_path
+
+        if not full_path.exists():
+            raise FileNotFoundError(f"File not found: {full_path}")
+
+        # Create a .trash directory
+        trash_dir = self.base_dir / '.trash'
+        trash_dir.mkdir(exist_ok=True)
+
+        # Move to trash, preserving directory structure
+        relative_path = Path(file_path)
+        trash_dest = trash_dir / relative_path
+        trash_dest.parent.mkdir(parents=True, exist_ok=True)
+
+        # If file already exists in trash, add a timestamp
+        if trash_dest.exists():
+            import time
+            timestamp = int(time.time())
+            trash_dest = trash_dest.parent / f"{trash_dest.stem}_{timestamp}{trash_dest.suffix}"
+
+        shutil.move(str(full_path), str(trash_dest))
