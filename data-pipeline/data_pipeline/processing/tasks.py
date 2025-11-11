@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from domain import DateRange
 from extractors import get_extractor, SourceDescriptor
 from loaders import build_csv_file_path, get_storage_client
@@ -6,11 +8,16 @@ from .value_objects import Task, Result
 from .worker import app
 
 
+TIMESERIES_FOLDER = 'timeseries'
+METADATA_FOLDER = 'metadata'
+
+
 @app.task
-def create_folder(
+def create_folders(
         source_descriptor: SourceDescriptor,
         local_dir: str | None,
-) -> str | None:
+        include_metadata: bool
+) -> list[str]:
     """
     Create folder structure for a data source.
 
@@ -19,8 +26,12 @@ def create_folder(
         local_dir: If provided, a local directory path where folders will be created instead of Google Drive.
     """
     storage_client = get_storage_client(local_dir)
-    folder_id = storage_client.create_folder(source_descriptor)
-    return folder_id
+    parent_folders = [TIMESERIES_FOLDER, METADATA_FOLDER] if include_metadata else [TIMESERIES_FOLDER]
+    folder_ids = [
+        storage_client.create_folder(f"{parent}/{source_descriptor}")
+        for parent in parent_folders
+    ]
+    return folder_ids
 
 
 @app.task
@@ -50,12 +61,13 @@ def extract_and_load(
     """
     task = Task(source_descriptor, pv_system_id, date_range)
     file_path = build_csv_file_path(source_descriptor, pv_system_id, date_range.start)
+    timeseries_file_path = f"{TIMESERIES_FOLDER}/{file_path}"
 
     storage_client = get_storage_client(local_dir)
     build_pv_site_repo(storage_client)
 
     # Check if file already exists using polymorphic method
-    if storage_client.file_exists(file_path) and not overwrite:
+    if storage_client.file_exists(timeseries_file_path) and not overwrite:
         print(f"    {task}: File already exists")
         return Result.skipped_existing(task)
 
@@ -70,12 +82,13 @@ def extract_and_load(
         extraction_result = extractor.extract(pv_site, date_range.start, date_range.end)
 
         # Write CSV data using polymorphic method, pass overwrite flag
-        storage_client.write_csv(file_path, extraction_result.data, overwrite=overwrite)
+        storage_client.write_csv(timeseries_file_path, extraction_result.data, overwrite=overwrite)
 
         # Optionally write metadata JSON if requested and available
         if write_metadata and extraction_result.metadata:
+            metadata_file_path = f"{METADATA_FOLDER}/{file_path}"
             try:
-                storage_client.write_metadata(file_path, extraction_result.metadata)
+                storage_client.write_metadata(metadata_file_path, extraction_result.metadata)
             except Exception as meta_e:
                 print(f"    {task}: WARNING - failed to write metadata: {meta_e}")
 
@@ -85,5 +98,4 @@ def extract_and_load(
     except Exception as e:
         print(f"    {task}: ERROR: {e}")
         return Result.failure(task, e)
-
 

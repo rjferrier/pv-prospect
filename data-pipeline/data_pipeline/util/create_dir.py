@@ -9,7 +9,7 @@ def create_dir(source_file: Optional[str], destination_path: Optional[str], loca
     dest = _derive_dest_for_create(destination_path, source_file)
 
     storage_client = get_storage_client(local_dir)
-    created = storage_client.create_folder(dest)
+    created = storage_client.create_folders(dest)
     if created:
         print(f"✓ Created directory: {dest}")
     else:

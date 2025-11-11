@@ -7,7 +7,7 @@ from celery.result import ResultSet, AsyncResult
 from config import EtlConfig
 from domain import DateRange
 from extractors import SourceDescriptor
-from .tasks import create_folder, extract_and_load
+from .tasks import create_folders, extract_and_load
 
 
 @dataclass
@@ -41,10 +41,12 @@ class TaskQueuer:
             join_timeout=config.join_timeout,
         )
 
-    def create_folders(self, source_descriptors: list[SourceDescriptor], local_dir: str | None) -> AsyncResultsWrapper:
+    def create_folders(
+            self, source_descriptors: list[SourceDescriptor], local_dir: str | None, include_metadata: bool
+    ) -> AsyncResultsWrapper:
         print(f"Creating folders for:", ', '.join(source_descriptors))
         results_async = [
-            create_folder.apply_async(args=(sd, local_dir), countdown=self._calculate_delay(i))
+            create_folders.apply_async(args=(sd, local_dir, include_metadata), countdown=self._calculate_delay(i))
             for i, sd in enumerate(source_descriptors)
         ]
         return self._wrap_async_results(results_async, _create_folders_callback)
@@ -86,8 +88,8 @@ class TaskQueuer:
         return AsyncResultsWrapper(self.join_timeout, async_results, callback)
 
 
-def _create_folders_callback(results: list[str]):
-    folder_ids = [r for r in results if r]
+def _create_folders_callback(results: list[list[str]]):
+    folder_ids = [el for sublist in results for el in sublist if el]
     if not folder_ids:
         print(f"No new folders to create.")
         return

@@ -176,7 +176,9 @@ def _main(config, args):
         raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(source_descriptor_keys)}")
 
     source_descriptors = [SOURCE_DESCRIPTORS[source] for source in sources]
-    task_queuer.create_folders(source_descriptors, args.local_dir).wait_for_completion()
+    task_queuer.create_folders(
+        source_descriptors, args.local_dir, args.write_metadata
+    ).wait_for_completion()
 
     pv_system_ids = (
         _parse_pv_system_ids(args.system_ids) if args.system_ids else
