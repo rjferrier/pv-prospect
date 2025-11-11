@@ -11,6 +11,7 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.12"
+pyspark = "^3.5.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }
