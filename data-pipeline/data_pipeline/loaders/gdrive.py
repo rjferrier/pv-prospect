@@ -162,7 +162,7 @@ class GDriveClient:
 
         return existing_folders[0]["id"]
 
-    def create_folder(self, folder_path: str) -> None:
+    def create_folder(self, folder_path: str) -> str | None:
         """
         Creates a folder path in Google Drive (e.g., 'pvoutput').
         Creates all intermediate folders if they don't exist.
@@ -170,11 +170,15 @@ class GDriveClient:
         Args:
             folder_path: The folder path as a string (e.g., 'pvoutput')
 
+        Returns:
+            str | None: The ID of the final folder in the path, or None if no folders were created
+
         Raises:
             HttpError: If the API request fails
         """
         parts = [p for p in _get_full_path(folder_path).split('/') if p]
         parent_id = None
+        created_any = False
 
         for part in parts:
             resolved_path = ResolvedFilePath(name=part, parent_id=parent_id)
@@ -184,7 +188,10 @@ class GDriveClient:
                 parent_id = self.get_folder(resolved_path)
             except FileNotFoundError:
                 parent_id = self._create_folder_internal(resolved_path)
+                created_any = True
                 print(f"    Created folder: {part}")
+
+        return parent_id if created_any else None
 
     def _create_folder_internal(self, folder_path: ResolvedFilePath) -> str:
         """

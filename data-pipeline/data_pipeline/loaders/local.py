@@ -18,16 +18,25 @@ class LocalStorageClient:
         self.base_dir = Path(base_dir).resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
     
-    def create_folder(self, folder_path: str) -> None:
+    def create_folder(self, folder_path: str) -> str | None:
         """
         Create a folder structure in the local storage.
 
         Args:
             folder_path: The relative path to the folder (e.g., 'data/pvoutput')
+
+        Returns:
+            str | None: The full path to the folder if it was created, or None if it already existed
         """
         full_path = self.base_dir / folder_path
+
+        # Check if folder already exists
+        if full_path.exists():
+            return None
+
         full_path.mkdir(parents=True, exist_ok=True)
         print(f"    Created folder: {full_path}")
+        return str(full_path)
 
     def file_exists(self, file_path: str) -> bool:
         """

@@ -10,7 +10,7 @@ from .worker import app
 def create_folder(
         source_descriptor: SourceDescriptor,
         local_dir: str | None,
-) -> None:
+) -> str | None:
     """
     Create folder structure for a data source.
 
@@ -19,8 +19,8 @@ def create_folder(
         local_dir: If provided, a local directory path where folders will be created instead of Google Drive.
     """
     storage_client = get_storage_client(local_dir)
-    storage_client.create_folder(source_descriptor)
-    print(f"Created folder structure for {source_descriptor}")
+    folder_id = storage_client.create_folder(source_descriptor)
+    return folder_id
 
 
 @app.task

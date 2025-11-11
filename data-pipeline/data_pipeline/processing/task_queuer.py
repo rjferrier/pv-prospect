@@ -41,16 +41,13 @@ class TaskQueuer:
             join_timeout=config.join_timeout,
         )
 
-    @staticmethod
-    def get_pv_sites_by_system_id(file_path: str, local_dir: str | None) -> AsyncResult:
-        return get_pv_sites_by_system_id.apply_async(args=(file_path, local_dir))
-
     def create_folders(self, source_descriptors: list[SourceDescriptor], local_dir: str | None) -> AsyncResultsWrapper:
+        print(f"Creating folders for:", ', '.join(source_descriptors))
         results_async = [
             create_folder.apply_async(args=(sd, local_dir), countdown=self._calculate_delay(i))
             for i, sd in enumerate(source_descriptors)
         ]
-        return self._wrap_async_results(results_async, lambda results: print(f"Created folders: {results}"))
+        return self._wrap_async_results(results_async, _create_folders_callback)
 
     def extract_and_load(
             self,
@@ -87,3 +84,12 @@ class TaskQueuer:
             self, async_results: list[AsyncResult], callback: Callable[[list], None]
     ) -> AsyncResultsWrapper:
         return AsyncResultsWrapper(self.join_timeout, async_results, callback)
+
+
+def _create_folders_callback(results: list[str]):
+    folder_ids = [r for r in results if r]
+    if not folder_ids:
+        print(f"No new folders to create.")
+        return
+
+    print(f"Created folders:", folder_ids)
