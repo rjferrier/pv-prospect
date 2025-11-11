@@ -1,4 +1,6 @@
 [core]
-    remote = gdrive
+    remote = gcs
 ['remote "gdrive"']
     url = gdrive://1Y8zMI_ia_OdAJqg5xP03BV-FyDhKm2rY
+['remote "gcs"']
+    url = gs://pv-prospect-data
