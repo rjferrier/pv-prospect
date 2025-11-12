@@ -1,19 +1,23 @@
+import argparse
+import re
 from contextlib import contextmanager
 from pathlib import Path
-import argparse
-from collections import defaultdict
-import re
 
-from pyspark.sql import SparkSession
 from pyspark.sql import DataFrame
+from pyspark.sql import SparkSession
+
+from data_transformation.two_key_dict import TwoKeyDefaultDict
+
+# Pattern: {data_source}_{pv_site_id}_{YYYYMMDD} where pv_site_id and YYYYMMDD are digits
+CSV_FILENAME_PATTERN = re.compile(r'^(.+)_(\d+)_(\d{8})$')
 
 CSV_LOAD_BATCH_SIZE = 5
 
 
-def combine_csvs(source_path: str, output_path: str | None = None, recursive: bool = False) -> list[str]:
+def main(source_path: str, output_path: str | None = None, recursive: bool = False) -> list[str]:
     """
-    Combine CSV files from a local folder using Spark, grouping them by family (prefix).
-    A CSV family is defined by the filename format {prefix}_YYYYMMDD.csv.
+    Combine CSV files from a local folder using Spark, grouping them by data source and PV site.
+    A CSV family is defined by the filename format {data_source}_{pv_site_id}_{YYYYMMDD}.csv.
 
     Optionally recurse through subdirectories.
 
@@ -27,7 +31,7 @@ def combine_csvs(source_path: str, output_path: str | None = None, recursive: bo
         list[str]: List of paths to the created CSV files (one per family found).
 
     Raises:
-        ValueError: If no CSV files are found in the folder (and not recursive).
+        ValueError: If no CSV files are found in the folder.
         FileNotFoundError: If the folder doesn't exist.
     """
     source_path_obj = Path(source_path)
@@ -39,10 +43,16 @@ def combine_csvs(source_path: str, output_path: str | None = None, recursive: bo
         raise ValueError(f"Path is not a directory: {source_path}")
 
     output_path_obj = Path(output_path) if output_path else None
-    strategy = combine_csvs_recursively if recursive else combine_csvs_single_folder
+    data_collection_strategy = collect_data_recursively if recursive else collect_data
 
     with get_spark_session() as spark:
-        return strategy(spark, source_path_obj, output_path_obj)
+        combined_dataframe = data_collection_strategy(spark, source_path_obj, output_path_obj)
+
+        family_names_and_dataframes = ... # TODO
+        results = coalesce_csv_families(source_path, output_path, family_names_and_dataframes)
+
+    if not results:
+        raise ValueError(f"No CSV files found in folder: {source_path_obj.absolute()}")
 
 
 @contextmanager
@@ -68,7 +78,7 @@ def get_spark_session():
     spark.stop()
 
 
-def combine_csvs_recursively(spark: SparkSession, source_path: Path, output_path: Path | None) -> list[str]:
+def collect_data_recursively(spark: SparkSession, source_path: Path) -> TwoKeyDefaultDict[str, str, DataFrame]:
     """
     Recursively process all subdirectories containing CSV files and combine them by family.
 
@@ -99,118 +109,87 @@ def combine_csvs_recursively(spark: SparkSession, source_path: Path, output_path
     print(f"Found {len(folders_with_csvs)} folders with CSV files")
 
     # For each folder, combine CSVs by family
-    created_files = []
+    combined_dataframes = TwoKeyDefaultDict()
     for csv_folder in sorted(folders_with_csvs):
         print(f"\nProcessing folder: {csv_folder}")
-        if output_path is None:
-            folder_output_path = None
-        else:
-            output_path.mkdir(parents=True, exist_ok=True)
-            folder_output_path = output_path
-        results = combine_csvs_in_folder(spark, csv_folder, folder_output_path)
-        created_files.extend(results)
 
-    return created_files
+        dataframes = collect_data(spark, csv_folder)
+        combined_dataframes.update(dataframes)
+
+    return combined_dataframes
 
 
-
-def combine_csvs_single_folder(spark: SparkSession, source_path: Path, output_path: Path | None) -> list[str]:
+def collect_data(spark: SparkSession, source_folder_path: Path) -> TwoKeyDefaultDict[str, str, DataFrame]:
     """
-    Process CSV files in a single folder (non-recursive wrapper).
+    Collect and combine CSV files from a single folder using Spark, grouping them by family.
+    A CSV family is defined by the filename format {data_source}_{pv_site_id}_{YYYYMMDD}.csv.
 
-    This is a wrapper around combine_csvs_in_folder that raises an error if no CSV files
-    are found, making it suitable for single-folder processing mode.
+    For each family, all matching CSV files are combined into a single DataFrame.
+    Only CSVs directly in the given folder are processed (no recursion).
 
     Args:
         spark (SparkSession): The Spark session to use for processing.
-        source_path (Path): The path to the folder containing CSV files.
-        output_path (Path | None): Path where to save the output CSV files. Must be a folder path.
-                                    If None, saves in the same folder as the input files.
+        source_folder_path (Path): The path to the folder containing CSV files.
 
     Returns:
-        list[str]: List of paths to the created CSV files (one per family).
-
-    Raises:
-        ValueError: If no CSV files are found in the folder.
-    """
-    # Process only the specified folder
-    results = combine_csvs_in_folder(spark, source_path, output_path)
-
-    if not results:
-        raise ValueError(f"No CSV files found in folder: {source_path.absolute()}")
-
-    return results
-
-
-def combine_csvs_in_folder(spark: SparkSession, source_path: Path, output_path: Path | None) -> list[str]:
-    """
-    Combine CSV files from a single folder using Spark, grouping them by family (prefix).
-    A CSV family is defined by the filename format {prefix}_YYYYMMDD.csv.
-
-    For each family, all matching CSV files are combined into a single CSV file.
-    Only CSVs directly in the given folder are combined (no recursion).
-
-    Args:
-        spark (SparkSession): The Spark session to use for processing.
-        source_path (Path): The path to the folder containing CSV files.
-        output_path (Path | None): Path where to save the output CSV files. Must be a folder path.
-                                    If None, saves in the same folder as the input files.
-
-    Returns:
-        list[str]: List of paths to the created CSV files (one per family), or empty list if no CSV files found.
+        TwoKeyDefaultDict[str, str, DataFrame]: A dictionary mapping (data_source, pv_site_id)
+                                                 to combined DataFrames, or empty dict if no CSV files found.
     """
     # Only combine CSVs directly in this folder (not in subfolders)
-    folder_csv_files = sorted([f for f in source_path.glob('*.csv') if not f.stem.endswith('_combined')])
+    folder_csv_filenames = sorted([f for f in source_folder_path.glob('*.csv') if not f.stem.endswith('_combined')])
 
-    if not folder_csv_files:
-        return []
+    if not folder_csv_filenames:
+        return TwoKeyDefaultDict()
 
-    # Group CSV files by family (prefix)
-    # Pattern: {prefix}_YYYYMMDD.csv where YYYYMMDD is 8 digits
-    families = defaultdict(list)
-    date_pattern = re.compile(r'^(.+)_(\d{8})$')
+    csv_filenames = TwoKeyDefaultDict(list)
 
-    for csv_file in folder_csv_files:
-        match = date_pattern.match(csv_file.stem)
+    for filename in folder_csv_filenames:
+        match = CSV_FILENAME_PATTERN.match(filename.stem)
         if match:
-            prefix = match.group(1)
-            families[prefix].append(csv_file)
+            data_source, pv_site_id = match.group(1), match.group(2)
+            csv_filenames[data_source, pv_site_id].append(filename)
         else:
-            # Files that don't match the pattern are treated as their own family
-            families[csv_file.stem].append(csv_file)
+            print(f"    Skipped {filename}")
+
+    def to_dataframe(filenames_: list[Path]) -> DataFrame:
+        return CsvTransformer(spark).read_and_combine_csvs(filenames_)
+
+    return csv_filenames.map_values(to_dataframe)
+
+
+def coalesce_csv_families(
+        source_folder_path: Path,
+        output_folder_path: Path | None,
+        filename_stems_and_dataframes: list[tuple[str, DataFrame]]
+) -> list[str]:
 
     created_files = []
 
-    for prefix, files in sorted(families.items()):
-        output_name = f"{prefix}.csv"
+    for family_name, dataframe in filename_stems_and_dataframes:
+        output_name = f"{family_name}.csv"
 
-        if output_path is None:
-            output_file = source_path / output_name
+        if output_folder_path is None:
+            output_path = source_folder_path / output_name
         else:
-            # output_path should be a directory
-            output_path.mkdir(parents=True, exist_ok=True)
-            output_file = output_path / output_name
+            # output_folder_path should be a directory
+            output_folder_path.mkdir(parents=True, exist_ok=True)
+            output_path = output_folder_path / output_name
 
-        print(f"Processing family: {prefix} ({len(files)} file(s))")
-
-        # Read and combine CSV files efficiently
-        combined_df = CsvTransformer(spark).read_and_combine_csvs(files)
-
-        if combined_df is None:
+        if dataframe is None:
             # Create an empty file if all files failed to load
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            output_file.write_text('')
-            print(f"  Created empty output file {output_file}")
-            created_files.append(str(output_file))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text('')
+            print(f"  Created empty output file {output_path}")
+            created_files.append(str(output_path))
             continue
 
         # Get total row count
-        row_count = combined_df.count()
+        row_count = dataframe.count()
 
         # Write the combined dataframe to a single CSV file
         # Using coalesce(1) to write to a single file
-        temp_output = output_file.parent / f"{output_file.stem}_temp"
-        combined_df.coalesce(1).write.csv(
+        temp_output = output_path.parent / f"{output_path.stem}_temp"
+        dataframe.coalesce(1).write.csv(
             str(temp_output),
             header=True,
             mode='overwrite',
@@ -221,16 +200,16 @@ def combine_csvs_in_folder(spark: SparkSession, source_path: Path, output_path: 
         csv_parts = list(temp_output.glob('*.csv'))
         if csv_parts:
             # Move the CSV file to the desired location
-            csv_parts[0].rename(output_file)
+            csv_parts[0].rename(output_path)
             # Clean up the temp directory
             import shutil
             shutil.rmtree(temp_output)
-            print(f"  Successfully created {output_file} with {row_count} data rows")
+            print(f"  Successfully created {output_path} with {row_count} data rows")
         else:
-            print(f"  Warning: No CSV file generated for {prefix}")
+            print(f"  Warning: No CSV file generated for {family_name}")
             continue
 
-        created_files.append(str(output_file))
+        created_files.append(str(output_path))
 
     return created_files
 
@@ -314,6 +293,15 @@ class CsvTransformer:
         return batch_df
 
     def _read_csv(self, path_or_paths: str | list[str]) -> DataFrame:
+        """
+        Read CSV file(s) using Spark with standard settings.
+
+        Args:
+            path_or_paths: Single file path or list of file paths to read.
+
+        Returns:
+            DataFrame: The loaded DataFrame.
+        """
         return self._spark.read.csv(
             path_or_paths,
             header=True,
@@ -323,13 +311,13 @@ class CsvTransformer:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Combine CSV files by family (prefix) in a folder using Apache Spark. A CSV family has the format {prefix}_YYYYMMDD.csv")
+    parser = argparse.ArgumentParser(description="Combine CSV files by family in a folder using Apache Spark. A CSV family has the format {data_source}_{pv_site_id}_{YYYYMMDD}.csv")
     parser.add_argument('folder', type=str, help='Path to the folder containing CSV files (e.g., data/pvoutput)')
     parser.add_argument('-o', '--output', type=str, default=None, help='Path to folder where combined CSV files will be saved (optional)')
     parser.add_argument('-r', '--recursive', action='store_true', help='Recursively process all subdirectories')
 
     args = parser.parse_args()
-    result = combine_csvs(args.folder, args.output, args.recursive)
+    result = main(args.folder, args.output, args.recursive)
 
     print(f"\n{'='*60}")
     print(f"Created {len(result)} combined CSV file(s)")
