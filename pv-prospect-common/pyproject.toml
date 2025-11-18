@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "pv-prospect-common"
+version = "0.1.0"
+description = "Shared common models for PV Prospect projects"
+authors = ["RJ Ferrier <rjferrier@outlook.com>"]
+readme = "README.md"
+packages = [{include = "pv_prospect"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+[tool.poetry.group.dev.dependencies]
+ruff = { version = "^0.13" }
+mypy = { version = "^1.18" }
+pytest = "^9.0.1"
+
+[build-system]
+requires = ["poetry-core>=2.2.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
