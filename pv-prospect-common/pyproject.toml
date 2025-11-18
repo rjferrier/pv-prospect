@@ -8,6 +8,8 @@ packages = [{include = "pv_prospect"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
+spherical-coordinates = "^0.1.8"
+numpy = "^2.3.5"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }

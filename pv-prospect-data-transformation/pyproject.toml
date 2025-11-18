@@ -11,8 +11,9 @@ packages = [{include = "pv_prospect"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-pyspark = "^3.5.0"
 pv-prospect-common = {path = "../pv-prospect-common", develop = true}
+pyspark = "^4.0.1"
+solarpy = "^0.1.3"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }

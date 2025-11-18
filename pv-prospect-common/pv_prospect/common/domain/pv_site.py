@@ -2,6 +2,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional, List
 
+from numpy import deg2rad
+from spherical_coordinates import az_zd_to_cx_cy_cz
+
 from .location import Location
 
 
@@ -10,6 +13,19 @@ class PanelGeometry:
     azimuth: int
     tilt: int
     area_fraction: float
+
+    @property
+    def azimuth_radians(self) -> float:
+        return deg2rad(self.azimuth)
+
+    @property
+    def tilt_radians(self) -> float:
+        return deg2rad(self.tilt)
+
+    @property
+    def v_norm(self) -> tuple[float, float, float]:
+        cx_cy_cz = az_zd_to_cx_cy_cz(self.azimuth_radians, self.tilt_radians)
+        return cx_cy_cz[0], cx_cy_cz[1], -cx_cy_cz[2]
 
 
 @dataclass
