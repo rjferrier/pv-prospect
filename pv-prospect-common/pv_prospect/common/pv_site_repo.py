@@ -1,6 +1,6 @@
 import csv
 from datetime import date
-from io import BytesIO
+from io import TextIOWrapper
 from typing import Optional
 
 from .domain import PVSite, Location, System, PanelGeometry
@@ -9,16 +9,16 @@ from .domain import PVSite, Location, System, PanelGeometry
 pv_sites_by_system_id = {}
 
 
-def build_pv_site_repo(csv_stream: BytesIO) -> None:
+def build_pv_site_repo(csv_stream: TextIOWrapper) -> None:
     """
-    Build the PV site repository by loading PV site data from a CSV bytes stream.
+    Build the PV site repository by loading PV site data from a CSV text stream.
     Or simply return if it is already built.
 
-    This function reads the CSV data from the bytes stream, parses it, and populates
+    This function reads the CSV data from the text stream, parses it, and populates
     the module-level pv_sites_by_system_id dictionary with PVSite objects.
 
     Args:
-        csv_stream: stream of bytes representing a CSV file.
+        csv_stream: text stream representing a CSV file.
 
     Raises:
         FileNotFoundError: If pv_sites.csv is not found in storage.
@@ -27,11 +27,10 @@ def build_pv_site_repo(csv_stream: BytesIO) -> None:
     if len(pv_sites_by_system_id) != 0:
         return
 
-    # Decode the BytesIO stream to text for csv.DictReader
+    # Read directly from the text stream
     csv_stream.seek(0)
-    text_stream = csv_stream.read().decode('utf-8')
 
-    reader = csv.DictReader(text_stream.splitlines())
+    reader = csv.DictReader(csv_stream)
     for row in reader:
         pv_site = _create_pv_site_from_csv_row(row)
         pv_sites_by_system_id[pv_site.pvo_sys_id] = pv_site
@@ -63,11 +62,10 @@ def get_pv_site_by_system_id(system_id: int) -> PVSite:
     return pv_sites_by_system_id[system_id]
 
 
-def create_pv_sites_by_system_id(pv_site_csv_stream: BytesIO) -> dict[int, PVSite]:
+def create_pv_sites_by_system_id(pv_site_csv_stream: TextIOWrapper) -> dict[int, PVSite]:
     pv_site_csv_stream.seek(0)
-    text_stream = pv_site_csv_stream.read().decode('utf-8')
 
-    reader = csv.DictReader(text_stream.splitlines())
+    reader = csv.DictReader(pv_site_csv_stream)
     pv_sites = (_create_pv_site_from_csv_row(row) for row in reader)
     return {pv_site.pvo_sys_id: pv_site for pv_site in pv_sites}
 

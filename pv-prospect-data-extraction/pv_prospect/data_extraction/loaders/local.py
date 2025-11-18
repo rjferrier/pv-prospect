@@ -52,15 +52,15 @@ class LocalStorageClient:
         full_path = self.base_dir / file_path
         return full_path.exists()
     
-    def read_file(self, file_path: str) -> io.BytesIO:
+    def read_file(self, file_path: str) -> io.TextIOWrapper:
         """
-        Read a file from local storage and return it as a BytesIO stream.
+        Read a file from local storage and return it as a text stream.
 
         Args:
             file_path: The relative path to the file (e.g., 'data/pvoutput/file.csv')
 
         Returns:
-            io.BytesIO: A BytesIO stream containing the file content
+            io.TextIOWrapper: A text stream containing the file content with UTF-8 encoding
 
         Raises:
             FileNotFoundError: If the file doesn't exist
@@ -70,10 +70,7 @@ class LocalStorageClient:
         if not full_path.exists():
             raise FileNotFoundError(f"File not found: {full_path}")
 
-        with open(full_path, 'rb') as f:
-            content = f.read()
-
-        return io.BytesIO(content)
+        return open(full_path, 'r', encoding='utf-8')
 
     def write_csv(self, file_path: str, rows: Iterable[Iterable[str]], overwrite: bool = False) -> None:
         """

@@ -1,4 +1,4 @@
-from io import BytesIO
+from io import TextIOWrapper
 from typing import Protocol, Iterable
 
 from pv_prospect.data_extraction.loaders.gdrive import GDriveClient
@@ -6,8 +6,8 @@ from pv_prospect.data_extraction.loaders.local import LocalStorageClient
 
 
 class StorageClient(Protocol):
-    def read_file(self, file_path: str) -> BytesIO:
-        """Read a file and return its contents as a BytesIO stream."""
+    def read_file(self, file_path: str) -> TextIOWrapper:
+        """Read a file and return its contents as a text stream."""
         ...
 
     def create_folder(self, folder_path: str) -> str | None:

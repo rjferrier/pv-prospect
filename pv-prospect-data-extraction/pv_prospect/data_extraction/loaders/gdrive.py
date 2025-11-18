@@ -336,15 +336,15 @@ class GDriveClient:
             print(f"Error while moving file {file_id}: {error}")
             raise
 
-    def read_file(self, file_path: str) -> io.BytesIO:
+    def read_file(self, file_path: str) -> io.TextIOWrapper:
         """
-        Read a file from Google Drive and return it as a BytesIO stream.
+        Read a file from Google Drive and return it as a text stream.
 
         Args:
             file_path: The file path as a string (e.g., 'pvoutput/file.csv')
 
         Returns:
-            io.BytesIO: A BytesIO stream containing the file content
+            io.TextIOWrapper: A text stream containing the file content with UTF-8 encoding
 
         Raises:
             FileNotFoundError: If the file doesn't exist
@@ -357,7 +357,8 @@ class GDriveClient:
         self._download_to_stream(file_id, stream)
         stream.seek(0)
 
-        return stream
+        # Wrap BytesIO with TextIOWrapper for text operations
+        return io.TextIOWrapper(stream, encoding='utf-8')
 
     @retry_on_500
     def rename_file(self, file_id: str, new_name: str) -> None:
