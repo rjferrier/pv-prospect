@@ -1,44 +1,67 @@
-import sys
 from datetime import datetime
-from typing import Collection
+from typing import Collection, Iterable
 
+import pandas as pd
 from pv_prospect.common import PVSite, Location, PanelGeometry
-from pyspark.sql import DataFrame, functions as f
+from pytz import timezone
 from solarpy import standard2solar_time, irradiance_on_plane, beam_irradiance
 
-MACHINE_EPSILON = sys.float_info.epsilon
+from dataframe_functions import reduce_rows
+
 ALTITUDE = 0
 
-
-def preprocess(openmeteo: DataFrame, pvoutput: DataFrame, pv_site: PVSite) -> DataFrame:
-    _normalise_pvoutput_datetimes(pvoutput)
-    # to be continued
-    return ...
+UKTZ = timezone('Europe/London')
+UTC = timezone('UTC')
 
 
-def _normalise_pvoutput_datetimes(df: DataFrame) -> DataFrame:
-    ts = f.to_timestamp(f.concat_ws('T', f.col('date').cast('string'), f.date_format(f.col('time'), "HH:mm:ss")), "yyyyMMdd'T'HH:mm:ss")
-    df = df.withColumn('time', f.to_utc_timestamp(ts, 'Europe/London'))
-    df.drop('date')
-
-
-def _calculate_solar_incidence_factor(dt: datetime, pv_site: PVSite) -> float:
-    solar_time = standard2solar_time(dt, pv_site.location.longitude)
-    return (
-            _calculate_irradiance_on_panels(solar_time, pv_site.location, pv_site.panel_geometries) /
-            _calculate_direct_normal_irradiance(solar_time, pv_site.location)
+def preprocess(openmeteo: pd.DataFrame, pvoutput: pd.DataFrame, pv_site: PVSite) -> pd.DataFrame:
+    openmeteo['time'] = pd.to_datetime(openmeteo['time'])
+    _clean_pvoutput_times(pvoutput)
+    pvo_reduced = reduce_rows(
+        pvoutput[['time', 'power']], openmeteo['time']
     )
+    joined = openmeteo.join(pvo_reduced.set_index('time'), on='time', how='inner')
+
+    # to be continued
+
+    return joined
 
 
-def _calculate_irradiance_on_panels(
+def _clean_pvoutput_times(df: pd.DataFrame) -> pd.DataFrame:
+    df['time'] = (
+        pd.to_datetime(df['date'].astype(str) + 'T' + df['time'])
+        .apply(_undo_uk_daylight_savings)
+    )
+    df.drop('date', axis=1, inplace=True)
+    return df
+
+
+def _undo_uk_daylight_savings(dt_local):
+    return UKTZ.localize(dt_local).astimezone(UTC).replace(tzinfo=None)
+
+
+def _calculate_solar_incidence_factor(
+        dt: datetime, location: Location, panel_geometries: Iterable[PanelGeometry]
+) -> float:
+    solar_time = standard2solar_time(dt, location.longitude)
+
+    dni = _calculate_direct_normal_irradiance(solar_time, location)
+    if dni <= 0:
+        return 1.0
+
+    gti = _calculate_global_tilted_irradiance(solar_time, location, panel_geometries)
+    return min(gti / dni, 1.0)
+
+
+def _calculate_global_tilted_irradiance(
         solar_time: datetime, loc: Location, panel_geometries: Collection[PanelGeometry]
 ) -> float:
     irradiances_per_panel_group = [
-        max(MACHINE_EPSILON, irradiance_on_plane(geom.v_norm, ALTITUDE, solar_time, loc.latitude)) * geom.area_fraction
+        irradiance_on_plane(geom.v_norm, ALTITUDE, solar_time, loc.latitude) * geom.area_fraction
         for geom in panel_geometries
     ]
     return sum(irradiances_per_panel_group)
 
 
 def _calculate_direct_normal_irradiance(solar_time: datetime, location: Location) -> float:
-    return max(MACHINE_EPSILON, beam_irradiance(ALTITUDE, solar_time, location.longitude))
+    return beam_irradiance(ALTITUDE, solar_time, location.longitude)
