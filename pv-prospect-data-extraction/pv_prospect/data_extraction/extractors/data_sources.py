@@ -1,11 +1,11 @@
 from enum import Enum
 from functools import lru_cache
 
-from .openmeteo import (
+from pv_prospect.data_extraction.extractors.openmeteo import (
     OpenMeteoWeatherDataExtractor, Mode as OMMode, APISelector, TimeResolution, Fields, Models
 )
-from .pvoutput import PVOutputExtractor
-from .visualcrossing import VCWeatherDataExtractor, Mode as VCMode
+from pv_prospect.data_extraction.extractors.pvoutput import PVOutputExtractor
+from pv_prospect.data_extraction.extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
 
 
 class SourceDescriptor(str, Enum):

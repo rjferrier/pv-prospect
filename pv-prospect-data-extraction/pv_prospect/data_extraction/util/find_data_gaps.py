@@ -227,10 +227,10 @@ def format_gap_report(results: Dict[str, Dict[str, List[Tuple[datetime, datetime
 
 def get_source_name(dataset_path: str) -> str:
     """
-    Map dataset path to producer.py source name.
+    Map dataset path to task_producer.py source name.
 
     Returns:
-        Source name for producer.py command
+        Source name for task_producer.py command
     """
     if 'pvoutput' in dataset_path:
         return 'pv'
@@ -253,7 +253,7 @@ def generate_docker_commands(results: Dict[str, Dict[str, List[Tuple[datetime, d
     Generate Docker Compose commands to rectify the identified gaps.
 
     Commands are in the format:
-    docker compose run --rm producer python processing/producer.py <source> <entities> -d <start> -e <end> [-w] [-l <local-dir>]
+    docker compose run --rm taskproducer <source> <entities> -d <start> -e <end> [-w] [-l <local-dir>]
 
     Where:
     - <source> is the data source (pv, weather-om-15, weather-om-historical, etc.)
@@ -291,7 +291,7 @@ def generate_docker_commands(results: Dict[str, Dict[str, List[Tuple[datetime, d
             entity_list = ','.join(sorted(entity_ids, key=int))
 
             # Format the command with entity IDs
-            command = (f"docker compose run --rm producer python processing/producer.py {source_name} "
+            command = (f"docker compose run --rm taskproducer {source_name} "
                       f"{entity_list} -d {gap_start.strftime('%Y-%m-%d')} "
                       f"-e {exclusive_end.strftime('%Y-%m-%d')}")
 

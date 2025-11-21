@@ -2,7 +2,7 @@ from celery import Celery
 import os
 
 # Import and register custom JSON serialization types
-from .serialization import register_custom_types
+from pv_prospect.data_extraction.processing.serialization import register_custom_types
 
 # Register custom types with Kombu's JSON serializer
 register_custom_types()
@@ -12,7 +12,12 @@ register_custom_types()
 broker_url = os.environ.get('CELERY_BROKER_URL', 'amqp://')
 result_backend = os.environ.get('CELERY_RESULT_BACKEND', 'rpc://')
 
-app = Celery('processor', broker=broker_url, backend=result_backend, include=['processing.tasks'])
+app = Celery(
+    'processor',
+    broker=broker_url,
+    backend=result_backend,
+    include=['pv_prospect.data_extraction.processing.tasks']
+)
 
 # Optional configuration, see the application user guide.
 app.conf.update(

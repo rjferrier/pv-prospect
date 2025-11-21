@@ -1,6 +1,5 @@
 import io
 import json
-import os
 import time
 import csv
 from contextlib import contextmanager
@@ -20,10 +19,11 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from importlib_resources import files
 
-import resources
+import pv_prospect.data_extraction.resources as resources
+
 
 CREDS_FILENAME = "gdrive_credentials.json"
-TOKEN_FILENAME = "token.json"
+TOKEN_FILENAME = "gdrive_token.json"
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
@@ -55,18 +55,28 @@ def get_credentials() -> Credentials:
         creds = _get_new_creds()
 
     # Save the credentials for the next run
-    with open(TOKEN_FILENAME, "w") as token:
+    token_path = files(resources).joinpath(TOKEN_FILENAME)
+    with token_path.open("w") as token:
         token.write(creds.to_json())
 
     return creds
 
 
 def _read_creds_from_token_file() -> Optional[Credentials]:
-    if not os.path.exists(TOKEN_FILENAME):
+    token_path = files(resources).joinpath(TOKEN_FILENAME)
+
+    # Check if token file exists
+    try:
+        with token_path.open("r") as f:
+            token_data = f.read()
+    except (FileNotFoundError, OSError):
+        return None
+
+    if not token_data:
         return None
 
     try:
-        return Credentials.from_authorized_user_file(TOKEN_FILENAME, SCOPES)
+        return Credentials.from_authorized_user_info(json.loads(token_data), SCOPES)
     except (ValueError, KeyError, json.JSONDecodeError):
         # Token file exists but is empty or malformed
         return None

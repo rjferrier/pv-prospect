@@ -7,7 +7,7 @@ from celery.result import ResultSet, AsyncResult
 from pv_prospect.data_extraction.config import EtlConfig
 from pv_prospect.common import DateRange
 from pv_prospect.data_extraction.extractors import SourceDescriptor
-from .tasks import create_folders, extract_and_load
+from pv_prospect.data_extraction.processing.tasks import create_folders, extract_and_load
 
 
 @dataclass

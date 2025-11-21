@@ -1,8 +1,8 @@
 from io import BytesIO
 from typing import Protocol, Iterable
 
-from loaders.gdrive import GDriveClient
-from loaders.local import LocalStorageClient
+from pv_prospect.data_extraction.loaders.gdrive import GDriveClient
+from pv_prospect.data_extraction.loaders.local import LocalStorageClient
 
 
 class StorageClient(Protocol):

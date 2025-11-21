@@ -13,27 +13,26 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: pv-prospect-data-extraction/Dockerfile
       target: worker
     container_name: pvprospect-dataextraction-worker
-    command: ["celery", "-A", "processing.worker", "worker", "--loglevel=info"]
     env_file:
       - worker.env
     environment:
       CELERY_BROKER_URL: "amqp://user:password@rabbitmq:5672//"
       CELERY_RESULT_BACKEND: "rpc://"
+    volumes:
+      - ./pv_prospect/data_extraction/resources/gdrive_credentials.json:/app/pv-prospect-data-extraction/pv_prospect/data_extraction/resources/gdrive_credentials.json:ro
+      - ./pv_prospect/data_extraction/resources/gdrive_token.json:/app/pv-prospect-data-extraction/pv_prospect/data_extraction/resources/gdrive_token.json:ro
     depends_on:
       - rabbitmq
-    volumes:
-      - ./data_extraction:/data_extraction:rw
-    working_dir: /data_extraction
     restart: on-failure
 
   flower:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: pv-prospect-data-extraction/Dockerfile
       target: flower
     container_name: pvprospect-dataextraction-flower
     ports:
@@ -44,26 +43,22 @@ services:
     depends_on:
       - rabbitmq
       - worker
-    volumes:
-      - ./data_extraction:/data_extraction:rw
-    working_dir: /data_extraction
     restart: on-failure
 
-  producer:
+  taskproducer:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: pv-prospect-data-extraction/Dockerfile
       target: cli
-    container_name: pvprospect-dataextraction-producer
+    container_name: pvprospect-dataextraction-taskproducer
     environment:
       CELERY_BROKER_URL: "amqp://user:password@rabbitmq:5672//"
       CELERY_RESULT_BACKEND: "rpc://"
+    volumes:
+      - ./pv_prospect/data_extraction/resources/gdrive_credentials.json:/app/pv-prospect-data-extraction/pv_prospect/data_extraction/resources/gdrive_credentials.json:ro
+      - ./pv_prospect/data_extraction/resources/gdrive_token.json:/app/pv-prospect-data-extraction/pv_prospect/data_extraction/resources/gdrive_token.json:ro
     depends_on:
       - rabbitmq
       - worker
-    volumes:
-      - ./data_extraction:/data_extraction:rw
-    working_dir: /data_extraction
-    # Don't auto-start - run on demand with: docker-compose run producer python processing/producer.py <args>
     profiles:
       - manual

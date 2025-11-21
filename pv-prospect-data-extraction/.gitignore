@@ -1,3 +1,3 @@
 worker.env
 **/gdrive_credentials.json
-**/token.json
+**/gdrive_token.json

@@ -1,17 +1,19 @@
-from pathlib import Path
+from io import TextIOWrapper
 
-from pv_prospect.common import DateRange
+from pv_prospect.common import DateRange, build_pv_site_repo, get_pv_site_by_system_id
 from pv_prospect.data_extraction.extractors import get_extractor, SourceDescriptor
 from pv_prospect.data_extraction.loaders import build_csv_file_path, get_storage_client
-from pv_prospect.data_extraction.processing.pv_site_repo import build_pv_site_repo, get_pv_site_by_system_id
-
-from .value_objects import Task, Result
-from .worker import app
-
+from pv_prospect.data_extraction.loaders.factory import StorageClient
+from pv_prospect.data_extraction.processing.value_objects import Task, Result
+from pv_prospect.data_extraction.processing.worker import app
 
 TIMESERIES_FOLDER = 'timeseries'
 METADATA_FOLDER = 'metadata'
 PV_SITES_CSV_FILE = 'pv_sites.csv'
+
+
+def get_pv_sites_csv_stream(storage_client: StorageClient) -> TextIOWrapper:
+    return storage_client.read_file(PV_SITES_CSV_FILE)
 
 
 @app.task
@@ -66,7 +68,7 @@ def extract_and_load(
     timeseries_file_path = f"{TIMESERIES_FOLDER}/{file_path}"
 
     storage_client = get_storage_client(local_dir)
-    csv_stream = storage_client.read_file(PV_SITES_CSV_FILE)
+    csv_stream = get_pv_sites_csv_stream(storage_client)
     build_pv_site_repo(csv_stream)
 
     # Check if file already exists using polymorphic method

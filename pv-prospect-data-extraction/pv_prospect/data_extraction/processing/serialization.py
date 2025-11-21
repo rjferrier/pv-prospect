@@ -4,7 +4,7 @@ from datetime import date
 from kombu.utils.json import register_type
 from pv_prospect.common import DateRange
 from pv_prospect.data_extraction.extractors import SourceDescriptor
-from .value_objects import Task, Result, ResultType, FailureDetails
+from pv_prospect.data_extraction.processing.value_objects import Task, Result, ResultType, FailureDetails
 
 
 def _encode_date(obj):

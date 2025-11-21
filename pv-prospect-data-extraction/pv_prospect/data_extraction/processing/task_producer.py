@@ -2,13 +2,13 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 from datetime import date, timedelta
 
 from pv_prospect.data_extraction.config import EtlConfig
-from pv_prospect.common import DateRange
-from pv_prospect.common.domain.date_range import Period
+from pv_prospect.common import DateRange, Period
+from pv_prospect.common.pv_site_repo import get_all_pv_system_ids, build_pv_site_repo
 from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.loaders import get_storage_client
 from pv_prospect.data_extraction.loaders.factory import StorageClient
-from pv_prospect.data_extraction.processing.pv_site_repo import get_all_pv_system_ids, build_pv_site_repo
 from pv_prospect.data_extraction.processing.task_queuer import TaskQueuer
+from pv_prospect.data_extraction.processing.tasks import get_pv_sites_csv_stream
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -25,7 +25,7 @@ SOURCE_DESCRIPTORS = {
 
 def _parse_args():
     parser = ArgumentParser(
-        prog='etl', formatter_class=lambda prog: RawTextHelpFormatter(prog, width=120)
+        prog='data-extraction-task-producer', formatter_class=lambda prog: RawTextHelpFormatter(prog, width=120)
     )
     parser.format_help()
     parser.add_argument(
@@ -160,7 +160,8 @@ def _parse_pv_system_ids(system_ids_str: str):
 
 
 def _get_all_pv_system_ids(storage_client: StorageClient) -> list[int]:
-    build_pv_site_repo(storage_client)
+    csv_stream = get_pv_sites_csv_stream(storage_client)
+    build_pv_site_repo(csv_stream)
     return get_all_pv_system_ids()
 
 
