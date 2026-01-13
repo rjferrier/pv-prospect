@@ -81,10 +81,9 @@ def _create_pv_site_from_csv_row(row: dict) -> PVSite:
         PVSite: The constructed PVSite object
     """
     # Convert string values to appropriate types
-    location = Location(
+    location = Location.from_floats(
         latitude=float(row['latitude']),
         longitude=float(row['longitude']),
-        shading=row['shading']
     )
 
     # Create panel and inverter systems
@@ -114,6 +113,7 @@ def _create_pv_site_from_csv_row(row: dict) -> PVSite:
         pvo_sys_id=int(row['pvoutput_system_id']),
         name=row['name'],
         location=location,
+        shading=row['shading'],
         panel_system=panel_system,
         panel_geometries=panel_geometries,
         inverter_system=inverter_system,

@@ -2,18 +2,18 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, date, time
 from enum import Enum
-from typing import Callable
+from typing import Callable, Collection
 
 import requests
-from typing_extensions import deprecated
-
-from pv_prospect.common import Location, PVSite
-from pv_prospect.data_extraction.extractors import ExtractionResult
+from pv_prospect.common import BoundingBox, Location, PVSite
+from pv_prospect.data_extraction.extractors import TimeSeriesDescriptor, TimeSeries
 from pv_prospect.data_extraction.util import retry_on_429
-
+from typing_extensions import deprecated
 
 MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)
+
+GRID_STEP = 0.2
 
 CONSTANT_QUERY_PARAMS = {
     # 'timezone': 'Europe/London',
@@ -125,7 +125,24 @@ class Models(Enum):
 
 
 @dataclass(frozen=True)
+class OpenMeteoTimeSeriesDescriptor:
+    location: Location
+
+    def __str__(self) -> str:
+        # Round to 4 decimal places and strip the decimal point
+        lat = round(self.location.latitude, 4)
+        lon = round(self.location.longitude, 4)
+
+        # Format to 4 decimal places and remove the decimal point
+        lat_str = f"{lat:.4f}".replace('.', '')
+        lon_str = f"{lon:.4f}".replace('.', '')
+
+        return f"{lat_str}_{lon_str}"
+
+
+@dataclass(frozen=True)
 class APIHelper:
+    bounding_box_getter = Callable[[int], BoundingBox]
     api_selector: APISelector
     time_resolution: TimeResolution
     fields: Fields
@@ -135,10 +152,10 @@ class APIHelper:
         return self.api_selector.base_url
 
     def get_query_params(
-            self, location: Location, start_datetime: datetime, end_datetime: datetime
+            self, locations: Collection[Location], start_datetime: datetime, end_datetime: datetime
     ) -> dict[str, str]:
         return {
-            **self._get_location_params(location),
+            **self._get_location_params(locations),
             **self.api_selector.get_time_limit_params(self.time_resolution, start_datetime, end_datetime),
             **self._get_fields_param(),
             **self._get_models_param(),
@@ -147,10 +164,10 @@ class APIHelper:
         }
 
     @staticmethod
-    def _get_location_params(location: Location) -> dict[str, str]:
+    def _get_location_params(locations: Collection[Location]) -> dict[str, str]:
         return {
-            'latitude': str(location.latitude),
-            'longitude': str(location.longitude),
+            'latitude': ','.join(f'{loc.latitude:.4f}' for loc in locations),
+            'longitude': ','.join(f'{loc.longitude:.4f}' for loc in locations),
         }
 
     def _get_fields_param(self) -> dict[str, str]:
@@ -183,67 +200,96 @@ API_HELPERS_BY_MODE = {
 
 
 class OpenMeteoWeatherDataExtractor:
-    def __init__(self, api_helper: APIHelper) -> None:
+    def __init__(self, bounding_box_getter: Callable[[int], BoundingBox], api_helper: APIHelper) -> None:
+        self.bounding_box_getter = bounding_box_getter
         self.api_helper = api_helper
 
     @classmethod
-    def from_mode(cls, mode: Mode) -> 'OpenMeteoWeatherDataExtractor':
+    def from_mode(
+            cls, bounding_box_getter: Callable[[int], BoundingBox], mode: Mode
+    ) -> 'OpenMeteoWeatherDataExtractor':
         api_helper = API_HELPERS_BY_MODE[mode]
-        return cls(api_helper=api_helper)
+        return cls(bounding_box_getter=bounding_box_getter, api_helper=api_helper)
 
     @classmethod
     def from_components(
             cls,
+            bounding_box_getter: Callable[[int], BoundingBox],
             api_selector: APISelector,
             time_resolution: TimeResolution,
             models: Models,
             fields: Fields,
     ) -> 'OpenMeteoWeatherDataExtractor':
-        return cls(APIHelper(
-            api_selector=api_selector,
-            time_resolution=time_resolution,
-            models=models,
-            fields=fields,
-        ))
+        return cls(
+            bounding_box_getter=bounding_box_getter,
+            api_helper=APIHelper(
+                api_selector=api_selector,
+                time_resolution=time_resolution,
+                models=models,
+                fields=fields,
+            )
+        )
+
+    def get_time_series_descriptors(self, pv_site: PVSite) -> list[TimeSeriesDescriptor]:
+        bounding_box = self.bounding_box_getter(pv_site.pvo_sys_id)
+        return [OpenMeteoTimeSeriesDescriptor(vertex) for vertex in bounding_box.get_vertices()]
 
     @retry_on_429
-    def extract(self, pv_site: PVSite, date_: date, end_date: date = None) -> ExtractionResult:
-        if not pv_site:
-            raise ValueError("PVSite must be provided")
+    def extract(
+            self, time_series_descriptors: Collection[OpenMeteoTimeSeriesDescriptor], date_: date, end_date: date = None
+    ) -> list[TimeSeries]:
 
         start_datetime = datetime.combine(date_, MIN_TIME)
 
         # For multi-date extraction, use end_date if provided; otherwise use same day
         end_datetime = datetime.combine(end_date if end_date else date_, MAX_TIME)
 
+        vertices = [tsd.location for tsd in time_series_descriptors]
+
         url = self.api_helper.get_url()
-        params = self.api_helper.get_query_params(pv_site.location, start_datetime, end_datetime)
+        params = self.api_helper.get_query_params(vertices, start_datetime, end_datetime)
         response = requests.get(url=url, params=params)
         response.raise_for_status()
 
         # Parse JSON response and convert to CSV rows
-        data = json.loads(response.text)
+        json_data = json.loads(response.text)
 
-        # Extract the data section based on time resolution
+        if len(time_series_descriptors) == 1:
+            # json will be an object
+            time_series = TimeSeries(
+                descriptor=time_series_descriptors[0],
+                rows=self._process_time_series_data(json_data)
+            )
+        else:
+            # json will be an array of objects
+            time_series = [
+                TimeSeries(
+                    descriptor=ts_descriptor,
+                    rows=self._process_time_series_data(json_data[i])
+                )
+                for i, ts_descriptor in enumerate(time_series_descriptors)
+            ]
+
+        return time_series
+
+    def _process_time_series_data(self, json_data) -> list[list[str]]:
         om_descriptor = self.api_helper.time_resolution.om_descriptor
+
         try:
-            time_data = data[om_descriptor]
+            time_series_data = json_data[om_descriptor]
         except KeyError as e:
             raise ValueError(
                 f"Expected time resolution '{om_descriptor}' not found in response:\n"
                 f"{response.text}"
             ) from e
 
-        metadata = dict(data)
-        del metadata[om_descriptor]
-
         # Get the headers (field names) and corresponding arrays
-        headers = list(time_data.keys())
-        arrays = [time_data[header] for header in headers]
+        headers = list(time_series_data.keys())
+        arrays = [time_series_data[header] for header in headers]
 
         # Ensure all arrays have the same length
         if not arrays or not arrays[0]:
-            return ExtractionResult(data=[], metadata=metadata)
+            return []
 
         num_rows = len(arrays[0])
 
@@ -253,4 +299,4 @@ class OpenMeteoWeatherDataExtractor:
             row = [str(array[i]) if array[i] is not None else '' for array in arrays]
             rows.append(row)
 
-        return ExtractionResult(data=rows, metadata=metadata)
+        return rows

@@ -1,7 +1,14 @@
-from dataclasses import dataclass
+from typing import Protocol
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
-class ExtractionResult:
-    data: list[list[str]]
-    metadata: dict | None = None
+class TimeSeriesDescriptor(Protocol):
+    def __str__(self) -> str:
+        ...
+
+
+@dataclass(frozen=True)
+class TimeSeries:
+    descriptor: TimeSeriesDescriptor
+    rows: list[list[str]]

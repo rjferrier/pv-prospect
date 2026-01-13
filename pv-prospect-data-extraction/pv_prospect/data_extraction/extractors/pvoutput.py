@@ -1,13 +1,12 @@
-from datetime import date, datetime
-from typing import Optional
 import time
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Optional, Collection
 
 import requests
-
 from pv_prospect.common import PVSite
-from pv_prospect.data_extraction.extractors import ExtractionResult
-from pv_prospect.data_extraction.util import map_from_env, VarMapping
-
+from pv_prospect.data_extraction.extractors import TimeSeriesDescriptor, TimeSeries
+from pv_prospect.data_extraction.util import map_from_env, VarMapping, retry_on_429
 
 URL = "https://pvoutput.org/service/r2/getstatus.jsp"
 API_KEY_HEADER_NAME = "X-Pvoutput-Apikey"
@@ -39,6 +38,14 @@ HEADER = [
     'temperature',
     'voltage'
 ]
+
+
+@dataclass(frozen=True)
+class PVOutputTimeSeriesDescriptor:
+    pv_site_id: int
+
+    def __str__(self) -> str:
+        return str(pv_site_id)
 
 
 class PVOutputRateLimiter:
@@ -108,24 +115,28 @@ class PVOutputExtractor:
         }, rate_limiter=rate_limiter)
         return extractor
 
-    def extract(self, pv_site: PVSite, date_: date, end_date: date = None) -> ExtractionResult:
+    def get_time_series_descriptors(self, pv_site: PVSite) -> list[TimeSeriesDescriptor]:
+        return [PVOutputTimeSeriesDescriptor(pv_site.pvo_sys_id)]
+
+    @retry_on_429
+    def extract(
+            self, time_series_descriptors: Collection[PVOutputTimeSeriesDescriptor], date_: date, end_date: date = None
+    ) -> list[TimeSeries]:
         """
         Extract PV output status data for a single date from the PVOutput API for the given site.
 
         Args:
             pv_site: PVSite object containing the target system id and site metadata.
-            date_: The date to extract (only a single date is supported by the API).
+            time_series_descriptors:
             end_date: Optional end date (ignored by this extractor since PVOutput only supports single-date queries).
 
         Returns:
-            ExtractionResult: Object containing extracted CSV-style rows in `data` and optional `metadata`.
+            list[TimeSeries]
 
         Raises:
             ValueError: If pv_site is missing or does not contain a valid system id.
             requests.HTTPError: If the HTTP request to the PVOutput API fails.
         """
-        if not pv_site or not pv_site.pvo_sys_id:
-            raise ValueError("PVSite must be provided with a valid system ID")
 
         # PVOutput API only supports single-date queries, so ignore end_date
         # If multi-date support is needed in the future, multiple API calls would be required
@@ -136,8 +147,10 @@ class PVOutputExtractor:
             'X-Rate-Limit': '1'  # Request rate limit information in response headers
         }
 
+        ts_descriptor = time_series_descriptors[0]
+
         params = {
-            'sid1': pv_site.pvo_sys_id,        # Target system ID from PVSite
+            'sid1': str(ts_descriptor),        # Target system ID from PVSite
             'd': date_.strftime('%Y%m%d'),     # Date in YYYYMMDD format
             **CONSTANT_QUERY_PARAMS
         }
@@ -161,7 +174,7 @@ class PVOutputExtractor:
         entries = _to_clean_entries(response.text)
         data = [HEADER] + entries
 
-        return ExtractionResult(data=data)
+        return [TimeSeries(descriptor=ts_descriptor, rows=data)]
 
 
 def _to_clean_entries(text: str) -> list[list[str]]:

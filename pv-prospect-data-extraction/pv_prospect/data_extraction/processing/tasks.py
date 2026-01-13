@@ -1,20 +1,17 @@
-from io import TextIOWrapper
+from datetime import date
+import os
 
-from pv_prospect.common import DateRange, build_pv_site_repo, get_pv_site_by_system_id
+from pv_prospect.common import DateRange, build_pv_site_repo, build_openmeteo_bounding_box_repo, get_pv_site_by_system_id
 from pv_prospect.data_extraction.extractors import get_extractor, SourceDescriptor
-from pv_prospect.data_extraction.loaders import build_csv_file_path, get_storage_client
-from pv_prospect.data_extraction.loaders.factory import StorageClient
+from pv_prospect.data_extraction.extractors.base import TimeSeriesDescriptor
+from pv_prospect.data_extraction.loaders import get_storage_client
 from pv_prospect.data_extraction.processing.value_objects import Task, Result
 from pv_prospect.data_extraction.processing.worker import app
 
 TIMESERIES_FOLDER = 'timeseries'
 METADATA_FOLDER = 'metadata'
 PV_SITES_CSV_FILE = 'pv_sites.csv'
-
-
-def get_pv_sites_csv_stream(storage_client: StorageClient) -> TextIOWrapper:
-    return storage_client.read_file(PV_SITES_CSV_FILE)
-
+OM_BOUNDING_BOXES_CSV_FILE = 'openmeteo_bounding_boxes.csv'
 
 @app.task
 def create_folders(
@@ -64,38 +61,48 @@ def extract_and_load(
         Result: The result of the extraction and load operation.
     """
     task = Task(source_descriptor, pv_system_id, date_range)
-    file_path = build_csv_file_path(source_descriptor, pv_system_id, date_range.start)
-    timeseries_file_path = f"{TIMESERIES_FOLDER}/{file_path}"
 
     storage_client = get_storage_client(local_dir)
-    csv_stream = get_pv_sites_csv_stream(storage_client)
-    build_pv_site_repo(csv_stream)
-
-    # Check if file already exists using polymorphic method
-    if storage_client.file_exists(timeseries_file_path) and not overwrite:
-        print(f"    {task}: File already exists")
-        return Result.skipped_existing(task)
+    build_pv_site_repo(
+        storage_client.read_file(PV_SITES_CSV_FILE)
+    )
+    build_openmeteo_bounding_box_repo(
+        storage_client.read_file(OM_BOUNDING_BOXES_CSV_FILE)
+    )
 
     if dry_run:
         print(f"    {task}: Dry run - not writing")
         return Result.skipped_dry_run(task)
 
+    def get_csv_path(ts_descriptor: TimeSeriesDescriptor) -> str:
+        return _build_csv_file_path(TIMESERIES_FOLDER, source_descriptor, ts_descriptor, date_range.start)
+
+    def is_processable(ts_descriptor: TimeSeriesDescriptor) -> bool:
+        file_path = get_csv_path(ts_descriptor)
+        return overwrite or not storage_client.file_exists(file_path)
+
     try:
         # Call extractor with appropriate arguments
         extractor = get_extractor(source_descriptor)
         pv_site = get_pv_site_by_system_id(pv_system_id)
-        extraction_result = extractor.extract(pv_site, date_range.start, date_range.end)
+        if not pv_site or not pv_site.pvo_sys_id:
+            raise ValueError("Unable to retrieve PVSite object")
 
-        # Write CSV data using polymorphic method, pass overwrite flag
-        storage_client.write_csv(timeseries_file_path, extraction_result.data, overwrite=overwrite)
+        desired_ts_descriptors = extractor.get_time_series_descriptors(pv_site)
+        processable_ts_descriptors = [
+            ts_descriptor for ts_descriptor in desired_ts_descriptors if is_processable(ts_descriptor)
+        ]
 
-        # Optionally write metadata JSON if requested and available
-        if write_metadata and extraction_result.metadata:
-            metadata_file_path = f"{METADATA_FOLDER}/{file_path}"
-            try:
-                storage_client.write_metadata(metadata_file_path, extraction_result.metadata)
-            except Exception as meta_e:
-                print(f"    {task}: WARNING - failed to write metadata: {meta_e}")
+        if not processable_ts_descriptors:
+            print(f"    {task}: All output files already exist")
+            return Result.skipped_existing(task)
+
+        timeseries = extractor.extract(processable_ts_descriptors, date_range.start, date_range.end)
+
+        # Write each time series to storage
+        for ts in timeseries:
+            ts_file_path = get_csv_path(ts.descriptor)
+            storage_client.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
 
         print(f"    {task}: Success")
         return Result.success(task)
@@ -103,3 +110,22 @@ def extract_and_load(
     except Exception as e:
         print(f"    {task}: ERROR: {e}")
         return Result.failure(task, e)
+
+
+def _build_csv_file_path(
+        time_series_folder: str,
+        source_descriptor: 'SourceDescriptor',
+        time_series_descriptor: 'TimeSeriesDescriptor',
+        date_: date
+) -> str:
+    filename_parts = [
+        str(source_descriptor).replace('/', '-'),
+        str(time_series_descriptor),
+        _format_date(date_)
+    ]
+    filename = '_'.join(filename_parts) + '.csv'
+    return os.path.join(time_series_folder, source_descriptor, filename)
+
+
+def _format_date(date_: date) -> str:
+    return "%04d%02d%02d" % (date_.year, date_.month, date_.day)

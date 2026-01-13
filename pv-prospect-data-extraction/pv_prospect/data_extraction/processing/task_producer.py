@@ -8,7 +8,7 @@ from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_mu
 from pv_prospect.data_extraction.loaders import get_storage_client
 from pv_prospect.data_extraction.loaders.factory import StorageClient
 from pv_prospect.data_extraction.processing.task_queuer import TaskQueuer
-from pv_prospect.data_extraction.processing.tasks import get_pv_sites_csv_stream
+from pv_prospect.data_extraction.processing.tasks import PV_SITES_CSV_FILE
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -18,8 +18,6 @@ SOURCE_DESCRIPTORS = {
     'weather-om-historical': SourceDescriptor.OPENMETEO_HISTORICAL,
     'weather-om-15-v0': SourceDescriptor.OPENMETEO_V0_QUARTERHOURLY,
     'weather-om-60-v0': SourceDescriptor.OPENMETEO_V0_HOURLY,
-    'weather-vc-15': SourceDescriptor.VISUALCROSSING_QUARTERHOURLY,
-    'weather-vc-60': SourceDescriptor.VISUALCROSSING_HOURLY,
 }
 
 
@@ -160,7 +158,7 @@ def _parse_pv_system_ids(system_ids_str: str):
 
 
 def _get_all_pv_system_ids(storage_client: StorageClient) -> list[int]:
-    csv_stream = get_pv_sites_csv_stream(storage_client)
+    csv_stream = storage_client.read_file(PV_SITES_CSV_FILE)
     build_pv_site_repo(csv_stream)
     return get_all_pv_system_ids()
 

@@ -5,8 +5,7 @@ from pv_prospect.data_extraction.extractors.openmeteo import (
     OpenMeteoWeatherDataExtractor, Mode as OMMode, APISelector, TimeResolution, Fields, Models
 )
 from pv_prospect.data_extraction.extractors.pvoutput import PVOutputExtractor
-from pv_prospect.data_extraction.extractors.visualcrossing import VCWeatherDataExtractor, Mode as VCMode
-
+from pv_prospect.common import get_openmeteo_bounding_box_by_pv_site_id
 
 class SourceDescriptor(str, Enum):
     PVOUTPUT = 'pvoutput'
@@ -16,8 +15,6 @@ class SourceDescriptor(str, Enum):
     OPENMETEO_HISTORICAL = 'openmeteo/historical'
     OPENMETEO_V0_QUARTERHOURLY = 'openmeteo/v0/quarterhourly'
     OPENMETEO_V0_HOURLY = 'openmeteo/v0/hourly'
-    VISUALCROSSING_QUARTERHOURLY = 'visualcrossing/quarterhourly'
-    VISUALCROSSING_HOURLY = 'visualcrossing/hourly'
 
     def __str__(self) -> str:
         return self.value
@@ -52,31 +49,39 @@ def supports_multi_date(source_descriptor: SourceDescriptor) -> bool:
 _EXTRACTOR_FACTORIES = {
     SourceDescriptor.PVOUTPUT: lambda: PVOutputExtractor.from_env(),
     SourceDescriptor.OPENMETEO_QUARTERHOURLY: lambda: OpenMeteoWeatherDataExtractor.from_components(
+        bounding_box_getter=get_openmeteo_bounding_box_by_pv_site_id,
         api_selector=APISelector.FORECAST,
         time_resolution=TimeResolution.QUARTERHOURLY,
         fields=Fields.FORECAST,
         models=Models.ALL_FORECAST,
     ),
     SourceDescriptor.OPENMETEO_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_components(
+        bounding_box_getter=get_openmeteo_bounding_box_by_pv_site_id,
         api_selector=APISelector.FORECAST,
         time_resolution=TimeResolution.HOURLY,
         fields=Fields.FORECAST,
         models=Models.ALL_FORECAST,
     ),
     SourceDescriptor.OPENMETEO_SATELLITE: lambda: OpenMeteoWeatherDataExtractor.from_components(
+        bounding_box_getter=get_openmeteo_bounding_box_by_pv_site_id,
         api_selector=APISelector.SATELLITE,
         time_resolution=TimeResolution.HOURLY,
         fields=Fields.SOLAR_RADIATION,
         models=Models.ALL_SATELLITE,
     ),
     SourceDescriptor.OPENMETEO_HISTORICAL: lambda: OpenMeteoWeatherDataExtractor.from_components(
+        bounding_box_getter=get_openmeteo_bounding_box_by_pv_site_id,
         api_selector=APISelector.HISTORICAL,
         time_resolution=TimeResolution.HOURLY,
         fields=Fields.FORECAST,
         models=Models.ALL_FORECAST,
     ),
-    SourceDescriptor.OPENMETEO_V0_QUARTERHOURLY: lambda: OpenMeteoWeatherDataExtractor.from_mode(OMMode.QUARTERHOURLY),
-    SourceDescriptor.OPENMETEO_V0_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_mode(OMMode.HOURLY),
-    SourceDescriptor.VISUALCROSSING_QUARTERHOURLY: lambda: VCWeatherDataExtractor.from_env(mode=VCMode.QUARTERHOURLY),
-    SourceDescriptor.VISUALCROSSING_HOURLY: lambda: VCWeatherDataExtractor.from_env(mode=VCMode.HOURLY),
+    SourceDescriptor.OPENMETEO_V0_QUARTERHOURLY: lambda: OpenMeteoWeatherDataExtractor.from_mode(
+        bounding_box_getter=get_openmeteo_bounding_box_by_pv_site_id,
+        mode=OMMode.QUARTERHOURLY
+    ),
+    SourceDescriptor.OPENMETEO_V0_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_mode(
+        bounding_box_getter=get_openmeteo_bounding_box_by_pv_site_id,
+        mode=OMMode.HOURLY
+    ),
 }

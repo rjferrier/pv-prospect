@@ -1,11 +1,18 @@
 from dataclasses import dataclass
 from datetime import date
+from enum import Enum
 from typing import Optional, List
 
 from numpy import deg2rad
 from spherical_coordinates import az_zd_to_cx_cy_cz
 
 from .location import Location
+
+
+class Shading(Enum):
+    NONE = 0
+    LOW = 1
+    MEDIUM = 2
 
 
 @dataclass
@@ -39,6 +46,7 @@ class PVSite:
     pvo_sys_id: int
     name: str
     location: Location
+    shading: Shading
     panel_system: System
     panel_geometries: List[PanelGeometry]
     inverter_system: System

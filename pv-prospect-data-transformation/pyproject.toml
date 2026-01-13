@@ -16,6 +16,7 @@ solarpy = "^0.1.3"
 pvlib = "^0.11.0"
 pandas = "^2.0.0"
 numpy = "^2.3.5"
+common = "^0.1.2"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }

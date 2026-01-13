@@ -2,7 +2,7 @@
 import pandas as pd
 import pytest
 from pytz import timezone
-from pv_prospect.data_transformation.dataframe_functions import reduce_rows
+from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
 
 UTC = timezone('UTC')
 

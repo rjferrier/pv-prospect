@@ -1,28 +1,38 @@
 from datetime import date
 import os
+from typing import TYPE_CHECKING
 
-from pv_prospect.data_extraction.extractors import SourceDescriptor
+from pv_prospect.data_extraction.extractors.base import TimeSeriesDescriptor
+
+if TYPE_CHECKING:
+    from pv_prospect.data_extraction.extractors import SourceDescriptor
 
 
-def build_csv_file_path(source_descriptor: SourceDescriptor, pv_system_id: int, date_: date) -> str:
+def build_csv_file_path(
+        time_series_folder: str,
+        source_descriptor: 'SourceDescriptor',
+        time_series_descriptor: 'TimeSeriesDescriptor',
+        date_: date
+) -> str:
     """
-    Build the full CSV file path for a given data source, site, and date.
+    Build the full CSV file path for a given data source, time series descriptor, and date.
+    """
+    filename = build_csv_filename(source_descriptor, time_series_descriptor, date_) + '.csv'
+    return os.path.join(time_series_folder, source_descriptor, filename)
 
-    Args:
-        source_descriptor: The data source descriptor string (e.g. 'openmeteo/hourly')
-        pv_system_id: The PV system identifier (integer)
-        date_: The date for the data
 
-    Returns:
-        The full CSV file path (e.g., 'openmeteo/hourly/openmeteo-hourly_12345_20231029.csv')
+def build_csv_filename(
+        source_descriptor: "SourceDescriptor", time_series_descriptor: str, date_: date
+) -> str:
+    """
+    Build the CSV filename (without extension) for a given data source, time series descriptor, and date.
     """
     filename_parts = [
         str(source_descriptor).replace('/', '-'),
-        str(pv_system_id),
+        str(time_series_descriptor),
         format_date(date_)
     ]
-    filename = '_'.join(filename_parts) + '.csv'
-    return os.path.join(source_descriptor, filename)
+    return '_'.join(filename_parts)
 
 
 def format_date(date_: date) -> str:
