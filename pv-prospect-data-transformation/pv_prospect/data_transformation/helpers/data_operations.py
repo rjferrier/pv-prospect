@@ -115,7 +115,7 @@ class CellData:
         w_ne = x * y
 
         # Create result dataframe starting with time column
-        result = pd.DataFrame({'time': df_sw['time'].copy()})
+        dfs = [pd.DataFrame({'time': df_sw['time'].copy()})]
 
         # Interpolate each column
         for col in columns_to_interpolate:
@@ -126,14 +126,14 @@ class CellData:
             if not all(col in df.columns for df in [df_sw, df_se, df_nw, df_ne]):
                 continue
 
-            result[col] = (
+            dfs.append(
                 w_sw * df_sw[col] +
                 w_se * df_se[col] +
                 w_nw * df_nw[col] +
                 w_ne * df_ne[col]
             )
 
-        return result
+        return pd.concat(dfs, axis=1)
 
     def select_nearest_non_interpolables(
         self,

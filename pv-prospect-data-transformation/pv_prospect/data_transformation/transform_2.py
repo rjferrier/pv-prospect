@@ -194,8 +194,8 @@ def _calculate_poa_irradiance(df: pd.DataFrame, pv_site: PVSite) -> pd.Series:
     """
     # Create pvlib location
     location = pvlib.location.Location(
-        pv_site.location.latitude,
-        pv_site.location.longitude,
+        float(pv_site.location.latitude),
+        float(pv_site.location.longitude),
         altitude=ALTITUDE,
         tz='UTC'
     )

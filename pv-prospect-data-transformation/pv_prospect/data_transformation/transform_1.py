@@ -161,10 +161,10 @@ def main() -> int:
 
     with ProcessPoolExecutor() as executor:
         # TODO get rid
-        results = [
-            _process_site(pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date)
-            for pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date in tasks
-        ]
+        # results = [
+        #     _process_site(pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date)
+        #     for pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date in tasks
+        # ]
 
         futures = {
             executor.submit(_process_site, pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date):
