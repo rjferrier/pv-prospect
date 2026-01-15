@@ -69,7 +69,7 @@ def _split_path(path: str) -> tuple[str, str]:
     return '', path
 
 
-def process_files(folder_path: str | None, pattern: str, replacement: str, mime_type: str | None = None, dry_run: bool = False):
+def process_files(folder_path: str | None, pattern: str, replacement: str, mime_type: str | None = None, dry_run: bool = False, delete_on_duplicate: bool = False):
     """
     Rename files in a Google Drive folder according to a regex pattern.
     Supports directory changes in pattern/replacement (e.g., 'olddir/(.*)', 'newdir/\1').
@@ -80,6 +80,7 @@ def process_files(folder_path: str | None, pattern: str, replacement: str, mime_
         replacement: Replacement string (can use regex groups like \\1, \\2, and specify new directory)
         mime_type: Optional MIME type filter
         dry_run: If True, only print what would be renamed without actually renaming
+        delete_on_duplicate: If True, delete existing files with the same name instead of skipping
     """
     client = GDriveClient.build_service()
     root_folder_id = get_folder_id(client, folder_path)
@@ -87,6 +88,10 @@ def process_files(folder_path: str | None, pattern: str, replacement: str, mime_
 
     regex = re.compile(pattern)
     renamed_count = 0
+    deleted_count = 0
+
+    # Build a map of existing file paths to file IDs for duplicate detection
+    existing_files = {f['path']: f for f in files}
 
     for file in files:
         file_id = file['id']
@@ -98,6 +103,27 @@ def process_files(folder_path: str | None, pattern: str, replacement: str, mime_
             # Parse old and new paths
             old_dir, old_name = _split_path(old_path)
             new_dir, new_name = _split_path(new_path)
+
+            # Check if target file already exists (and it's not the same file)
+            existing_target = existing_files.get(new_path)
+            if existing_target and existing_target['id'] != file_id:
+                if delete_on_duplicate:
+                    if dry_run:
+                        print(f"Would delete duplicate: {new_path} (id: {existing_target['id']})")
+                        deleted_count += 1
+                    else:
+                        try:
+                            client.trash_file(existing_target['id'])
+                            print(f"Deleted duplicate: {new_path} (id: {existing_target['id']})")
+                            # Remove from map so we don't try to process it later
+                            del existing_files[new_path]
+                            deleted_count += 1
+                        except Exception as e:
+                            print(f"Error deleting duplicate {existing_target['id']}: {e}")
+                            continue
+                else:
+                    print(f"Skipping: {old_path} -> {new_path} (target already exists)")
+                    continue
 
             if dry_run:
                 print(f"Would rename: {old_path} -> {new_path}")
@@ -124,11 +150,17 @@ def process_files(folder_path: str | None, pattern: str, replacement: str, mime_
                     if old_dir == new_dir:
                         print(f"Renamed: {old_path} -> {new_path}")
 
+                # Update the existing_files map with the new path
+                existing_files[new_path] = file
+
             renamed_count += 1
         else:
             print(f"Skipping: {old_path} (no match)")
 
     print(f"\n{'Would rename' if dry_run else 'Renamed/moved'} {renamed_count} file(s)")
+    if delete_on_duplicate and deleted_count > 0:
+        print(f"{'Would delete' if dry_run else 'Deleted'} {deleted_count} duplicate file(s)")
+
 
 
 if __name__ == '__main__':
@@ -159,6 +191,11 @@ if __name__ == '__main__':
         action='store_true',
         help='Show what would be renamed without actually renaming'
     )
+    parser.add_argument(
+        '--delete-on-duplicate',
+        action='store_true',
+        help='Delete existing files if renaming would cause a duplicate'
+    )
 
     args = parser.parse_args()
 
@@ -167,5 +204,6 @@ if __name__ == '__main__':
         args.pattern,
         args.replacement,
         args.mime_type,
-        args.dry_run
+        args.dry_run,
+        args.delete_on_duplicate
     )
