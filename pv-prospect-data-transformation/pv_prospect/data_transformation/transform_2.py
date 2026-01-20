@@ -15,7 +15,8 @@ from pv_prospect.common.pv_site_repo import build_pv_site_repo, get_pv_site_by_s
 ALTITUDE = 0
 
 # Weather model to analyze
-WEATHER_MODEL = 'ukmo_seamless'  # Options: best_match, dmi_seamless, gem_seamless, gfs_seamless, icon_seamless, jma_seamless, kma_seamless, knmi_seamless, meteofrance_seamless, metno_seamless, ukmo_seamless
+# WEATHER_MODEL = 'ukmo_seamless'  # Options: best_match, dmi_seamless, gem_seamless, gfs_seamless, icon_seamless, jma_seamless, kma_seamless, knmi_seamless, meteofrance_seamless, metno_seamless, ukmo_seamless
+WEATHER_MODEL = 'best_match'
 
 PV_SITES_PATH = Path('data-0/pv_sites.csv')
 
@@ -30,9 +31,9 @@ EXCLUDED_COLUMNS = {
     # 'cloud_cover',
     # 'visibility',
     'pressure_msl',
-    'weather_code',
-    'wind_speed_80m',
-    'wind_speed_180m',
+    # 'weather_code',
+    # 'wind_speed_80m',
+    # 'wind_speed_180m',
     'wind_direction_80m',
     'wind_direction_180m',
 }

@@ -222,6 +222,10 @@ def _process_site(
     # Preprocess with bilinear interpolation
     dataframe = preprocess(cell_data, pvo_df, pv_site)
 
+    # Skip saving if no valid data remains
+    if dataframe.empty:
+        return f"SKIPPED (no valid data): {pv_site_id}_{date_to_str(start_date)}_{date_to_str(end_date)}"
+
     # Save result
     target_filename = _build_target_filename(pv_site_id, start_date, end_date)
     dataframe.to_csv(TARGET_TIMESERIES_DIR / target_filename, index=False, encoding='utf-8')
@@ -298,6 +302,9 @@ def preprocess(
         pvoutput[['time', 'power']], openmeteo['time']
     )
     joined = openmeteo.join(pvo_reduced.set_index('time'), on='time', how='inner')
+
+    # Remove rows where power is NaN
+    joined = joined.dropna(subset=['power'])
 
     return joined
 
