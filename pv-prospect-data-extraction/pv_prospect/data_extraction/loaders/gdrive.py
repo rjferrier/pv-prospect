@@ -430,6 +430,34 @@ class GDriveClient:
             raise
 
     @retry_on_500
+    def restore_file(self, file_id: str) -> None:
+        """
+        Restores a file from the Google Drive trash bin.
+
+        Args:
+            file_id (str): The ID of the file to restore.
+        """
+        try:
+            self.service.files().update(fileId=file_id, body={'trashed': False}).execute()
+        except HttpError as error:
+            print(f"Error while restoring file {file_id}: {error}")
+            raise
+
+    @retry_on_500
+    def delete_file(self, file_id: str) -> None:
+        """
+        Permanently deletes a file from Google Drive.
+
+        Args:
+            file_id (str): The ID of the file to delete.
+        """
+        try:
+            self.service.files().delete(fileId=file_id).execute()
+        except HttpError as error:
+            print(f"Error while deleting file {file_id}: {error}")
+            raise
+
+    @retry_on_500
     def upload_file(self, media_body: MediaIoBaseUpload, file_path: ResolvedFilePath, mimetype: str) -> str:
         """
         Uploads a file to Google Drive in the specified parent folder.
