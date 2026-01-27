@@ -1,3 +1,6 @@
+# Main Terraform configuration
+# Provider and general settings
+
 terraform {
   required_providers {
     google = {
@@ -11,28 +14,54 @@ provider "google" {
   project = var.project_id
 }
 
-resource "google_storage_bucket" "pv_prospect_data" {
-  name          = var.bucket_name
-  location      = "europe-west2"
-  uniform_bucket_level_access = true
-
-  hierarchical_namespace {
-    enabled = true
-  }
+# Storage module for DVC and data management
+module "storage" {
+  source      = "./modules/storage"
+  bucket_name = var.bucket_name
+  region      = var.region
 }
 
-resource "google_service_account" "dvc_sa" {
-  account_id   = "dvc-sa"
-  display_name = "DVC SA"
+# Kafka cluster module
+module "kafka" {
+  source = "./modules/kafka"
+  region = var.region
+  zone   = var.zone
 }
 
-resource "google_storage_bucket_iam_member" "dvc_sa_bucket" {
-  bucket = var.bucket_name
-  role   = "roles/storage.objectCreator"
-  member = "serviceAccount:${google_service_account.dvc_sa.email}"
-}
-
+# Outputs from modules
 output "service_account_email" {
-  value       = google_service_account.dvc_sa.email
+  value       = module.storage.service_account_email
   description = "Use this service account for application authentication."
 }
+
+output "bucket_name" {
+  value       = module.storage.bucket_name
+  description = "Name of the created storage bucket"
+}
+
+output "zookeeper_internal_ip" {
+  value       = module.kafka.zookeeper_internal_ip
+  description = "Internal IP of Zookeeper instance"
+}
+
+output "zookeeper_external_ip" {
+  value       = module.kafka.zookeeper_external_ip
+  description = "External IP of Zookeeper instance"
+}
+
+output "kafka_broker_internal_ips" {
+  value       = module.kafka.kafka_broker_internal_ips
+  description = "Internal IPs of Kafka broker instances"
+}
+
+output "kafka_broker_external_ips" {
+  value       = module.kafka.kafka_broker_external_ips
+  description = "External IPs of Kafka broker instances"
+}
+
+output "kafka_bootstrap_servers" {
+  value       = module.kafka.kafka_bootstrap_servers
+  description = "Kafka bootstrap servers connection string (internal IPs)"
+}
+
+
