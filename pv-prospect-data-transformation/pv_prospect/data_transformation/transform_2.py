@@ -11,6 +11,7 @@ import pvlib
 from pv_prospect.common import PVSite
 from pv_prospect.common.pv_site_repo import build_pv_site_repo, get_pv_site_by_system_id
 
+from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
 
 ALTITUDE = 0
 
@@ -37,6 +38,10 @@ EXCLUDED_COLUMNS = {
     'wind_direction_80m',
     'wind_direction_180m',
 }
+
+# Optional time averaging: set to a nonzero positive integer (days) to enable,
+# or None to keep the original per-hour resolution.
+TIMESCALE_DAYS: int | None = 1
 
 
 def process_timeseries_data() -> None:
@@ -177,6 +182,17 @@ def _process_micro_batch(batch_file: Path, pv_site: PVSite) -> pd.DataFrame:
     # Add PV output power as the last column
     if 'power' in df.columns:
         processed_df['power'] = df['power']
+
+    # Optional time averaging
+    if TIMESCALE_DAYS is not None and TIMESCALE_DAYS > 0 and not processed_df.empty:
+        start_time = processed_df['time'].min().normalize()
+        end_time = processed_df['time'].max()
+        ref_times = pd.date_range(
+            start=start_time + pd.Timedelta(days=TIMESCALE_DAYS),
+            end=end_time + pd.Timedelta(days=TIMESCALE_DAYS),
+            freq=f'{TIMESCALE_DAYS}D'
+        )
+        processed_df = reduce_rows(processed_df, ref_times.to_series())
 
     return processed_df
 

@@ -280,9 +280,17 @@ def reduce_rows(df: pd.DataFrame, ref_times: pd.Series) -> pd.DataFrame:
             if pd.isna(values).any():
                 row_data[col] = float('nan')
             else:
-                # Time-weighted average
-                weighted_sum = sum(val * dur for val, dur in zip(values, durations))
-                row_data[col] = weighted_sum / total_duration
+                if NON_INTERPOLABLE_COLUMN_PATTERN.search(col):
+                    # Time-weighted mode
+                    durations_per_value = {}
+                    for val, dur in zip(values, durations):
+                        durations_per_value[val] = durations_per_value.get(val, 0) + dur
+                    # Get value with maximum duration
+                    row_data[col] = max(durations_per_value.items(), key=lambda x: x[1])[0]
+                else:
+                    # Time-weighted average
+                    weighted_sum = sum(val * dur for val, dur in zip(values, durations))
+                    row_data[col] = weighted_sum / total_duration
 
         result_rows.append(row_data)
 
