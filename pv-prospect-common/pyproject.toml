@@ -1,15 +1,25 @@
 [tool.poetry]
 name = "pv-prospect-common"
-version = "0.1.0"
+version = "0.2.0"
 description = "Shared common models for PV Prospect projects"
 authors = ["RJ Ferrier <rjferrier@outlook.com>"]
 readme = "README.md"
 packages = [{include = "pv_prospect"}]
 
+[project]
+name = "pv-prospect-common"
+version = "0.2.0"
+description = "Shared common models for PV Prospect projects"
+authors = [{name = "RJ Ferrier", email = "rjferrier@outlook.com"}]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "spherical-coordinates>=0.1.8,<0.2",
+    "numpy>=2.3.5,<3",
+]
+
 [tool.poetry.dependencies]
 python = "^3.12"
-spherical-coordinates = "^0.1.8"
-numpy = "^2.3.5"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }

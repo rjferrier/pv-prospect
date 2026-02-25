@@ -1,24 +1,32 @@
-[virtualenvs]
-in-project = true
-
 [tool.poetry]
-name = "PV Prospect Data Extraction Pipeline"
+name = "pv-prospect-data-extraction"
 version = "0.1.0"
 description = ""
 authors = ["RJ Ferrier <rjferrier@outlook.com>"]
 readme = "README.md"
 packages = [{include = "pv_prospect"}]
 
+[project]
+name = "pv-prospect-data-extraction"
+version = "0.1.0"
+description = ""
+authors = [{name = "RJ Ferrier", email = "rjferrier@outlook.com"}]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.32.5,<3",
+    "google-api-python-client>=2.184.0,<3",
+    "google-auth-httplib2==0.2.0",
+    "google-auth-oauthlib>=1.2.2,<2",
+    "importlib_resources>=6.5.2,<7",
+    "celery>=5.5.3,<6",
+    "flower>=2.0.1,<3",
+    "pyyaml>=6.0.3,<7",
+    "pv-prospect-common",
+]
+
 [tool.poetry.dependencies]
 python = "^3.12"
-requests = "^2.32.5"
-google-api-python-client = "^2.184.0"
-google-auth-httplib2 = "==0.2.0"
-google-auth-oauthlib = "^1.2.2"
-importlib_resources = "^6.5.2"
-celery = "^5.5.3"
-flower = "^2.0.1"
-pyyaml = "^6.0.3"
 pv-prospect-common = {path = "../pv-prospect-common", develop = true}
 
 [tool.poetry.group.dev.dependencies]
