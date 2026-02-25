@@ -179,6 +179,30 @@ class CellData:
         return nearest_df[result_cols].copy()
 
 
+def select_nearest(vertex_data_list: list[VertexData], target_location: Location) -> pd.DataFrame:
+    """
+    Select the dataframe from the nearest vertex to the target location.
+
+    When there is only one vertex (nearest mode), returns its dataframe directly.
+    When there are multiple, finds the nearest by Euclidean distance.
+
+    Args:
+        vertex_data_list: List of VertexData objects
+        target_location: Location to find nearest vertex for
+
+    Returns:
+        DataFrame from the nearest vertex
+    """
+    if len(vertex_data_list) == 1:
+        return vertex_data_list[0].dataframe.copy()
+
+    nearest = min(
+        vertex_data_list,
+        key=lambda vd: vd.vertex.location.euclidean_distance(target_location)
+    )
+    return nearest.dataframe.copy()
+
+
 def reduce_rows(df: pd.DataFrame, ref_times: pd.Series) -> pd.DataFrame:
     """
     Reduce rows of a dataframe to match reference times using time-weighted averaging.

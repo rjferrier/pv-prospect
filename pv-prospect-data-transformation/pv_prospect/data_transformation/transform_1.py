@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 
 import pandas as pd
+from pv_prospect.common.interpolation import InterpolationStrategy
 from pv_prospect.common.pv_site_repo import build_pv_site_repo, get_all_pv_system_ids, get_pv_site_by_system_id
 from pv_prospect.common.openmeteo_bounding_box_repo import build_openmeteo_bounding_box_repo, get_openmeteo_bounding_box_by_pv_site_id
 from pv_prospect.common.domain.location import Location
@@ -15,6 +16,7 @@ from pytz import timezone
 from pv_prospect.data_transformation.helpers.csv_loader import read_and_combine_csv_rows
 from pv_prospect.data_transformation.helpers.data_operations import (
     reduce_rows,
+    select_nearest,
     NON_INTERPOLABLE_COLUMN_PATTERN,
     CellData,
     VertexData
@@ -30,6 +32,7 @@ from pv_prospect.data_transformation.helpers.file_metadata import (
 UKTZ = timezone('Europe/London')
 UTC = timezone('UTC')
 
+INTERPOLATION_STRATEGY = InterpolationStrategy.NEAREST
 
 SOURCE_DIR = Path('data-0')
 TARGET_DIR = Path('data-1')
@@ -53,6 +56,7 @@ ALLOW_OVERWRITES = True
 def main() -> int:
     """Main entry point for preprocessing historical data."""
     print("Starting preprocessing of historical data...")
+    print(f"Interpolation strategy: {INTERPOLATION_STRATEGY.value}")
 
     # Load PV sites and bounding boxes repositories
     print("Loading PV sites repository...")
@@ -97,60 +101,101 @@ def main() -> int:
             print(f"Skipping site {pv_site_id}: missing site or bounding box data")
             continue
 
-        # Find all dates that have complete bounding box data
         vertex_locations_dict = bounding_box.get_vertices_dict()
 
-        # Get all dates available for any vertex
-        available_dates = set()
-        for vertex_loc in vertex_locations_dict.values():
-            vertex_key_prefix = (
-                vertex_loc.latitude,
-                vertex_loc.longitude
+        if INTERPOLATION_STRATEGY is InterpolationStrategy.NEAREST:
+            # Find the nearest vertex and only look for that single file
+            nearest_location = bounding_box.nearest_vertex_location(pv_site.location)
+            nearest_label = next(
+                label for label, loc in vertex_locations_dict.items()
+                if loc == nearest_location
             )
+
+            # Get all dates available for the nearest vertex
+            available_dates = set()
             for key in om_file_lookup.keys():
-                if key[0] == vertex_key_prefix[0] and key[1] == vertex_key_prefix[1]:
+                if key[0] == nearest_location.latitude and key[1] == nearest_location.longitude:
                     available_dates.add(key[2])
 
-        # For each date, check if all 4 vertices are available
-        for start_date in sorted(available_dates):
-            vertex_files = {}
-            all_vertices_present = True
+            for start_date in sorted(available_dates):
+                lookup_key = (nearest_location.latitude, nearest_location.longitude, start_date)
+                if lookup_key not in om_file_lookup:
+                    continue
 
-            for vertex_label, vertex_loc in vertex_locations_dict.items():
-                lookup_key = (
-                    vertex_loc.latitude,
-                    vertex_loc.longitude,
-                    start_date
+                vertex_files = {nearest_label: om_file_lookup[lookup_key]}
+
+                # Calculate date range (7 days for historical data)
+                end_date = start_date + pd.Timedelta(days=7)
+
+                # Check if corresponding PVOutput files exist
+                pvo_filenames = _get_desired_pvoutput_filenames_for_site(
+                    pv_site_id, start_date, end_date
                 )
+                pvo_filenames_available = sorted(pvo_filenames.intersection(present_pvo_filenames))
 
-                if lookup_key in om_file_lookup:
-                    vertex_files[vertex_label] = om_file_lookup[lookup_key]
-                else:
-                    all_vertices_present = False
-                    break
+                if len(pvo_filenames_available) == 0:
+                    continue
 
-            if not all_vertices_present:
-                continue
+                # Check if target file already exists
+                target_filename = _build_target_filename(pv_site_id, start_date, end_date)
+                if not ALLOW_OVERWRITES and target_filename in filenames_present_in_target_folder:
+                    continue
 
-            # Calculate date range (7 days for historical data)
-            end_date = start_date + pd.Timedelta(days=7)
+                tasks.append((pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames_available, start_date, end_date))
 
-            # Check if corresponding PVOutput files exist
-            pvo_filenames = _get_desired_pvoutput_filenames_for_site(
-                pv_site_id, start_date, end_date
-            )
-            pvo_filenames_available = sorted(pvo_filenames.intersection(present_pvo_filenames))
+        else:
+            # BILINEAR: require all 4 vertices
+            # Get all dates available for any vertex
+            available_dates = set()
+            for vertex_loc in vertex_locations_dict.values():
+                vertex_key_prefix = (
+                    vertex_loc.latitude,
+                    vertex_loc.longitude
+                )
+                for key in om_file_lookup.keys():
+                    if key[0] == vertex_key_prefix[0] and key[1] == vertex_key_prefix[1]:
+                        available_dates.add(key[2])
 
-            if len(pvo_filenames_available) == 0:
-                continue
+            # For each date, check if all 4 vertices are available
+            for start_date in sorted(available_dates):
+                vertex_files = {}
+                all_vertices_present = True
 
-            # Check if target file already exists
-            target_filename = _build_target_filename(pv_site_id, start_date, end_date)
-            if not ALLOW_OVERWRITES and target_filename in filenames_present_in_target_folder:
-                continue
+                for vertex_label, vertex_loc in vertex_locations_dict.items():
+                    lookup_key = (
+                        vertex_loc.latitude,
+                        vertex_loc.longitude,
+                        start_date
+                    )
 
-            # Add task
-            tasks.append((pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames_available, start_date, end_date))
+                    if lookup_key in om_file_lookup:
+                        vertex_files[vertex_label] = om_file_lookup[lookup_key]
+                    else:
+                        all_vertices_present = False
+                        break
+
+                if not all_vertices_present:
+                    continue
+
+                # Calculate date range (7 days for historical data)
+                end_date = start_date + pd.Timedelta(days=7)
+
+                # Check if corresponding PVOutput files exist
+                pvo_filenames = _get_desired_pvoutput_filenames_for_site(
+                    pv_site_id, start_date, end_date
+                )
+                pvo_filenames_available = sorted(pvo_filenames.intersection(present_pvo_filenames))
+
+                if len(pvo_filenames_available) == 0:
+                    continue
+
+                # Check if target file already exists
+                target_filename = _build_target_filename(pv_site_id, start_date, end_date)
+                if not ALLOW_OVERWRITES and target_filename in filenames_present_in_target_folder:
+                    continue
+
+                # Add task
+                tasks.append((pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames_available, start_date, end_date))
 
     print(f"\nPrepared {len(tasks)} processing tasks")
 
@@ -160,12 +205,6 @@ def main() -> int:
     failed = 0
 
     with ProcessPoolExecutor() as executor:
-        # TODO get rid
-        # results = [
-        #     _process_site(pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date)
-        #     for pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date in tasks
-        # ]
-
         futures = {
             executor.submit(_process_site, pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date):
             (pv_site_id, start_date)
@@ -205,22 +244,28 @@ def _process_site(
     start_date: date,
     end_date: date
 ) -> str:
-    """Process a single PV site with bounding box interpolation - designed to be called in parallel."""
+    """Process a single PV site - designed to be called in parallel."""
 
-    # Load all four vertices as VertexData objects
+    # Load vertex data
     vertex_data_list = [
         _to_vertex_data(Vertex(location=vertex_locations_dict[vertex_label], label=vertex_label), filename)
         for vertex_label, filename in vertex_files.items()
     ]
 
-    # Create CellData from labeled vertices
-    cell_data = CellData.from_vertices(vertex_data_list)
-
     # Load PVOutput data
     pvo_df = read_and_combine_csv_rows(PVOUTPUT_DIR, pvo_filenames)
 
-    # Preprocess with bilinear interpolation
-    dataframe = preprocess(cell_data, pvo_df, pv_site)
+    # Preprocess with appropriate interpolation strategy
+    target_location = Location(
+        latitude=pv_site.location.latitude,
+        longitude=pv_site.location.longitude
+    )
+
+    if INTERPOLATION_STRATEGY is InterpolationStrategy.NEAREST:
+        dataframe = preprocess_nearest(vertex_data_list, pvo_df, target_location)
+    else:
+        cell_data = CellData.from_vertices(vertex_data_list)
+        dataframe = preprocess_bilinear(cell_data, pvo_df, target_location)
 
     # Skip saving if no valid data remains
     if dataframe.empty:
@@ -244,10 +289,41 @@ def _to_vertex_data(vertex: Vertex, filename: str) -> VertexData:
 # Core preprocessing logic
 # ============================================================================
 
-def preprocess(
+def preprocess_nearest(
+    vertex_data_list: list[VertexData],
+    pvoutput: pd.DataFrame,
+    target_location: Location
+) -> pd.DataFrame:
+    """
+    Preprocess and join OpenMeteo weather data with PVOutput data using nearest-neighbour lookup.
+
+    Args:
+        vertex_data_list: List of VertexData objects (typically one for nearest mode)
+        pvoutput: DataFrame with PV output data
+        target_location: Location of the PV site
+
+    Returns:
+        DataFrame with weather data from the nearest vertex joined with PV output data
+    """
+    openmeteo = select_nearest(vertex_data_list, target_location)
+
+    # Join with PVOutput data
+    _clean_pvoutput_times(pvoutput)
+    pvo_reduced = reduce_rows(
+        pvoutput[['time', 'power']], openmeteo['time']
+    )
+    joined = openmeteo.join(pvo_reduced.set_index('time'), on='time', how='inner')
+
+    # Remove rows where power is NaN
+    joined = joined.dropna(subset=['power'])
+
+    return joined
+
+
+def preprocess_bilinear(
     cell_data: CellData,
     pvoutput: pd.DataFrame,
-    pv_site
+    target_location: Location
 ) -> pd.DataFrame:
     """
     Preprocess and join OpenMeteo weather data with PVOutput data using bilinear interpolation.
@@ -255,14 +331,11 @@ def preprocess(
     Args:
         cell_data: CellData object containing all four bounding box vertices
         pvoutput: DataFrame with PV output data
-        pv_site: PVSite object containing location information
+        target_location: Location of the PV site
 
     Returns:
         DataFrame with interpolated weather data joined with PV output data
     """
-    # Note: No need to convert time columns here - they should already be in the correct format
-    # or the bilinear_interpolate method will handle them
-
     # Get a sample dataframe to identify columns
     sample_df = cell_data.sw.dataframe
     all_columns = [col for col in sample_df.columns if col != 'time']
@@ -274,11 +347,6 @@ def preprocess(
     ]
 
     # Perform bilinear interpolation for continuous variables
-    target_location = Location(
-        latitude=pv_site.location.latitude,
-        longitude=pv_site.location.longitude
-    )
-
     interpolated_df = cell_data.bilinear_interpolate(
         target_location,
         interpolable_columns
@@ -410,4 +478,3 @@ def _build_target_filename(pv_site_id: int, from_date: date, to_date: date) -> s
 
 if __name__ == '__main__':
     exit(main())
-

@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Callable, Collection
 
 import requests
-from pv_prospect.common import BoundingBox, Location, PVSite
+from pv_prospect.common import Location, PVSite
 from pv_prospect.data_extraction.extractors import TimeSeriesDescriptor, TimeSeries
 from pv_prospect.data_extraction.util import retry_on_429
 from typing_extensions import deprecated
@@ -142,7 +142,6 @@ class OpenMeteoTimeSeriesDescriptor:
 
 @dataclass(frozen=True)
 class APIHelper:
-    bounding_box_getter = Callable[[int], BoundingBox]
     api_selector: APISelector
     time_resolution: TimeResolution
     fields: Fields
@@ -200,28 +199,28 @@ API_HELPERS_BY_MODE = {
 
 
 class OpenMeteoWeatherDataExtractor:
-    def __init__(self, bounding_box_getter: Callable[[int], BoundingBox], api_helper: APIHelper) -> None:
-        self.bounding_box_getter = bounding_box_getter
+    def __init__(self, location_getter: Callable[[PVSite], list[Location]], api_helper: APIHelper) -> None:
+        self.location_getter = location_getter
         self.api_helper = api_helper
 
     @classmethod
     def from_mode(
-            cls, bounding_box_getter: Callable[[int], BoundingBox], mode: Mode
+            cls, location_getter: Callable[[PVSite], list[Location]], mode: Mode
     ) -> 'OpenMeteoWeatherDataExtractor':
         api_helper = API_HELPERS_BY_MODE[mode]
-        return cls(bounding_box_getter=bounding_box_getter, api_helper=api_helper)
+        return cls(location_getter=location_getter, api_helper=api_helper)
 
     @classmethod
     def from_components(
             cls,
-            bounding_box_getter: Callable[[int], BoundingBox],
+            location_getter: Callable[[PVSite], list[Location]],
             api_selector: APISelector,
             time_resolution: TimeResolution,
             models: Models,
             fields: Fields,
     ) -> 'OpenMeteoWeatherDataExtractor':
         return cls(
-            bounding_box_getter=bounding_box_getter,
+            location_getter=location_getter,
             api_helper=APIHelper(
                 api_selector=api_selector,
                 time_resolution=time_resolution,
@@ -231,46 +230,46 @@ class OpenMeteoWeatherDataExtractor:
         )
 
     def get_time_series_descriptors(self, pv_site: PVSite) -> list[TimeSeriesDescriptor]:
-        bounding_box = self.bounding_box_getter(pv_site.pvo_sys_id)
-        return [OpenMeteoTimeSeriesDescriptor(vertex) for vertex in bounding_box.get_vertices()]
+        locations = self.location_getter(pv_site)
+        return [OpenMeteoTimeSeriesDescriptor(location) for location in locations]
 
     @retry_on_429
     def extract(
             self, time_series_descriptors: Collection[OpenMeteoTimeSeriesDescriptor], date_: date, end_date: date = None
     ) -> list[TimeSeries]:
 
+        ts_descriptors = list(time_series_descriptors)
+
         start_datetime = datetime.combine(date_, MIN_TIME)
 
         # For multi-date extraction, use end_date if provided; otherwise use same day
         end_datetime = datetime.combine(end_date if end_date else date_, MAX_TIME)
 
-        vertices = [tsd.location for tsd in time_series_descriptors]
+        locations = [tsd.location for tsd in ts_descriptors]
 
         url = self.api_helper.get_url()
-        params = self.api_helper.get_query_params(vertices, start_datetime, end_datetime)
+        params = self.api_helper.get_query_params(locations, start_datetime, end_datetime)
         response = requests.get(url=url, params=params)
         response.raise_for_status()
 
         # Parse JSON response and convert to CSV rows
         json_data = json.loads(response.text)
 
-        if len(time_series_descriptors) == 1:
+        if len(ts_descriptors) == 1:
             # json will be an object
-            time_series = TimeSeries(
-                descriptor=time_series_descriptors[0],
+            return [TimeSeries(
+                descriptor=ts_descriptors[0],
                 rows=self._process_time_series_data(json_data)
-            )
+            )]
         else:
             # json will be an array of objects
-            time_series = [
+            return [
                 TimeSeries(
                     descriptor=ts_descriptor,
                     rows=self._process_time_series_data(json_data[i])
                 )
-                for i, ts_descriptor in enumerate(time_series_descriptors)
+                for i, ts_descriptor in enumerate(ts_descriptors)
             ]
-
-        return time_series
 
     def _process_time_series_data(self, json_data) -> list[list[str]]:
         om_descriptor = self.api_helper.time_resolution.om_descriptor

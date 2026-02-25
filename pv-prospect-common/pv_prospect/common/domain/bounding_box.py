@@ -48,3 +48,18 @@ class BoundingBox:
             for vertex in self.vertices
         }
 
+    def nearest_vertex_location(self, target: Location) -> Location:
+        """
+        Find the vertex location nearest to the target location.
+
+        Args:
+            target: The target Location to find the nearest vertex for
+
+        Returns:
+            The Location of the nearest vertex
+        """
+        return min(
+            (v.location for v in self.vertices),
+            key=lambda loc: loc.euclidean_distance(target)
+        )
+
