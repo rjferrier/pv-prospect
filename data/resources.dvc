@@ -1,0 +1,6 @@
+outs:
+- md5: 3486e9c76450cd2db9a9154e57d4db12.dir
+  size: 1740
+  nfiles: 2
+  hash: md5
+  path: resources
