@@ -10,6 +10,7 @@ Data extraction pipeline for PV Prospect.
 - Required credentials files in `pv_prospect/data_extraction/resources/`:
   - `gdrive_credentials.json`
   - `gdrive_token.json`
+- *(For local extraction with `-l`)* GCS service-account key for accessing `gs://pv-prospect-data`. Mount as `gcs-service-account-key.json` in the project root and uncomment the corresponding lines in `docker-compose.yml`.
 
 ### Starting the Infrastructure
 
@@ -78,26 +79,30 @@ docker compose run --rm taskproducer weather-om-60 89665 -d 2024-01-15 -x -l tem
 
 ### Option 2 — Run task producer from host but use dockerised broker & worker (recommended for local dev)
 
-If you want to run the task producer from your host machine (so you can iterate quickly and pass CLI args directly) but still use the RabbitMQ broker and Celery worker running inside Docker, run the producer container via `docker compose run` and bind-mount a host directory to the service so any files written with `-l/--local-dir` are visible on the host.
+If you want to run the task producer from your host machine (so you can iterate quickly and pass CLI args directly) but still use the RabbitMQ broker and Celery worker running inside Docker, run the producer container via `docker compose run` and pass the path `/data/out` to `-l/--local-dir`.
 
 How this works:
-- `docker compose run` creates a short-lived container attached to the compose network so it can reach `rabbitmq:5672` and the worker.
+- The **worker** service already has `./out` on the host bind-mounted to `/data/out` inside the container (configured in `docker-compose.yml`). This is important because it is the **worker** — not the taskproducer — that actually writes the output files; the taskproducer merely enqueues tasks.
+- `docker compose run` creates a short-lived taskproducer container attached to the compose network so it can reach `rabbitmq:5672` and dispatch tasks to the worker.
 - Pass all task producer CLI arguments after the service name; they are forwarded into the container entrypoint.
-- Use `-v` to bind-mount a host directory into the container at the path you will pass to `-l` so any files the container creates are immediately visible on the host.
+- Pass `-l /data/out` to tell the worker where to write files. The worker container resolves this path against its own bind-mount, so files appear under `./out` on your host.
 
-Example (bind a host folder `./out` to `/data/out` inside the container and pass `-l /data/out`):
+Example (start the worker with its existing `./out:/data/out` mount, then run the taskproducer):
 
 ```bash
 mkdir -p out
-# Run taskproducer in the compose network, mount ./out into the container at /data/out
-docker compose run --rm -v "$(pwd)/out:/data/out" taskproducer weather-om-60 89665 -d 2024-01-15 -x -l /data/out
+# Start the infrastructure (worker already has ./out mounted at /data/out)
+docker compose up -d rabbitmq worker flower
+
+# Enqueue extraction tasks — the worker will write results to ./out on the host
+docker compose run --rm taskproducer weather-om-60 89665 -d 2024-01-15 -x -l /data/out
 ```
 
 Notes and tips:
 - Do NOT expose the AMQP port (5672) on the host — the container will reach the broker over the compose network at `rabbitmq:5672` as configured in `docker-compose.yml`.
-- The path you pass to `-l/--local-dir` must be the path inside the container (e.g. `/data/out` in the example). Use an absolute path inside the container to avoid ambiguity.
-- You can reuse the same bind mount for multiple runs; files written by the taskproducer will appear under `./out` on your host.
-- If you mount a directory that is not empty, the container will use it as the base for writes; permissions are determined by Docker and host user mappings — if you see permission errors, try adjusting ownership or use `--user $(id -u):$(id -g)` on the `docker compose run` command.
+- The path you pass to `-l/--local-dir` is resolved by the **worker** container. Always use `/data/out` (or a sub-path beneath it) to stay inside the bind-mounted directory.
+- You can reuse the same bind mount for multiple runs; files written by the worker will accumulate under `./out` on your host.
+- If you see permission errors, try `--user $(id -u):$(id -g)` on the `docker compose up` command or adjust ownership of `./out`.
 
 This option keeps the messaging entirely on the Docker network while letting you run the producer with local credentials and inspect output files on your host.
 

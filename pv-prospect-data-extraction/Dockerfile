@@ -43,6 +43,7 @@ ENTRYPOINT ["python", "-m", "pv_prospect.data_extraction.processing.task_produce
 
 # Runtime image for Celery worker (default runs the worker process)
 FROM runtime-common AS worker
+COPY ./data/resources.dvc /app/resources.dvc
 CMD ["celery", "-A", "pv_prospect.data_extraction.processing.worker", "worker", "--loglevel=info"]
 
 

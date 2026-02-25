@@ -5,7 +5,7 @@ services:
     ports:
       # Do NOT bind AMQP port (5672) to the host to avoid host port clashes.
       # The broker is reachable by other services in the compose network at rabbitmq:5672.
-      - "15672:15672"   # Management UI
+      - "15672:15672" # Management UI
     environment:
       RABBITMQ_DEFAULT_USER: "user"
       RABBITMQ_DEFAULT_PASS: "password"
@@ -22,9 +22,12 @@ services:
     environment:
       CELERY_BROKER_URL: "amqp://user:password@rabbitmq:5672//"
       CELERY_RESULT_BACKEND: "rpc://"
+      GOOGLE_APPLICATION_CREDENTIALS: "/root/.config/gcloud/application_default_credentials.json"
     volumes:
+      - ./out:/data/out
       - ./pv_prospect/data_extraction/resources/gdrive_credentials.json:/app/pv-prospect-data-extraction/pv_prospect/data_extraction/resources/gdrive_credentials.json:ro
       - ./pv_prospect/data_extraction/resources/gdrive_token.json:/app/pv-prospect-data-extraction/pv_prospect/data_extraction/resources/gdrive_token.json:ro
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
     depends_on:
       - rabbitmq
     restart: on-failure
@@ -36,7 +39,7 @@ services:
       target: flower
     container_name: pvprospect-dataextraction-flower
     ports:
-      - "5555:5555"   # Flower web UI
+      - "5555:5555" # Flower web UI
     environment:
       CELERY_BROKER_URL: "amqp://user:password@rabbitmq:5672//"
       CELERY_RESULT_BACKEND: "rpc://"

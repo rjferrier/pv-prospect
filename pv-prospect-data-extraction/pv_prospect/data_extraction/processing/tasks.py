@@ -13,18 +13,24 @@ METADATA_FOLDER = 'metadata'
 PV_SITES_CSV_FILE = 'pv_sites.csv'
 OM_BOUNDING_BOXES_CSV_FILE = 'openmeteo_bounding_boxes.csv'
 
+SUPPORTING_RESOURCES = [PV_SITES_CSV_FILE, OM_BOUNDING_BOXES_CSV_FILE]
+DVC_FILE_PATH = os.environ.get('DVC_FILE_PATH', '/app/resources.dvc')
+
+
 @app.task
-def create_folders(
+def preprocess(
         source_descriptor: SourceDescriptor,
         local_dir: str | None,
         include_metadata: bool
 ) -> list[str]:
     """
-    Create folder structure for a data source.
+    Preprocess before extraction: create folder structure and provision supporting
+    resources (pv_sites.csv, openmeteo_bounding_boxes.csv) via the storage client.
 
     Args:
         source_descriptor: The source descriptor enum identifying the data source folder.
-        local_dir: If provided, a local directory path where folders will be created instead of Google Drive.
+        local_dir: If provided, a local directory path where files will be created.
+        include_metadata: If True, also create a metadata folder.
     """
     storage_client = get_storage_client(local_dir)
     parent_folders = [TIMESERIES_FOLDER, METADATA_FOLDER] if include_metadata else [TIMESERIES_FOLDER]
@@ -32,6 +38,9 @@ def create_folders(
         storage_client.create_folder(f"{parent}/{source_descriptor}")
         for parent in parent_folders
     ]
+
+    storage_client.provision_supporting_resources(DVC_FILE_PATH, SUPPORTING_RESOURCES)
+
     return folder_ids
 
 

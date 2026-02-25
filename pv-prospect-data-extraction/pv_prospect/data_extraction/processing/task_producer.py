@@ -175,7 +175,7 @@ def _main(config, args):
         raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(source_descriptor_keys)}")
 
     source_descriptors = [SOURCE_DESCRIPTORS[source] for source in sources]
-    task_queuer.create_folders(
+    task_queuer.preprocess(
         source_descriptors, args.local_dir, args.write_metadata
     ).wait_for_completion()
 

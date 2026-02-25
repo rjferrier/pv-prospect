@@ -1,9 +1,13 @@
 import csv
 import io
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Iterable
+
+from google.cloud import storage as gcs
+from pv_prospect.data_extraction.loaders.dvc_utils import get_blob_paths, GCS_BUCKET
 
 
 class LocalStorageClient:
@@ -224,3 +228,25 @@ class LocalStorageClient:
             trash_dest = trash_dest.parent / f"{trash_dest.stem}_{timestamp}{trash_dest.suffix}"
 
         shutil.move(str(full_path), str(trash_dest))
+
+    def provision_supporting_resources(self, dvc_file_path: str, resource_files: list[str]) -> None:
+        """
+        Download supporting resource CSVs from the GCS DVC cache to base_dir/.
+
+        Skips files that already exist locally.
+
+        Args:
+            dvc_file_path: Path to the directory .dvc YAML (e.g. /app/resources.dvc).
+            resource_files: List of filenames to provision (e.g. ['pv_sites.csv']).
+        """
+        blob_paths = get_blob_paths(dvc_file_path, resource_files)
+        client = gcs.Client()
+        bucket = client.bucket(GCS_BUCKET)
+
+        for filename, blob_path in blob_paths.items():
+            dest = self.base_dir / filename
+            if dest.exists():
+                print(f"    {filename} already exists, skipping download")
+                continue
+            bucket.blob(blob_path).download_to_filename(str(dest))
+            print(f"    Downloaded {filename} from GCS ({blob_path})")

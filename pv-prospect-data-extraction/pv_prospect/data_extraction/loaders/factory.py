@@ -1,7 +1,7 @@
 from io import TextIOWrapper
 from typing import Protocol, Iterable
 
-from pv_prospect.data_extraction.loaders.gdrive import GDriveClient
+from pv_prospect.data_extraction.loaders.gcs import GcsClient
 from pv_prospect.data_extraction.loaders.local import LocalStorageClient
 
 
@@ -61,9 +61,24 @@ class StorageClient(Protocol):
         Move a file to trash.
 
         Args:
-            file_id_or_path: For GDrive: file ID, For Local: file path
+            file_id_or_path: File ID or file path
         """
+        ...
 
+    def provision_supporting_resources(self, dvc_file_path: str, resource_files: list[str]) -> None:
+        """
+        Make supporting resource files available via this storage client.
+
+        Args:
+            dvc_file_path: Path to the directory .dvc YAML baked into the image
+                           (e.g. '/app/resources.dvc').
+            resource_files: List of filenames to provision (e.g. ['pv_sites.csv']).
+
+        Implementations differ by backend:
+        - LocalStorageClient: downloads from GCS DVC cache to base_dir/
+        - GcsClient: server-side copies from GCS DVC cache to staging/
+        """
+        ...
 
 def get_storage_client(local_dir: str | None) -> StorageClient:
     """
@@ -91,5 +106,5 @@ def get_storage_client(local_dir: str | None) -> StorageClient:
         print(f"Using local storage at {local_dir}")
         return LocalStorageClient(local_dir)
     else:
-        print("Using Google Drive storage")
-        return GDriveClient.build_service()
+        print("Using GCS storage")
+        return GcsClient()
