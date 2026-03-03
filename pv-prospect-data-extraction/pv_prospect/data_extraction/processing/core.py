@@ -20,7 +20,6 @@ from pv_prospect.data_extraction.loaders import get_storage_client
 from pv_prospect.data_extraction.processing.value_objects import Task, Result
 
 TIMESERIES_FOLDER = 'timeseries'
-METADATA_FOLDER = 'metadata'
 PV_SITES_CSV_FILE = 'pv_sites.csv'
 OM_BOUNDING_BOXES_CSV_FILE = 'openmeteo_bounding_boxes.csv'
 
@@ -31,7 +30,6 @@ DVC_FILE_PATH = os.environ.get('DVC_FILE_PATH', '/app/resources.dvc')
 def preprocess(
         source_descriptor: SourceDescriptor,
         local_dir: str | None,
-        include_metadata: bool,
 ) -> list[str]:
     """
     Preprocess before extraction: create folder structure and provision
@@ -40,12 +38,9 @@ def preprocess(
     Args:
         source_descriptor: The source descriptor identifying the data source folder.
         local_dir: If provided, a local directory path where files will be created.
-        include_metadata: If True, also create a metadata folder.
     """
     storage_client = get_storage_client(local_dir)
-    parent_folders = (
-        [TIMESERIES_FOLDER, METADATA_FOLDER] if include_metadata else [TIMESERIES_FOLDER]
-    )
+    parent_folders = [TIMESERIES_FOLDER]
     folder_ids = [
         storage_client.create_folder(f"{parent}/{source_descriptor}")
         for parent in parent_folders
@@ -61,7 +56,6 @@ def extract_and_load(
         pv_system_id: int,
         date_range: DateRange,
         local_dir: str | None,
-        write_metadata: bool,
         overwrite: bool,
         dry_run: bool,
 ) -> Result:
@@ -73,7 +67,6 @@ def extract_and_load(
         pv_system_id: PV system identifier.
         date_range: DateRange containing start date and optional end date.
         local_dir: Local directory path, or None for GCS.
-        write_metadata: If True, write metadata JSON alongside the CSV.
         overwrite: If True, overwrite existing files.
         dry_run: If True, perform a dry run (do not write files).
 

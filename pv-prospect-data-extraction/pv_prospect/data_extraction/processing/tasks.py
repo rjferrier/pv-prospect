@@ -20,9 +20,8 @@ DVC_FILE_PATH = core.DVC_FILE_PATH
 def preprocess(
         source_descriptor: SourceDescriptor,
         local_dir: str | None,
-        include_metadata: bool,
 ) -> list[str]:
-    return core.preprocess(source_descriptor, local_dir, include_metadata)
+    return core.preprocess(source_descriptor, local_dir)
 
 
 @app.task
@@ -31,11 +30,10 @@ def extract_and_load(
         pv_system_id: int,
         date_range: DateRange,
         local_dir: str | None,
-        write_metadata: bool,
         overwrite: bool,
         dry_run: bool,
 ) -> Result:
     return core.extract_and_load(
         source_descriptor, pv_system_id, date_range,
-        local_dir, write_metadata, overwrite, dry_run,
+        local_dir, overwrite, dry_run,
     )

@@ -102,30 +102,6 @@ class LocalStorageClient:
         
         print(f"    Written to: {full_path}")
     
-    def write_metadata(self, csv_file_path: str, metadata: dict) -> None:
-        """
-        Write JSON metadata to a local file alongside the corresponding CSV file.
-        
-        Args:
-            csv_file_path: The CSV file path (used to derive the metadata filename)
-            metadata: The metadata to write as JSON
-        """
-        # Derive metadata filename from CSV path (replace .csv with .json)
-        if csv_file_path.lower().endswith('.csv'):
-            metadata_path = csv_file_path[:-4] + '.json'
-        else:
-            metadata_path = csv_file_path + '.json'
-        
-        full_path = self.base_dir / metadata_path
-        
-        # Create parent directories if they don't exist
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Write the JSON file
-        with open(full_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-        
-        print(f"    Written metadata to: {full_path}")
 
     def list_files(self, folder_path: str | None = None, pattern: str = "*", recursive: bool = False) -> list[dict]:
         """

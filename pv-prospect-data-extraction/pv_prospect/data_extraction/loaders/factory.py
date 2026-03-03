@@ -22,9 +22,6 @@ class StorageClient(Protocol):
         """Write CSV data to storage."""
         ...
 
-    def write_metadata(self, csv_file_path: str, metadata: dict) -> None:
-        """Write JSON metadata alongside a CSV file."""
-        ...
 
     def list_files(self, folder_path: str | None = None, pattern: str = "*", recursive: bool = False) -> list[dict]:
         """

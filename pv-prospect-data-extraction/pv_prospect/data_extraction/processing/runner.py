@@ -63,7 +63,6 @@ def _parse_args():
     parser.add_argument('-r', '--reverse', action='store_true', help="process dates in reverse order")
     parser.add_argument('-n', '--dry-run', action='store_true', help="show what would be done without writing")
     parser.add_argument('-w', '--by-week', action='store_true', help="process one week at a time")
-    parser.add_argument('-x', '--write-metadata', action='store_true', help="write metadata JSON alongside CSVs")
     parser.add_argument('-l', '--local-dir', type=str, default=None, help="local directory instead of GCS")
     parser.add_argument('-o', '--overwrite', action='store_true', help="overwrite existing CSV files")
     parser.add_argument(
@@ -148,7 +147,7 @@ def _main() -> None:
 
     # --- preprocess (sequential, one per source) ----------------------------
     for sd in source_descriptors:
-        core.preprocess(sd, args.local_dir, args.write_metadata)
+        core.preprocess(sd, args.local_dir)
 
     # --- resolve PV system IDs ----------------------------------------------
     pv_system_ids = (
@@ -190,7 +189,7 @@ def _main() -> None:
             pool.submit(
                 core.extract_and_load,
                 sd, pv_id, dr,
-                args.local_dir, args.write_metadata,
+                args.local_dir,
                 args.overwrite, args.dry_run,
             ): (sd, pv_id, dr)
             for sd, pv_id, dr in work_items

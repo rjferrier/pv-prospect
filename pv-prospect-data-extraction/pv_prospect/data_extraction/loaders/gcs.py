@@ -63,19 +63,7 @@ class GcsClient:
         blob.upload_from_string(buf.getvalue(), content_type='text/csv')
         print(f"    Written to: gs://{self._bucket.name}/{blob_path}")
 
-    def write_metadata(self, csv_file_path: str, metadata: dict) -> None:
-        if csv_file_path.lower().endswith('.csv'):
-            metadata_path = csv_file_path[:-4] + '.json'
-        else:
-            metadata_path = csv_file_path + '.json'
 
-        blob_path = self._blob_path(metadata_path)
-        blob = self._bucket.blob(blob_path)
-        blob.upload_from_string(
-            json.dumps(metadata, indent=2, ensure_ascii=False),
-            content_type='application/json',
-        )
-        print(f"    Written metadata to: gs://{self._bucket.name}/{blob_path}")
 
     def list_files(self, folder_path: str | None = None, pattern: str = "*", recursive: bool = False) -> list[dict]:
         prefix = self._blob_path(folder_path) + '/' if folder_path else self._prefix + '/'

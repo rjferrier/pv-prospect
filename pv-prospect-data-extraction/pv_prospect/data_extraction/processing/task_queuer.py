@@ -42,11 +42,11 @@ class TaskQueuer:
         )
 
     def preprocess(
-            self, source_descriptors: list[SourceDescriptor], local_dir: str | None, include_metadata: bool
+            self, source_descriptors: list[SourceDescriptor], local_dir: str | None
     ) -> AsyncResultsWrapper:
         print(f"Preprocessing for:", ', '.join(source_descriptors))
         results_async = [
-            preprocess.apply_async(args=(sd, local_dir, include_metadata), countdown=self._calculate_delay(i))
+            preprocess.apply_async(args=(sd, local_dir), countdown=self._calculate_delay(i))
             for i, sd in enumerate(source_descriptors)
         ]
         return self._wrap_async_results(results_async, _preprocess_callback)
@@ -54,10 +54,9 @@ class TaskQueuer:
     def extract_and_load(
             self,
             source_descriptor: SourceDescriptor,
-            pv_system_id: str,
+            pv_system_id: int,
             date_range: DateRange,
             local_dir: str | None,
-            write_metadata: bool,
             overwrite: bool,
             dry_run: bool,
             counter: int
@@ -68,7 +67,6 @@ class TaskQueuer:
                 pv_system_id,
                 date_range,
                 local_dir,
-                write_metadata,
                 overwrite,
                 dry_run,
             ),

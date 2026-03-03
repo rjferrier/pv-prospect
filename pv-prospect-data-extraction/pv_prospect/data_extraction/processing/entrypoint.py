@@ -10,14 +10,12 @@ JOB_TYPE
 
 For **preprocess**:
     SOURCE_DESCRIPTOR — e.g. ``openmeteo/quarterhourly``
-    INCLUDE_METADATA  — ``true`` or ``false`` (default ``false``)
 
 For **extract_and_load**:
     SOURCE_DESCRIPTOR — e.g. ``openmeteo/quarterhourly``
     PV_SYSTEM_ID      — integer system id
     START_DATE        — ISO date ``YYYY-MM-DD``
     END_DATE          — ISO date ``YYYY-MM-DD``
-    WRITE_METADATA    — ``true`` or ``false`` (default ``false``)
     OVERWRITE         — ``true`` or ``false`` (default ``false``)
     DRY_RUN           — ``true`` or ``false`` (default ``false``)
 """
@@ -39,13 +37,11 @@ def main() -> None:
 
     if job_type == 'preprocess':
         source_descriptor = SourceDescriptor(os.environ['SOURCE_DESCRIPTOR'])
-        include_metadata = _env_bool('INCLUDE_METADATA')
 
         print(f"[entrypoint] preprocess: {source_descriptor}")
         core.preprocess(
             source_descriptor=source_descriptor,
             local_dir=None,          # Cloud Run always writes to GCS
-            include_metadata=include_metadata,
         )
 
     elif job_type == 'extract_and_load':
@@ -53,7 +49,6 @@ def main() -> None:
         pv_system_id = int(os.environ['PV_SYSTEM_ID'])
         start_date = date.fromisoformat(os.environ['START_DATE'])
         end_date = date.fromisoformat(os.environ['END_DATE'])
-        write_metadata = _env_bool('WRITE_METADATA')
         overwrite = _env_bool('OVERWRITE')
         dry_run = _env_bool('DRY_RUN')
 
@@ -66,7 +61,6 @@ def main() -> None:
             pv_system_id=pv_system_id,
             date_range=date_range,
             local_dir=None,
-            write_metadata=write_metadata,
             overwrite=overwrite,
             dry_run=dry_run,
         )

@@ -522,22 +522,7 @@ class GDriveClient:
             # resolved_file_path = self.resolve_path(file_path)  # already resolved above
             self.upload_file(media_body, resolved_file_path, CSV_MIME_TYPE)
 
-    def write_metadata(self, csv_file_path: str, metadata: dict) -> None:
-        """Upload JSON metadata to Google Drive."""
-        # Derive metadata filename from CSV path (replace .csv with .json)
-        if csv_file_path.lower().endswith('.csv'):
-            metadata_path = csv_file_path[:-4] + '.json'
-        else:
-            metadata_path = csv_file_path + '.json'
 
-        with SpooledTemporaryFile(mode='w+b') as tmp:
-            text = json.dumps(metadata, indent=2, ensure_ascii=False)
-            tmp.write(text.encode('utf-8'))
-            tmp.seek(0)
-
-            media_body = MediaIoBaseUpload(tmp, mimetype='application/json', resumable=True)
-            resolved_file_path = self._resolve_path(metadata_path)
-            self.upload_file(media_body, resolved_file_path, 'application/json')
 
     # Private methods (alphabetically)
 

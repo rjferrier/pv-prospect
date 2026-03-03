@@ -60,11 +60,7 @@ def _parse_args():
         action='store_true',
         help="Process one week at a time instead of one day at a time."
     )
-    parser.add_argument(
-        '-x', '--write-metadata',
-        action='store_true',
-        help='Write extractor metadata as a JSON file next to the CSV when present.'
-    )
+
     parser.add_argument(
         '-l', '--local-dir',
         type=str,
@@ -176,7 +172,7 @@ def _main(config, args):
 
     source_descriptors = [SOURCE_DESCRIPTORS[source] for source in sources]
     task_queuer.preprocess(
-        source_descriptors, args.local_dir, args.write_metadata
+        source_descriptors, args.local_dir
     ).wait_for_completion()
 
     pv_system_ids = (
@@ -222,7 +218,6 @@ def _main(config, args):
                         pv_system_id,
                         dr,
                         args.local_dir,
-                        args.write_metadata,
                         args.overwrite,
                         args.dry_run,
                         counter
