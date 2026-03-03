@@ -1,15 +1,35 @@
 services:
+  runner:
+    build:
+      context: ..
+      dockerfile: pv-prospect-data-extraction/Dockerfile
+      target: runner
+    container_name: pvprospect-dataextraction-runner
+    env_file:
+      - worker.env
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: "/root/.config/gcloud/application_default_credentials.json"
+    volumes:
+      - ./out:/data/out
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+    profiles:
+      - manual
+
+  # ---------------------------------------------------------------------------
+  # Legacy Celery-based services (optional, retained for backward compat)
+  # ---------------------------------------------------------------------------
+
   rabbitmq:
     image: rabbitmq:3-management
     container_name: pvprospect-dataextraction-rabbitmq
     ports:
-      # Do NOT bind AMQP port (5672) to the host to avoid host port clashes.
-      # The broker is reachable by other services in the compose network at rabbitmq:5672.
       - "15672:15672" # Management UI
     environment:
       RABBITMQ_DEFAULT_USER: "user"
       RABBITMQ_DEFAULT_PASS: "password"
     restart: unless-stopped
+    profiles:
+      - celery
 
   worker:
     build:
@@ -31,6 +51,8 @@ services:
     depends_on:
       - rabbitmq
     restart: on-failure
+    profiles:
+      - celery
 
   flower:
     build:
@@ -39,7 +61,7 @@ services:
       target: flower
     container_name: pvprospect-dataextraction-flower
     ports:
-      - "5555:5555" # Flower web UI
+      - "5555:5555"
     environment:
       CELERY_BROKER_URL: "amqp://user:password@rabbitmq:5672//"
       CELERY_RESULT_BACKEND: "rpc://"
@@ -47,6 +69,8 @@ services:
       - rabbitmq
       - worker
     restart: on-failure
+    profiles:
+      - celery
 
   taskproducer:
     build:
@@ -64,4 +88,4 @@ services:
       - rabbitmq
       - worker
     profiles:
-      - manual
+      - celery

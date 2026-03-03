@@ -14,54 +14,156 @@ provider "google" {
   project = var.project_id
 }
 
-# Storage module for DVC and data management
+# ---------------------------------------------------------------------------
+# Required GCP APIs
+# ---------------------------------------------------------------------------
+
+resource "google_project_service" "apis" {
+  for_each = toset([
+    "artifactregistry.googleapis.com",
+    "run.googleapis.com",
+    "workflows.googleapis.com",
+    "cloudscheduler.googleapis.com",
+    "secretmanager.googleapis.com",
+  ])
+  service            = each.value
+  disable_on_destroy = false
+}
+
+# ---------------------------------------------------------------------------
+# Shared service account for pipeline execution
+# ---------------------------------------------------------------------------
+
+resource "google_service_account" "pipeline" {
+  account_id   = "data-extraction-pipeline"
+  display_name = "Data Extraction Pipeline"
+  description  = "Used by Cloud Run Jobs, Workflows, and Scheduler"
+}
+
+# The pipeline SA needs to read/write GCS objects
+resource "google_storage_bucket_iam_member" "pipeline_gcs" {
+  bucket = module.storage.bucket_name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
+# The pipeline SA needs to run Cloud Run Jobs
+resource "google_project_iam_member" "pipeline_run_invoker" {
+  project = var.project_id
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
+# The pipeline SA needs to execute workflows
+resource "google_project_iam_member" "pipeline_workflows_invoker" {
+  project = var.project_id
+  role    = "roles/workflows.invoker"
+  member  = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
+# The Workflow needs to be able to trigger Cloud Run Job executions
+resource "google_project_iam_member" "pipeline_run_developer" {
+  project = var.project_id
+  role    = "roles/run.developer"
+  member  = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
+# The Cloud Run Job needs to read secrets (API keys) from Secret Manager
+resource "google_project_iam_member" "pipeline_secret_accessor" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
+# ---------------------------------------------------------------------------
+# Modules
+# ---------------------------------------------------------------------------
+
 module "storage" {
   source      = "./modules/storage"
   bucket_name = var.bucket_name
   region      = var.region
 }
 
-# Kafka cluster module
-module "kafka" {
-  source = "./modules/kafka"
+module "artifact_registry" {
+  source = "./modules/artifact_registry"
   region = var.region
-  zone   = var.zone
+
+  depends_on = [google_project_service.apis]
 }
 
-# Outputs from modules
+module "cloud_run" {
+  source = "./modules/cloud_run"
+  region = var.region
+
+  project_id            = var.project_id
+  image_url             = "${module.artifact_registry.repository_url}/data-extraction"
+  image_tag             = var.image_tag
+  gcs_bucket            = var.bucket_name
+  service_account_email = google_service_account.pipeline.email
+  secret_env_vars       = var.secret_env_vars
+
+  depends_on = [google_project_service.apis, module.artifact_registry]
+}
+
+module "workflows" {
+  source = "./modules/workflows"
+  region = var.region
+
+  service_account_email      = google_service_account.pipeline.email
+  cloud_run_job_name         = module.cloud_run.job_name
+  default_source_descriptors = var.default_source_descriptors
+  default_pv_system_ids      = var.default_pv_system_ids
+
+  depends_on = [google_project_service.apis, module.cloud_run]
+}
+
+module "scheduler" {
+  source = "./modules/scheduler"
+  region = var.region
+
+  workflow_id           = module.workflows.workflow_id
+  service_account_email = google_service_account.pipeline.email
+  schedule              = var.scheduler_cron
+
+  depends_on = [google_project_service.apis, module.workflows]
+}
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+
 output "service_account_email" {
   value       = module.storage.service_account_email
-  description = "Use this service account for application authentication."
+  description = "DVC service account email"
+}
+
+output "pipeline_service_account_email" {
+  value       = google_service_account.pipeline.email
+  description = "Pipeline service account email"
 }
 
 output "bucket_name" {
   value       = module.storage.bucket_name
-  description = "Name of the created storage bucket"
+  description = "Name of the storage bucket"
 }
 
-output "zookeeper_internal_ip" {
-  value       = module.kafka.zookeeper_internal_ip
-  description = "Internal IP of Zookeeper instance"
+output "artifact_registry_url" {
+  value       = module.artifact_registry.repository_url
+  description = "Docker registry URL"
 }
 
-output "zookeeper_external_ip" {
-  value       = module.kafka.zookeeper_external_ip
-  description = "External IP of Zookeeper instance"
+output "cloud_run_job_name" {
+  value       = module.cloud_run.job_name
+  description = "Cloud Run Job name"
 }
 
-output "kafka_broker_internal_ips" {
-  value       = module.kafka.kafka_broker_internal_ips
-  description = "Internal IPs of Kafka broker instances"
+output "workflow_name" {
+  value       = module.workflows.workflow_name
+  description = "Workflow name"
 }
 
-output "kafka_broker_external_ips" {
-  value       = module.kafka.kafka_broker_external_ips
-  description = "External IPs of Kafka broker instances"
+output "scheduler_job_name" {
+  value       = module.scheduler.scheduler_job_name
+  description = "Cloud Scheduler job name"
 }
-
-output "kafka_bootstrap_servers" {
-  value       = module.kafka.kafka_bootstrap_servers
-  description = "Kafka bootstrap servers connection string (internal IPs)"
-}
-
-

@@ -11,7 +11,7 @@ resource "google_storage_bucket" "pv_prospect_data" {
 }
 
 resource "google_service_account" "dvc_sa" {
-  account_id   = "dvc-sa"
+  account_id   = "dvc-sa-v3"
   display_name = "DVC SA"
 }
 

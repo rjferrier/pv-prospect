@@ -15,9 +15,35 @@ variable "region" {
   description = "GCP region for all resources"
 }
 
-variable "zone" {
+variable "image_tag" {
   type        = string
-  default     = "europe-west2-a"
-  description = "GCP zone for compute resources"
+  default     = "latest"
+  description = "Docker image tag for the data extraction container"
 }
 
+variable "scheduler_cron" {
+  type        = string
+  default     = "0 3 * * *"
+  description = "Cron schedule for daily extraction (default: 03:00 UTC)"
+}
+
+variable "default_source_descriptors" {
+  type        = list(string)
+  default     = ["openmeteo/quarterhourly", "openmeteo/hourly"]
+  description = "Source descriptors for the daily scheduled run"
+}
+
+variable "default_pv_system_ids" {
+  type        = list(number)
+  description = "PV system IDs to process in the daily scheduled run"
+}
+
+variable "secret_env_vars" {
+  type = list(object({
+    name      = string
+    secret_id = string
+    version   = string
+  }))
+  default     = []
+  description = "Environment variables sourced from Secret Manager for Cloud Run Jobs"
+}

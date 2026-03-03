@@ -36,17 +36,28 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 
-# Runtime image for CLI (default runs the CLI)
+# ---- Cloud Run Job entrypoint (primary cloud target) ----
+FROM runtime-common AS entrypoint
+COPY ./data/resources.dvc /app/resources.dvc
+CMD ["python", "-m", "pv_prospect.data_extraction.processing.entrypoint"]
+
+
+# ---- Local runner (for development) ----
+FROM runtime-common AS runner
+ENTRYPOINT ["python", "-m", "pv_prospect.data_extraction.processing.runner"]
+
+
+# ---- Legacy: CLI task producer (Celery-based) ----
 FROM runtime-common AS cli
 ENTRYPOINT ["python", "-m", "pv_prospect.data_extraction.processing.task_producer"]
 
 
-# Runtime image for Celery worker (default runs the worker process)
+# ---- Legacy: Celery worker ----
 FROM runtime-common AS worker
 COPY ./data/resources.dvc /app/resources.dvc
 CMD ["celery", "-A", "pv_prospect.data_extraction.processing.worker", "worker", "--loglevel=info"]
 
 
-# Runtime image for Flower monitoring
+# ---- Legacy: Flower monitoring ----
 FROM runtime-common AS flower
 CMD ["celery", "-A", "pv_prospect.data_extraction.processing.worker", "flower"]
