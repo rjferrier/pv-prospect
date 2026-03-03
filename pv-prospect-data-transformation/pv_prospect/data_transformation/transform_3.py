@@ -19,7 +19,7 @@ def concatenate_timeseries_data() -> None:
     For each PV site:
     - Collect all processed micro-batches for that site from data-2/timeseries
     - Concatenate them in chronological order
-    - Write to a single CSV file in data-3/timeseries with format {pv_site_id}.csv
+    - Write to a single CSV file in data-3/timeseries with format {pv_system_id}.csv
     """
     # Load PV sites repository to get all site IDs
     print("Loading PV sites repository...")
@@ -70,7 +70,7 @@ def concatenate_timeseries_data() -> None:
 
 def _group_batches_by_site(batch_files: list[Path]) -> dict[int, list[Path]]:
     """Group micro-batch files by PV site ID."""
-    # Micro-batch filename format: {pv_site_id}_{start_date}_{end_date}.csv
+    # Micro-batch filename format: {pv_system_id}_{start_date}_{end_date}.csv
     pattern = re.compile(r'^(\d+)_\d{8}_\d{8}\.csv$')
 
     site_batches = {}

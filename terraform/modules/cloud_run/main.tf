@@ -58,10 +58,10 @@ resource "google_cloud_run_v2_job" "data_extraction" {
     }
   }
 
-  lifecycle {
-    ignore_changes = [
-      # The Workflow overrides these per-execution; don't revert them on apply.
-      template[0].template[0].containers[0].env,
-    ]
-  }
+  # lifecycle {
+  #   ignore_changes = [
+  #     # The Workflow overrides these per-execution; don't revert them on apply.
+  #     template[0].template[0].containers[0].env,
+  #   ]
+  # }
 }

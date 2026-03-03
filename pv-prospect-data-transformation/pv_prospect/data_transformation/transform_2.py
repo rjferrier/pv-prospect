@@ -123,7 +123,7 @@ def _process_batch_file(batch_file: Path, site_id: int) -> str:
 
 def _group_batches_by_site(batch_files: list[Path]) -> dict[int, list[Path]]:
     """Group micro-batch files by PV site ID."""
-    # Micro-batch filename format: {pv_site_id}_{start_date}_{end_date}.csv
+    # Micro-batch filename format: {pv_system_id}_{start_date}_{end_date}.csv
     pattern = re.compile(r'^(\d+)_\d{8}_\d{8}\.csv$')
     
     site_batches = {}

@@ -6,10 +6,10 @@ from pv_prospect.common.openmeteo_bounding_box_repo import (
     _parse_coordinate,
     _str_to_coordinate,
     build_openmeteo_bounding_box_repo,
-    om_bounding_boxes_by_pv_site_id,
+    om_bounding_boxes_by_pv_system_id,
 )
 from pv_prospect.common.domain.location import Location
-from pv_prospect.common.domain.bounding_box import BoundingBox
+from pv_prospect.common.domain.bounding_box import BoundingBox, VertexLabel
 
 
 class TestStrToCoordinate:
@@ -114,7 +114,7 @@ class TestParseRow:
     def test_parse_row_returns_tuple(self):
         """Test that _parse_row returns a tuple of (int, BoundingBox)"""
         row = {
-            'pv_site_id': '42248',
+            'pv_system_id': '42248',
             'sw': '516004_-41776',
             'se': '515995_-41487',
             'nw': '516213_-42626',
@@ -126,59 +126,59 @@ class TestParseRow:
         assert isinstance(result[0], int)
         assert isinstance(result[1], BoundingBox)
 
-    def test_parse_row_correct_pv_site_id(self):
-        """Test that pv_site_id is correctly parsed"""
+    def test_parse_row_correct_pv_system_id(self):
+        """Test that pv_system_id is correctly parsed"""
         row = {
-            'pv_site_id': '42248',
+            'pv_system_id': '42248',
             'sw': '516004_-41776',
             'se': '515995_-41487',
             'nw': '516213_-42626',
             'ne': '516174_-41472'
         }
-        pv_site_id, _ = _parse_row(row)
-        assert pv_site_id == 42248
+        pv_system_id, _ = _parse_row(row)
+        assert pv_system_id == 42248
 
     def test_parse_row_correct_bounding_box_from_sample_1(self):
         """Test parsing first row from sample CSV"""
         row = {
-            'pv_site_id': '42248',
+            'pv_system_id': '42248',
             'sw': '516004_-41776',
             'se': '515995_-41487',
             'nw': '516213_-42626',
             'ne': '516174_-41472'
         }
-        pv_site_id, bbox = _parse_row(row)
+        pv_system_id, bbox = _parse_row(row)
 
-        assert pv_site_id == 42248
-        assert bbox.sw.latitude == Decimal('51.6004')
-        assert bbox.sw.longitude == Decimal('-4.1776')
-        assert bbox.se.latitude == Decimal('51.5995')
-        assert bbox.se.longitude == Decimal('-4.1487')
-        assert bbox.nw.latitude == Decimal('51.6213')
-        assert bbox.nw.longitude == Decimal('-4.2626')
-        assert bbox.ne.latitude == Decimal('51.6174')
-        assert bbox.ne.longitude == Decimal('-4.1472')
+        assert pv_system_id == 42248
+        assert bbox.get_vertices_dict()[VertexLabel.SW].latitude == Decimal('51.6004')
+        assert bbox.get_vertices_dict()[VertexLabel.SW].longitude == Decimal('-4.1776')
+        assert bbox.get_vertices_dict()[VertexLabel.SE].latitude == Decimal('51.5995')
+        assert bbox.get_vertices_dict()[VertexLabel.SE].longitude == Decimal('-4.1487')
+        assert bbox.get_vertices_dict()[VertexLabel.NW].latitude == Decimal('51.6213')
+        assert bbox.get_vertices_dict()[VertexLabel.NW].longitude == Decimal('-4.2626')
+        assert bbox.get_vertices_dict()[VertexLabel.NE].latitude == Decimal('51.6174')
+        assert bbox.get_vertices_dict()[VertexLabel.NE].longitude == Decimal('-4.1472')
 
     def test_parse_row_correct_bounding_box_from_sample_2(self):
         """Test parsing second row from sample CSV"""
         row = {
-            'pv_site_id': '89665',
+            'pv_system_id': '89665',
             'sw': '526395_07603',
             'se': '526404_07808',
             'nw': '526600_07614',
             'ne': '526604_07799'
         }
-        pv_site_id, bbox = _parse_row(row)
+        pv_system_id, bbox = _parse_row(row)
 
-        assert pv_site_id == 89665
-        assert bbox.sw.latitude == Decimal('52.6395')
-        assert bbox.sw.longitude == Decimal('0.7603')
-        assert bbox.se.latitude == Decimal('52.6404')
-        assert bbox.se.longitude == Decimal('0.7808')
-        assert bbox.nw.latitude == Decimal('52.6600')
-        assert bbox.nw.longitude == Decimal('0.7614')
-        assert bbox.ne.latitude == Decimal('52.6604')
-        assert bbox.ne.longitude == Decimal('0.7799')
+        assert pv_system_id == 89665
+        assert bbox.get_vertices_dict()[VertexLabel.SW].latitude == Decimal('52.6395')
+        assert bbox.get_vertices_dict()[VertexLabel.SW].longitude == Decimal('0.7603')
+        assert bbox.get_vertices_dict()[VertexLabel.SE].latitude == Decimal('52.6404')
+        assert bbox.get_vertices_dict()[VertexLabel.SE].longitude == Decimal('0.7808')
+        assert bbox.get_vertices_dict()[VertexLabel.NW].latitude == Decimal('52.6600')
+        assert bbox.get_vertices_dict()[VertexLabel.NW].longitude == Decimal('0.7614')
+        assert bbox.get_vertices_dict()[VertexLabel.NE].latitude == Decimal('52.6604')
+        assert bbox.get_vertices_dict()[VertexLabel.NE].longitude == Decimal('0.7799')
 
 
 class TestBuildOpenMeteoBoundingBoxRepo:
@@ -186,11 +186,11 @@ class TestBuildOpenMeteoBoundingBoxRepo:
 
     def setup_method(self):
         """Clear the repository before each test"""
-        om_bounding_boxes_by_pv_site_id.clear()
+        om_bounding_boxes_by_pv_system_id.clear()
 
     def test_build_repo_from_sample_csv(self):
         """Test building repository from sample CSV data"""
-        csv_content = """pv_site_id,sw,se,nw,ne
+        csv_content = """pv_system_id,sw,se,nw,ne
 42248,516004_-41776,515995_-41487,516213_-42626,516174_-41472
 89665,526395_07603,526404_07808,526600_07614,526604_07799
 """
@@ -198,13 +198,13 @@ class TestBuildOpenMeteoBoundingBoxRepo:
 
         build_openmeteo_bounding_box_repo(csv_stream)
 
-        assert len(om_bounding_boxes_by_pv_site_id) == 2
-        assert 42248 in om_bounding_boxes_by_pv_site_id
-        assert 89665 in om_bounding_boxes_by_pv_site_id
+        assert len(om_bounding_boxes_by_pv_system_id) == 2
+        assert 42248 in om_bounding_boxes_by_pv_system_id
+        assert 89665 in om_bounding_boxes_by_pv_system_id
 
     def test_build_repo_correct_bounding_boxes(self):
         """Test that bounding boxes are correctly stored in repository"""
-        csv_content = """pv_site_id,sw,se,nw,ne
+        csv_content = """pv_system_id,sw,se,nw,ne
 42248,516004_-41776,515995_-41487,516213_-42626,516174_-41472
 89665,526395_07603,526404_07808,526600_07614,526604_07799
 """
@@ -212,26 +212,26 @@ class TestBuildOpenMeteoBoundingBoxRepo:
 
         build_openmeteo_bounding_box_repo(csv_stream)
 
-        bbox1 = om_bounding_boxes_by_pv_site_id[42248]
-        assert bbox1.sw.latitude == Decimal('51.6004')
-        assert bbox1.sw.longitude == Decimal('-4.1776')
+        bbox1 = om_bounding_boxes_by_pv_system_id[42248]
+        assert bbox1.get_vertices_dict()[VertexLabel.SW].latitude == Decimal('51.6004')
+        assert bbox1.get_vertices_dict()[VertexLabel.SW].longitude == Decimal('-4.1776')
 
-        bbox2 = om_bounding_boxes_by_pv_site_id[89665]
-        assert bbox2.sw.latitude == Decimal('52.6395')
-        assert bbox2.sw.longitude == Decimal('0.7603')
+        bbox2 = om_bounding_boxes_by_pv_system_id[89665]
+        assert bbox2.get_vertices_dict()[VertexLabel.SW].latitude == Decimal('52.6395')
+        assert bbox2.get_vertices_dict()[VertexLabel.SW].longitude == Decimal('0.7603')
 
     def test_build_repo_only_once(self):
         """Test that repository is only built once (idempotent)"""
-        csv_content = """pv_site_id,sw,se,nw,ne
+        csv_content = """pv_system_id,sw,se,nw,ne
 42248,516004_-41776,515995_-41487,516213_-42626,516174_-41472
 """
         csv_stream1 = io.StringIO(csv_content)
 
         build_openmeteo_bounding_box_repo(csv_stream1)
-        assert len(om_bounding_boxes_by_pv_site_id) == 1
+        assert len(om_bounding_boxes_by_pv_system_id) == 1
 
         # Try to build again with different data
-        csv_content2 = """pv_site_id,sw,se,nw,ne
+        csv_content2 = """pv_system_id,sw,se,nw,ne
 99999,526395_07603,526404_07808,526600_07614,526604_07799
 """
         csv_stream2 = io.StringIO(csv_content2)
@@ -239,33 +239,33 @@ class TestBuildOpenMeteoBoundingBoxRepo:
         build_openmeteo_bounding_box_repo(csv_stream2)
 
         # Should still have only the first entry
-        assert len(om_bounding_boxes_by_pv_site_id) == 1
-        assert 42248 in om_bounding_boxes_by_pv_site_id
-        assert 99999 not in om_bounding_boxes_by_pv_site_id
+        assert len(om_bounding_boxes_by_pv_system_id) == 1
+        assert 42248 in om_bounding_boxes_by_pv_system_id
+        assert 99999 not in om_bounding_boxes_by_pv_system_id
 
     def test_build_repo_from_empty_csv(self):
         """Test building repository from CSV with only headers"""
-        csv_content = """pv_site_id,sw,se,nw,ne
+        csv_content = """pv_system_id,sw,se,nw,ne
 """
         csv_stream = io.StringIO(csv_content)
 
         build_openmeteo_bounding_box_repo(csv_stream)
 
-        assert len(om_bounding_boxes_by_pv_site_id) == 0
+        assert len(om_bounding_boxes_by_pv_system_id) == 0
 
     def test_build_repo_with_single_entry(self):
         """Test building repository with a single entry"""
-        csv_content = """pv_site_id,sw,se,nw,ne
+        csv_content = """pv_system_id,sw,se,nw,ne
 12345,516004_-41776,515995_-41487,516213_-42626,516174_-41472
 """
         csv_stream = io.StringIO(csv_content)
 
         build_openmeteo_bounding_box_repo(csv_stream)
 
-        assert len(om_bounding_boxes_by_pv_site_id) == 1
-        assert 12345 in om_bounding_boxes_by_pv_site_id
+        assert len(om_bounding_boxes_by_pv_system_id) == 1
+        assert 12345 in om_bounding_boxes_by_pv_system_id
 
-        bbox = om_bounding_boxes_by_pv_site_id[12345]
+        bbox = om_bounding_boxes_by_pv_system_id[12345]
         assert isinstance(bbox, BoundingBox)
-        assert len(bbox.get_vertices()) == 4
+        assert len(bbox.vertices) == 4
 

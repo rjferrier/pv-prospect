@@ -3,7 +3,7 @@ from functools import lru_cache
 
 from pv_prospect.common import (
     InterpolationStrategy, Location, PVSite,
-    get_openmeteo_bounding_box_by_pv_site_id,
+    get_openmeteo_bounding_box_by_pv_system_id,
 )
 from pv_prospect.data_extraction.extractors.openmeteo import (
     OpenMeteoWeatherDataExtractor, Mode as OMMode, APISelector, TimeResolution, Fields, Models
@@ -14,12 +14,12 @@ INTERPOLATION_STRATEGY = InterpolationStrategy.NEAREST
 
 
 def _nearest_location_getter(pv_site: PVSite) -> list[Location]:
-    bb = get_openmeteo_bounding_box_by_pv_site_id(pv_site.pvo_sys_id)
+    bb = get_openmeteo_bounding_box_by_pv_system_id(pv_site.pvo_sys_id)
     return [bb.nearest_vertex_location(pv_site.location)]
 
 
 def _bilinear_location_getter(pv_site: PVSite) -> list[Location]:
-    bb = get_openmeteo_bounding_box_by_pv_site_id(pv_site.pvo_sys_id)
+    bb = get_openmeteo_bounding_box_by_pv_system_id(pv_site.pvo_sys_id)
     return [v.location for v in bb.vertices]
 
 

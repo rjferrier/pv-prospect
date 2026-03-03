@@ -8,7 +8,7 @@ import time
 import pandas as pd
 from pv_prospect.common.interpolation import InterpolationStrategy
 from pv_prospect.common.pv_site_repo import build_pv_site_repo, get_all_pv_system_ids, get_pv_site_by_system_id
-from pv_prospect.common.openmeteo_bounding_box_repo import build_openmeteo_bounding_box_repo, get_openmeteo_bounding_box_by_pv_site_id
+from pv_prospect.common.openmeteo_bounding_box_repo import build_openmeteo_bounding_box_repo, get_openmeteo_bounding_box_by_pv_system_id
 from pv_prospect.common.domain.location import Location
 from pv_prospect.common.domain.bounding_box import Vertex, VertexLabel
 from pytz import timezone
@@ -90,15 +90,15 @@ def main() -> int:
 
     # Prepare tasks for parallel processing
     tasks = []
-    pv_site_ids = get_all_pv_system_ids()
-    print(f"\nProcessing {len(pv_site_ids)} PV sites...")
+    pv_system_ids = get_all_pv_system_ids()
+    print(f"\nProcessing {len(pv_system_ids)} PV sites...")
 
-    for pv_site_id in pv_site_ids:
+    for pv_system_id in pv_system_ids:
         try:
-            pv_site = get_pv_site_by_system_id(pv_site_id)
-            bounding_box = get_openmeteo_bounding_box_by_pv_site_id(pv_site_id)
+            pv_site = get_pv_site_by_system_id(pv_system_id)
+            bounding_box = get_openmeteo_bounding_box_by_pv_system_id(pv_system_id)
         except KeyError:
-            print(f"Skipping site {pv_site_id}: missing site or bounding box data")
+            print(f"Skipping site {pv_system_id}: missing site or bounding box data")
             continue
 
         vertex_locations_dict = bounding_box.get_vertices_dict()
@@ -129,7 +129,7 @@ def main() -> int:
 
                 # Check if corresponding PVOutput files exist
                 pvo_filenames = _get_desired_pvoutput_filenames_for_site(
-                    pv_site_id, start_date, end_date
+                    pv_system_id, start_date, end_date
                 )
                 pvo_filenames_available = sorted(pvo_filenames.intersection(present_pvo_filenames))
 
@@ -137,11 +137,11 @@ def main() -> int:
                     continue
 
                 # Check if target file already exists
-                target_filename = _build_target_filename(pv_site_id, start_date, end_date)
+                target_filename = _build_target_filename(pv_system_id, start_date, end_date)
                 if not ALLOW_OVERWRITES and target_filename in filenames_present_in_target_folder:
                     continue
 
-                tasks.append((pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames_available, start_date, end_date))
+                tasks.append((pv_system_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames_available, start_date, end_date))
 
         else:
             # BILINEAR: require all 4 vertices
@@ -182,7 +182,7 @@ def main() -> int:
 
                 # Check if corresponding PVOutput files exist
                 pvo_filenames = _get_desired_pvoutput_filenames_for_site(
-                    pv_site_id, start_date, end_date
+                    pv_system_id, start_date, end_date
                 )
                 pvo_filenames_available = sorted(pvo_filenames.intersection(present_pvo_filenames))
 
@@ -190,12 +190,12 @@ def main() -> int:
                     continue
 
                 # Check if target file already exists
-                target_filename = _build_target_filename(pv_site_id, start_date, end_date)
+                target_filename = _build_target_filename(pv_system_id, start_date, end_date)
                 if not ALLOW_OVERWRITES and target_filename in filenames_present_in_target_folder:
                     continue
 
                 # Add task
-                tasks.append((pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames_available, start_date, end_date))
+                tasks.append((pv_system_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames_available, start_date, end_date))
 
     print(f"\nPrepared {len(tasks)} processing tasks")
 
@@ -206,20 +206,20 @@ def main() -> int:
 
     with ProcessPoolExecutor() as executor:
         futures = {
-            executor.submit(_process_site, pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date):
-            (pv_site_id, start_date)
-            for pv_site_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date in tasks
+            executor.submit(_process_site, pv_system_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date):
+            (pv_system_id, start_date)
+            for pv_system_id, pv_site, vertex_locations_dict, vertex_files, pvo_filenames, start_date, end_date in tasks
         }
 
         for future in as_completed(futures):
-            pv_site_id, start_date = futures[future]
+            pv_system_id, start_date = futures[future]
             try:
                 result = future.result()
                 completed += 1
                 print(f"[{completed}/{len(tasks)}] Completed: {result}")
             except Exception as e:
                 failed += 1
-                print(f"[{completed + failed}/{len(tasks)}] Failed: site {pv_site_id}, date {start_date} - Error: {str(e)}")
+                print(f"[{completed + failed}/{len(tasks)}] Failed: site {pv_system_id}, date {start_date} - Error: {str(e)}")
 
     end_time = time.perf_counter()
     total_time = end_time - start_time
@@ -236,7 +236,7 @@ def main() -> int:
 
 
 def _process_site(
-    pv_site_id: int,
+    pv_system_id: int,
     pv_site,
     vertex_locations_dict: dict[VertexLabel, Location],
     vertex_files: dict[VertexLabel, str],
@@ -269,10 +269,10 @@ def _process_site(
 
     # Skip saving if no valid data remains
     if dataframe.empty:
-        return f"SKIPPED (no valid data): {pv_site_id}_{date_to_str(start_date)}_{date_to_str(end_date)}"
+        return f"SKIPPED (no valid data): {pv_system_id}_{date_to_str(start_date)}_{date_to_str(end_date)}"
 
     # Save result
-    target_filename = _build_target_filename(pv_site_id, start_date, end_date)
+    target_filename = _build_target_filename(pv_system_id, start_date, end_date)
     dataframe.to_csv(TARGET_TIMESERIES_DIR / target_filename, index=False, encoding='utf-8')
 
     return target_filename
@@ -440,7 +440,7 @@ def _build_openmeteo_file_lookup(om_filenames: list[str]) -> dict[tuple[Decimal,
 
 
 def _get_desired_pvoutput_filenames_for_site(
-    pv_site_id: int,
+    pv_system_id: int,
     start_date: date,
     end_date: date
 ) -> set[str]:
@@ -448,7 +448,7 @@ def _get_desired_pvoutput_filenames_for_site(
     Get set of desired PVOutput filenames for a given PV site and date range.
 
     Args:
-        pv_site_id: PV site ID
+        pv_system_id: PV site ID
         start_date: Start date
         end_date: End date (exclusive)
 
@@ -460,7 +460,7 @@ def _get_desired_pvoutput_filenames_for_site(
     while current_date < end_date:
         metadata = RawDataFileMetadata(
             data_source=DataSource.PV_OUTPUT,
-            pv_site_id=pv_site_id,
+            pv_system_id=pv_system_id,
             date_=current_date
         )
         filenames.add(metadata.get_file_name())
@@ -468,9 +468,9 @@ def _get_desired_pvoutput_filenames_for_site(
     return filenames
 
 
-def _build_target_filename(pv_site_id: int, from_date: date, to_date: date) -> str:
+def _build_target_filename(pv_system_id: int, from_date: date, to_date: date) -> str:
     """Build target filename from site ID and date range."""
-    stem = '_'.join((str(pv_site_id), date_to_str(from_date), date_to_str(to_date)))
+    stem = '_'.join((str(pv_system_id), date_to_str(from_date), date_to_str(to_date)))
     return stem + '.csv'
 
 

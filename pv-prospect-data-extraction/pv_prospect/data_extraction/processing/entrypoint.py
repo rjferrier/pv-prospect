@@ -18,13 +18,14 @@ For **extract_and_load**:
     END_DATE          — ISO date ``YYYY-MM-DD``
     OVERWRITE         — ``true`` or ``false`` (default ``false``)
     DRY_RUN           — ``true`` or ``false`` (default ``false``)
+    BY_WEEK           — ``true`` or ``false`` (chunking hint)
 """
 import os
 import sys
 from datetime import date
 
-from pv_prospect.common import DateRange
-from pv_prospect.data_extraction.extractors import SourceDescriptor
+from pv_prospect.common import DateRange, Period
+from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.processing import core
 
 
@@ -51,20 +52,33 @@ def main() -> None:
         end_date = date.fromisoformat(os.environ['END_DATE'])
         overwrite = _env_bool('OVERWRITE')
         dry_run = _env_bool('DRY_RUN')
+        by_week = _env_bool('BY_WEEK')
 
-        date_range = DateRange(start_date, end_date)
+        complete_date_range = DateRange(start_date, end_date)
         print(f"[entrypoint] extract_and_load: {source_descriptor}, "
-              f"site={pv_system_id}, {date_range}")
+              f"site={pv_system_id}, {complete_date_range}, by_week={by_week}")
 
-        result = core.extract_and_load(
-            source_descriptor=source_descriptor,
-            pv_system_id=pv_system_id,
-            date_range=date_range,
-            local_dir=None,
-            overwrite=overwrite,
-            dry_run=dry_run,
-        )
-        print(f"[entrypoint] result: {result.type.value}")
+        split_period = Period.WEEK if by_week else Period.DAY
+        sub_date_ranges = complete_date_range.split_by(split_period)
+        
+        if by_week and not supports_multi_date(source_descriptor):
+            # Fall back to days if the source doesn't support multi-date extraction
+            final_ranges = []
+            for dr in sub_date_ranges:
+                final_ranges.extend(dr.split_by(Period.DAY))
+        else:
+            final_ranges = sub_date_ranges
+
+        for dr in final_ranges:
+            result = core.extract_and_load(
+                source_descriptor=source_descriptor,
+                pv_system_id=pv_system_id,
+                date_range=dr,
+                local_dir=None,
+                overwrite=overwrite,
+                dry_run=dry_run,
+            )
+            print(f"[entrypoint] {dr}: {result.type.value}")
 
     else:
         print(f"[entrypoint] ERROR: unknown JOB_TYPE={job_type!r}", file=sys.stderr)

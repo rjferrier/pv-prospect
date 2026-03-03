@@ -24,6 +24,7 @@ resource "google_workflows_workflow" "data_extraction" {
               - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
               - overwrite: $${default(map.get(args, "overwrite"), "false")}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
+              - by_week: $${default(map.get(args, "by_week"), "${var.default_by_week}")}
 
         - preprocess:
             parallel:
@@ -78,6 +79,8 @@ resource "google_workflows_workflow" "data_extraction" {
                                             value: $${overwrite}
                                           - name: DRY_RUN
                                             value: $${dry_run}
+                                          - name: BY_WEEK
+                                            value: $${string(by_week)}
                               result: extract_result
 
         - done:

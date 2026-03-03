@@ -29,13 +29,19 @@ variable "scheduler_cron" {
 
 variable "default_source_descriptors" {
   type        = list(string)
-  default     = ["openmeteo/quarterhourly", "openmeteo/hourly"]
+  default     = ["pvoutput", "openmeteo/historical"]
   description = "Source descriptors for the daily scheduled run"
 }
 
 variable "default_pv_system_ids" {
   type        = list(number)
   description = "PV system IDs to process in the daily scheduled run"
+}
+
+variable "default_by_week" {
+  type        = bool
+  default     = false
+  description = "Whether to process by week by default"
 }
 
 variable "secret_env_vars" {

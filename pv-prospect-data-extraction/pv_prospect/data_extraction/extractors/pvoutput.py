@@ -42,10 +42,10 @@ HEADER = [
 
 @dataclass(frozen=True)
 class PVOutputTimeSeriesDescriptor:
-    pv_site_id: int
+    pv_system_id: int
 
     def __str__(self) -> str:
-        return str(pv_site_id)
+        return str(self.pv_system_id)
 
 
 class PVOutputRateLimiter:

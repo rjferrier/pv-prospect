@@ -16,10 +16,16 @@ variable "cloud_run_job_name" {
 variable "default_source_descriptors" {
   type        = list(string)
   description = "Default source descriptors for scheduled runs"
-  default     = ["openmeteo/quarterhourly", "openmeteo/hourly"]
+  default     = ["pvoutput", "openmeteo/historical"]
 }
 
 variable "default_pv_system_ids" {
   type        = list(number)
   description = "Default PV system IDs for scheduled runs"
+}
+
+variable "default_by_week" {
+  type        = bool
+  description = "Whether to process by week by default"
+  default     = false
 }
