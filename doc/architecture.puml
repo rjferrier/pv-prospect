@@ -1,0 +1,101 @@
+@startuml
+
+!include ./theme.puml
+
+component "Weather\nAPI" as WeatherApi
+component "PV\nApi" as PvApi
+
+database "Staged Raw Data" as StagedRawData {
+  database "Weather CSVs" as WeatherStagedRawData
+  database "PV CSVs" as PvStagedRawData
+}
+
+database "Staged Model Data" as StagedModelData {
+  database "Weather Model Data" as WeatherStagedModelData
+  database "PV Site Model Data" as PvSiteStagedModelData
+}
+
+StagedRawData -[hidden]> StagedModelData
+
+database "Versioned Raw Data" as VersionedRawData {
+  database "Weather CSVs" as WeatherVersionedRawData
+  database "PV CSVs" as PvVersionedRawData
+}
+
+database "Versioned Model Data" as VersionedModelData {
+  database "Weather Model Data" as WeatherVersionedModelData
+  database "PV Model Data" as PvVersionedModelData
+}
+
+VersionedRawData -[hidden]> VersionedModelData
+
+component "Data Extractor" as DataExtractor
+component "Data Transformer" as DataTransformer
+
+component Models {
+  component "Weather Model" as WeatherModel
+  component "PV Model" as PvModel
+}
+
+component "Model Trainer" as ModelTrainer
+
+component "PV Prospect App" as PvProspectApp {
+  component "Prediction API" as PredictionApi
+  component "Validation API" as ValidationApi
+  component "Irradiance Calculator" as IrradianceCalculator
+  component "In-Memory Data" as InMemoryData
+}
+
+component "Data Versioner" as DataVersioner
+database "Version Control Repo" as VCRepo
+
+actor User
+
+User --> ValidationApi
+User --> PredictionApi : lat, lon, period
+
+PredictionApi ----> WeatherModel : calls \n(lat, lon, \nday, year)
+PredictionApi <... WeatherModel : DNI, DHI, \ntemperature
+
+PredictionApi -> IrradianceCalculator : calls (DNI, DHI)
+PredictionApi <. IrradianceCalculator : POA
+
+PredictionApi ---> PvModel : calls (POA, temperature)
+PredictionApi <... PvModel : predicted\nenergy yield\nper site
+
+ValidationApi --> PvModel : calls (POA, \ntemperature, \nsite ID)
+ValidationApi <.. PvModel : predicted\nenergy\nyield
+ValidationApi --> InMemoryData : gets
+ValidationApi <.. InMemoryData : actual\nenergy\nyield
+
+WeatherVersionedModelData <-- ModelTrainer : MW.1: pulls\nMP.1: pulls
+PvVersionedModelData <-- ModelTrainer : MP.2: pulls
+WeatherModel <-- ModelTrainer : MW.2: trains
+PvModel <-- ModelTrainer : MP.3: trains
+
+WeatherApi <-- DataExtractor : EW.1: calls
+PvApi <-- DataExtractor : EP.1: calls
+
+DataExtractor --> WeatherStagedRawData : EW.2: puts
+DataExtractor --> PvStagedRawData : EP.2: puts
+
+DataTransformer --> WeatherStagedRawData : TW.1: gets\nTP.1: gets
+DataTransformer --> PvStagedRawData : TP.2: gets
+
+DataTransformer --> WeatherStagedModelData : TW.2: puts
+DataTransformer --> PvSiteStagedModelData : TP.3: puts
+
+InMemoryData <-- DataTransformer : TW.3: puts\nTP.4: puts
+
+StagedRawData <-- DataVersioner : V.1: gets
+VersionedRawData <-- DataVersioner : V.2: pushes (using DVC)
+
+StagedModelData <-- DataVersioner : V.3: gets
+VersionedModelData <-- DataVersioner : V.4: pushes (using DVC)
+DataVersioner -> VCRepo : V.5: pushes (using Git)
+
+InMemoryData ---> VersionedModelData : L.1: pulls
+InMemoryData ---> StagedModelData : L.2: gets
+
+
+@enduml
