@@ -1,23 +1,31 @@
 # Data Transformation
 
-Data transformation pipeline for PV Prospect. This pipeline processes raw data through several stages to produce a clean, interpolated dataset for PV power prediction.
+Data transformation pipeline for PV Prospect. This pipeline processes raw data through cleaning and processing stages to produce datasets for model training.
 
 ## Pipeline Stages
 
-The transformation process is split into three sequential scripts:
+The transformation process consists of four scripts, organised into two layers:
 
-### 1. Initial Preprocessing (`transform_1.py`)
-- **Inputs**: Raw OpenMeteo historical data and PVOutput power data (`data-0`).
-- **Role**: Performs **spatial interpolation** of weather data from the 4 OpenMeteo bounding box vertices down to the exact coordinates of each PV site. Continuous variables (e.g. temperature, wind speed, irradiance) use **bilinear interpolation**; categorical variables (e.g. `weather_code`) use **nearest-neighbour** selection. The interpolated weather data is then joined with the corresponding PVOutput power readings.
-- **Output**: Joined weather and power data micro-batches (7-day blocks) in `data-1`.
+### Cleaning (raw → intermediate)
 
-### 2. Physical Modeling (`transform_2.py`)
-- **Inputs**: Spatially interpolated micro-batches from `data-1`.
-- **Role**: Calculates Plane of Array (POA) irradiance for each site using `pvlib`, accounting for specific panel orientations (tilt and azimuth). It also filters for a specific weather model. Optionally applies time averaging over a configurable number of days (`TIMESCALE_DAYS`): numeric columns are reduced by time-weighted mean, and categorical columns (e.g. `weather_code`) by time-weighted mode.
-- **Output**: Processed micro-batches with POA irradiance in `data-2`.
+#### `clean_weather`
+- **Input**: Raw OpenMeteo historical weather CSV.
+- **Role**: Selects columns for a given weather model (e.g. `best_match`), strips the model suffix from column names, drops excluded columns (e.g. `pressure_msl`, `wind_direction_80m`), and optionally downsamples time resolution.
+- **Output**: Cleaned weather data (Parquet).
 
-### 3. Final Concatenation (`transform_3.py`)
-- **Inputs**: Processed micro-batches from `data-2`.
-- **Role**: Consolidates all micro-batches for each PV site into a single, chronologically sorted CSV file.
-- **Output**: Final per-site datasets in `data-3` (format: `{site_id}.csv`).
+#### `clean_pvoutput`
+- **Input**: Raw PVOutput CSV.
+- **Role**: Synthesises a UTC `time` column from `date` and `time` columns (converting from UK local time), retains only `time` and `power`, and drops rows where `power` is NaN.
+- **Output**: Cleaned PV output data (Parquet).
 
+### Processing (intermediate → versioned)
+
+#### `process_weather`
+- **Input**: Cleaned weather data.
+- **Role**: Selects a subset of weather features (e.g. `temperature`, `direct_normal_irradiance`, `diffuse_radiation`) and downsamples time resolution. Output is associated with a location (latitude/longitude), not a PV site, to support a large sample space for weather-model training.
+- **Output**: Processed weather data (Parquet, versioned).
+
+#### `process_pv`
+- **Input**: Cleaned weather data + cleaned PV output data.
+- **Role**: Inner-joins the two cleaned datasets on `time`, calculates Plane of Array (POA) irradiance using `pvlib` (accounting for panel tilt, azimuth, and area fraction), selects the final feature set (e.g. `temperature`, `plane_of_array_irradiance`, `power`), and downsamples time resolution.
+- **Output**: Processed PV model training data (Parquet, versioned).

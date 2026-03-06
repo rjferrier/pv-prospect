@@ -20,6 +20,8 @@ dependencies = [
     "numpy>=2.3.5,<3",
     "common>=0.1.2,<0.2",
     "pv-prospect-common",
+    "google-cloud-storage (>=3.9.0,<4.0.0)",
+    "pyarrow (>=23.0.1,<24.0.0)",
 ]
 
 [tool.poetry.dependencies]

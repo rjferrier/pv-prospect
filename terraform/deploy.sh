@@ -30,24 +30,36 @@ gcloud storage cp "$TFVARS_REMOTE" terraform.tfvars
 
 terraform init -backend-config=backend.hcl -upgrade
 
-# 1. Build and push Docker image
+# 1. Provision the Registry and APIs first
 echo ""
-echo "[1/2] Building and pushing Docker image..."
+echo "[1/3] Provisioning Artifact Registry and required APIs..."
+terraform apply -target=module.artifact_registry -target=module.artifact_registry_transformer -auto-approve
+
+# 2. Build and push Docker image
+echo ""
+echo "[2/3] Building and pushing Docker image..."
 REGION=$(terraform output -raw region 2>/dev/null || echo "europe-west2")
-IMAGE_URL=$(terraform output -raw artifact_registry_url)/data-extraction
+IMAGE_URL_EXTRACT=$(terraform output -raw artifact_registry_url)/data-extraction
+IMAGE_URL_TRANSFORM=$(terraform output -raw artifact_registry_transformer_url)/data-transformation
 
 echo "Authenticating Docker to $REGION-docker.pkg.dev..."
 gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 
-echo "Building Image: $IMAGE_URL:latest"
-docker build -t "$IMAGE_URL:latest" --target entrypoint -f ../pv-prospect-data-extraction/Dockerfile ..
+echo "Building Image (Extraction): $IMAGE_URL_EXTRACT:latest"
+docker build -t "$IMAGE_URL_EXTRACT:latest" --target entrypoint -f ../pv-prospect-data-extraction/Dockerfile ..
 
-echo "Pushing Image to Artifact Registry..."
-docker push "$IMAGE_URL:latest"
+echo "Pushing Image (Extraction) to Artifact Registry..."
+docker push "$IMAGE_URL_EXTRACT:latest"
 
-# 2. Apply the rest of the infrastructure
+echo "Building Image (Transformation): $IMAGE_URL_TRANSFORM:latest"
+docker build -t "$IMAGE_URL_TRANSFORM:latest" --target entrypoint -f ../pv-prospect-data-transformation/Dockerfile ..
+
+echo "Pushing Image (Transformation) to Artifact Registry..."
+docker push "$IMAGE_URL_TRANSFORM:latest"
+
+# 3. Apply the rest of the infrastructure
 echo ""
-echo "[2/2] Provisioning Cloud Run, Workflows, and Scheduler..."
+echo "[3/3] Provisioning Cloud Run, Workflows, and Scheduler..."
 terraform apply -auto-approve
 
 echo ""

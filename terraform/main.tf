@@ -40,9 +40,15 @@ resource "google_service_account" "pipeline" {
   description  = "Used by Cloud Run Jobs, Workflows, and Scheduler"
 }
 
-# The pipeline SA needs to read/write GCS objects
-resource "google_storage_bucket_iam_member" "pipeline_gcs" {
-  bucket = module.storage.bucket_name
+# The pipeline SA needs to read/write GCS objects in the staging buckets
+resource "google_storage_bucket_iam_member" "pipeline_staged_raw" {
+  bucket = module.storage.staged_raw_data_bucket_name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
+resource "google_storage_bucket_iam_member" "pipeline_staged_model" {
+  bucket = module.storage.staged_model_data_bucket_name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.pipeline.email}"
 }
@@ -80,9 +86,9 @@ resource "google_project_iam_member" "pipeline_secret_accessor" {
 # ---------------------------------------------------------------------------
 
 module "storage" {
-  source      = "./modules/storage"
-  bucket_name = var.bucket_name
-  region      = var.region
+  source        = "./modules/storage"
+  bucket_prefix = var.bucket_prefix
+  region        = var.region
 }
 
 module "cloud_run" {
@@ -92,11 +98,31 @@ module "cloud_run" {
   project_id            = var.project_id
   image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
   image_tag             = var.image_tag
-  gcs_bucket            = var.bucket_name
+  gcs_bucket            = module.storage.staged_raw_data_bucket_name
   service_account_email = google_service_account.pipeline.email
   secret_env_vars       = var.secret_env_vars
 
   depends_on = [google_project_service.apis]
+}
+
+module "artifact_registry_transformer" {
+  source = "./modules/artifact_registry_transformer"
+  region = var.region
+}
+
+module "cloud_run_transformer" {
+  source = "./modules/cloud_run_transformer"
+  region = var.region
+
+  project_id = var.project_id
+  # Temporary placeholder since the real image hasn't been built yet
+  image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
+  image_tag             = var.transformer_image_tag
+  raw_data_bucket       = module.storage.staged_raw_data_bucket_name
+  model_data_bucket     = module.storage.staged_model_data_bucket_name
+  service_account_email = google_service_account.pipeline.email
+
+  depends_on = [google_project_service.apis, module.artifact_registry_transformer]
 }
 
 module "workflows" {
@@ -110,6 +136,17 @@ module "workflows" {
   default_by_week            = var.default_by_week
 
   depends_on = [google_project_service.apis, module.cloud_run]
+}
+
+module "workflows_transform" {
+  source = "./modules/workflows_transform"
+  region = var.region
+
+  service_account_email = google_service_account.pipeline.email
+  cloud_run_job_name    = module.cloud_run_transformer.job_name
+  default_pv_system_ids = var.default_pv_system_ids
+
+  depends_on = [google_project_service.apis, module.cloud_run_transformer]
 }
 
 module "scheduler" {
@@ -137,14 +174,24 @@ output "pipeline_service_account_email" {
   description = "Pipeline service account email"
 }
 
-output "bucket_name" {
-  value       = module.storage.bucket_name
-  description = "Name of the storage bucket"
+output "staged_raw_data_bucket_name" {
+  value       = module.storage.staged_raw_data_bucket_name
+  description = "Name of the staged raw data storage bucket"
+}
+
+output "staged_model_data_bucket_name" {
+  value       = module.storage.staged_model_data_bucket_name
+  description = "Name of the staged model data storage bucket"
 }
 
 output "artifact_registry_url" {
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction"
   description = "Docker registry URL"
+}
+
+output "artifact_registry_transformer_url" {
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/data-transformation"
+  description = "Docker registry URL for data transformation"
 }
 
 output "cloud_run_job_name" {

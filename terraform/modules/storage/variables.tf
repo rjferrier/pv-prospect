@@ -1,10 +1,11 @@
-variable "bucket_name" {
+variable "bucket_prefix" {
   type        = string
-  description = "Name of the GCS bucket for data storage"
+  description = "Prefix for the GCS data buckets"
+  default     = "pv-prospect"
 }
 
 variable "region" {
   type        = string
-  description = "GCP region for the storage bucket"
+  description = "GCP region for the storage buckets"
 }
 

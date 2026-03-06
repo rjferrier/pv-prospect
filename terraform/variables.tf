@@ -3,10 +3,10 @@ variable "project_id" {
   description = "GCP project ID"
 }
 
-variable "bucket_name" {
+variable "bucket_prefix" {
   type        = string
-  default     = "pv-prospect-data"
-  description = "Name of the GCS bucket for data storage"
+  default     = "pv-prospect"
+  description = "Prefix for the GCS data buckets"
 }
 
 variable "region" {
@@ -19,6 +19,12 @@ variable "image_tag" {
   type        = string
   default     = "latest"
   description = "Docker image tag for the data extraction container"
+}
+
+variable "transformer_image_tag" {
+  type        = string
+  default     = "latest"
+  description = "Docker image tag for the data transformation container"
 }
 
 variable "scheduler_cron" {
