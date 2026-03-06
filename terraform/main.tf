@@ -2,6 +2,7 @@
 # Provider and general settings
 
 terraform {
+  backend "gcs" {}
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -20,7 +21,6 @@ provider "google" {
 
 resource "google_project_service" "apis" {
   for_each = toset([
-    "artifactregistry.googleapis.com",
     "run.googleapis.com",
     "workflows.googleapis.com",
     "cloudscheduler.googleapis.com",
@@ -85,25 +85,18 @@ module "storage" {
   region      = var.region
 }
 
-module "artifact_registry" {
-  source = "./modules/artifact_registry"
-  region = var.region
-
-  depends_on = [google_project_service.apis]
-}
-
 module "cloud_run" {
   source = "./modules/cloud_run"
   region = var.region
 
   project_id            = var.project_id
-  image_url             = "${module.artifact_registry.repository_url}/data-extraction"
+  image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
   image_tag             = var.image_tag
   gcs_bucket            = var.bucket_name
   service_account_email = google_service_account.pipeline.email
   secret_env_vars       = var.secret_env_vars
 
-  depends_on = [google_project_service.apis, module.artifact_registry]
+  depends_on = [google_project_service.apis]
 }
 
 module "workflows" {
@@ -150,7 +143,7 @@ output "bucket_name" {
 }
 
 output "artifact_registry_url" {
-  value       = module.artifact_registry.repository_url
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction"
   description = "Docker registry URL"
 }
 

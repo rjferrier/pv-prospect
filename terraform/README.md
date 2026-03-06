@@ -1,6 +1,6 @@
 # PV Prospect Terraform Infrastructure
 
-This directory contains Terraform configurations for deploying the serverless PV Prospect data extraction pipeline on Google Cloud Platform. 
+This directory contains Terraform configurations for deploying the serverless PV Prospect data extraction pipeline on Google Cloud Platform.
 
 ## Architecture Overview
 
@@ -25,17 +25,67 @@ PV Prospect Infrastructure
 
 ```
 terraform/
-├── main.tf                    # Root module configuration
-├── variables.tf               # Root module variables
-├── terraform.tfvars           # Variable values (customize this)
-├── README.md                  # This file
-└── modules/
-    ├── artifact_registry/     # Docker image repository
-    ├── cloud_run/             # Cloud Run batch jobs
-    ├── scheduler/             # Cloud Scheduler cron jobs
-    ├── storage/               # GCS storage
-    └── workflows/             # Cloud Workflows orchestration
+├── bootstrap/                     # Bootstrapping infrastructure (apply once)
+│   ├── main.tf                    #   State bucket + Artifact Registry
+│   ├── variables.tf
+│   └── terraform.tfvars
+├── modules/
+│   ├── artifact_registry/         # Docker image repository
+│   ├── cloud_run/                 # Cloud Run batch jobs
+│   ├── scheduler/                 # Cloud Scheduler cron jobs
+│   ├── storage/                   # GCS storage
+│   └── workflows/                 # Cloud Workflows orchestration
+├── main.tf                        # Root module configuration
+├── variables.tf                   # Root module variables
+├── terraform.tfvars               # Variable values (customize this)
+├── backend.hcl                    # Remote backend config (bucket name etc.)
+└── README.md                      # This file
 ```
+
+## Bootstrap vs. Main Configuration
+
+There are two separate Terraform configurations here to solve a **chicken-and-egg problem**: Terraform needs a GCS bucket to store its remote state, but you can't create that bucket with the same configuration that uses it.
+
+### Bootstrap (`terraform/bootstrap/`)
+
+Manages resources that must exist before the main configuration can run:
+
+- **GCS State Bucket** (`<project_id>-tfstate`) — stores the main Terraform state remotely with versioning enabled.
+- **Artifact Registry** — the Docker repository for pipeline images. It lives here because it's similarly foundational: images must be pushed before the Cloud Run Job can be deployed.
+
+Bootstrap uses **local state only** (stored in `bootstrap/terraform.tfstate`). This is intentional — it's a small, rarely-changed config and bootstrapping its own state would be circular.
+
+### Main (`terraform/`)
+
+Manages the rest of the pipeline: Storage, IAM, Cloud Run, Workflows, and Scheduler. Its state is stored remotely in the GCS bucket provisioned by bootstrap.
+
+The Artifact Registry URL is referenced as a computed string (`<region>-docker.pkg.dev/<project_id>/data-extraction`) rather than a Terraform output cross-reference, since the two configurations are independent.
+
+## Remote State & Configuration
+
+Both the Terraform **state** and the **variable values** (`terraform.tfvars`) are stored in the same GCS bucket, making GCS the single source of truth for project configuration. Neither file is committed to git.
+
+| File | Where it lives |
+|---|---|
+| Remote state | `gs://<project_id>-tfstate/terraform/state/` |
+| `terraform.tfvars` | `gs://<project_id>-tfstate/terraform/terraform.tfvars` |
+| `backend.hcl` | Generated locally by `deploy.sh` (gitignored) |
+
+`backend.hcl` cannot be stored in GCS — it would be circular, since it contains the bucket name needed to access GCS. It also can't be committed to git without leaking project-specific infrastructure details. Instead, `deploy.sh` generates it at runtime from the supplied `PROJECT_ID`.
+
+To edit the project configuration directly, pull `terraform.tfvars` from GCS, edit it locally, then push it back:
+
+```bash
+# Pull
+gcloud storage cp gs://<project_id>-tfstate/terraform/terraform.tfvars terraform.tfvars
+
+# ... make your edits ...
+
+# Push
+gcloud storage cp terraform.tfvars gs://<project_id>-tfstate/terraform/terraform.tfvars
+```
+
+> **Note:** `.tfvars` files are for _input variables_ passed via `-var-file`. Backend config files use `-backend-config` and the `.hcl` extension — they are a different mechanism.
 
 ## Prerequisites
 
@@ -52,56 +102,52 @@ terraform/
    gcloud auth application-default login
    ```
 
-## Quick Start
+## Quick Start (First Time)
 
-### 1. Configure Variables
+### 1. Apply Bootstrap Infrastructure
 
-Create or update `terraform.tfvars`:
-
-```hcl
-project_id            = "your-gcp-project-id"
-bucket_name           = "your-unique-bucket-name"
-default_pv_system_ids = [12345]
-
-# Environment variables containing secrets
-secret_env_vars = [
-  {
-    name      = "PVOUTPUT_API_KEY"
-    secret_id = "pvoutput-api-key"
-    version   = "latest"
-  }
-]
-```
-
-### 2. Initialize Terraform
+You only need your GCP project ID to begin. Run this once to create the state bucket and Artifact Registry:
 
 ```bash
-terraform init -upgrade
+cd terraform/bootstrap
+terraform init
+terraform apply -var="project_id=<your-project-id>"
 ```
 
-### 3. Deploy the Infrastructure
+### 2. Upload `terraform.tfvars` to GCS
 
-Because there is a dependency between the Docker registry, the Docker image, and the Cloud Run Job, we recommend deploying in stages or using a deployment script:
+After bootstrap, push the variable values to GCS:
 
 ```bash
-# 1. Provision the Registry and APIs first
-terraform apply -target=module.artifact_registry
-
-# 2. Build and push Docker image
-IMAGE_URL=$(terraform output -raw artifact_registry_url)/data-extraction
-docker build -t $IMAGE_URL:latest --target entrypoint -f ../pv-prospect-data-extraction/Dockerfile ..
-docker push $IMAGE_URL:latest
-
-# 3. Apply the rest of the infrastructure
-terraform apply
+gcloud storage cp terraform.tfvars gs://<your-project-id>-tfstate/terraform/terraform.tfvars
 ```
 
-### 4. Trigger the Pipeline Manually (Optional)
+### 3. Deploy
+
+```bash
+bash deploy.sh <your-project-id>
+```
+
+`deploy.sh` generates `backend.hcl`, pulls `terraform.tfvars` from GCS, initialises the backend, builds and pushes the Docker image, and applies the infrastructure.
+
+## Subsequent Deployments
+
+After the initial setup, only the main configuration needs to be touched for normal deployments. You can just use the deploy script:
+
+```bash
+cd terraform/
+bash deploy.sh <your-project-id>
+```
+
+Bootstrap only needs to be re-applied if foundational resources change (e.g., adding a new Artifact Registry repository).
+
+### Trigger the Pipeline Manually (Optional)
 
 You can trigger an ad-hoc run (e.g., a backfill) using the `gcloud` CLI:
 
 ```bash
 gcloud workflows run pv-prospect-extract \
+  --location=europe-west2 \
   --data='{"pv_system_ids": [12345], "start_date": "2025-06-24", "end_date": "2025-06-25"}'
 ```
 
@@ -120,7 +166,7 @@ Approximate monthly costs (varies by usage volume):
 
 ## Security Considerations
 
-1. **Service Accounts**: 
+1. **Service Accounts**:
    - A dedicated `data-extraction-pipeline` service account runs the jobs, adhering to the principle of least privilege.
-2. **Secrets**: 
+2. **Secrets**:
    - API keys (like PVOutput) are injected securely via Google Secret Manager, avoiding plaintext keys in environment variables.

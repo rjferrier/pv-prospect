@@ -32,3 +32,5 @@ terraform.rc
 # Ignore lock file (optional - some teams commit this)
 # .terraform.lock.hcl
 
+# Local backend and variable config (project-specific, not committed)
+backend.hcl
