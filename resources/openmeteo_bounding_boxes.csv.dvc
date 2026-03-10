@@ -1,0 +1,5 @@
+outs:
+- md5: 7c62b3a56058a1545e40229d5c4ab66d
+  size: 269
+  hash: md5
+  path: openmeteo_bounding_boxes.csv
