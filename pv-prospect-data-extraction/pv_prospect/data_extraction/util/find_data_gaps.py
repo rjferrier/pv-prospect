@@ -14,8 +14,8 @@ from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
-from pv_prospect.data_extraction.loaders import get_storage_client
-from pv_prospect.data_extraction.loaders.factory import StorageClient
+from pv_prospect.etl.factory import get_extractor
+from pv_prospect.etl.extractors.protocol import Extractor
 
 
 def parse_date_from_filename(filename: str) -> datetime | None:
@@ -71,7 +71,7 @@ def find_gaps(dates: List[datetime], interval_days: int) -> List[Tuple[datetime,
     return gaps
 
 
-def analyze_dataset(storage_client: StorageClient) -> Dict[str, Dict[str, List[Tuple[datetime, datetime, int]]]]:
+def analyze_dataset(extractor: Extractor) -> Dict[str, Dict[str, List[Tuple[datetime, datetime, int]]]]:
     """
     Analyze the entire dataset and find gaps.
     Returns nested dict: {dataset_path: {entity_id: [gaps]}}
@@ -88,8 +88,8 @@ def analyze_dataset(storage_client: StorageClient) -> Dict[str, Dict[str, List[T
     ]
     
     for dataset_path in dataset_paths:
-        # Use polymorphic list_files method - works for both local and GDrive
-        files = storage_client.list_files(folder_path=dataset_path, pattern='*.csv')
+        # Use polymorphic list_files method - works for both local and GCloud
+        files = extractor.list_files(folder_path=dataset_path, pattern='*.csv')
 
         if not files:
             continue
@@ -325,8 +325,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Get the storage client
-    storage_client = get_storage_client(args.local_dir)
+    # Get the extractor
+    extractor = get_extractor(args.local_dir)
 
     if args.local_dir:
         print(f"Analyzing local dataset at: {args.local_dir}")
@@ -336,7 +336,7 @@ def main():
     print("This may take a moment...\n")
     
     # Analyze the dataset
-    results = analyze_dataset(storage_client)
+    results = analyze_dataset(extractor)
 
     if args.generate_commands:
         # Generate and print Docker commands

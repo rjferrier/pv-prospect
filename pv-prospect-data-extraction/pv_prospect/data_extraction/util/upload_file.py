@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 
-from pv_prospect.data_extraction.loaders import get_storage_client
+from pv_prospect.etl.factory import get_loader, get_extractor
 
 
 def upload_file(
@@ -27,11 +27,12 @@ def upload_file(
     if not source_path.is_file():
         raise ValueError(f"Source path is not a file: {source_file}")
 
-    # Get the appropriate storage client
-    storage_client = get_storage_client(local_dir)
+    # Get the appropriate clients
+    extractor = get_extractor(local_dir)
+    loader = get_loader(local_dir)
 
     # Check if file already exists
-    if storage_client.file_exists(destination_path) and not overwrite:
+    if extractor.file_exists(destination_path) and not overwrite:
         raise FileExistsError(
             f"File already exists at destination: {destination_path}\n"
             "Use --overwrite flag to replace it."
@@ -53,7 +54,7 @@ def upload_file(
         rows = list(reader)
 
         print(f"Uploading CSV file: {source_file} -> {destination_path}")
-        storage_client.write_csv(destination_path, rows, overwrite=overwrite)
+        loader.write_csv(destination_path, rows, overwrite=overwrite)
         print(f"✓ Successfully uploaded {len(rows)} rows")
     else:
         # For other files, we'll need to implement a generic write method

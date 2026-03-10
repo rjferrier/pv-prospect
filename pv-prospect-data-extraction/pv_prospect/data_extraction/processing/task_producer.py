@@ -5,9 +5,8 @@ from pv_prospect.data_extraction.config import EtlConfig
 from pv_prospect.common import DateRange, Period
 from pv_prospect.common.pv_site_repo import get_all_pv_system_ids, build_pv_site_repo
 from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
-from pv_prospect.data_extraction.loaders import get_storage_client
-from pv_prospect.data_extraction.loaders.factory import StorageClient
-from pv_prospect.data_extraction.processing.task_queuer import TaskQueuer
+from pv_prospect.etl.factory import get_extractor as get_storage_extractor
+from pv_prospect.etl.extractors.protocol import Extractor
 from pv_prospect.data_extraction.processing.tasks import PV_SITES_CSV_FILE
 
 SOURCE_DESCRIPTORS = {
@@ -153,8 +152,8 @@ def _parse_pv_system_ids(system_ids_str: str):
     return [int(s.strip()) for s in system_ids_str.split(',') if s.strip()]
 
 
-def _get_all_pv_system_ids(storage_client: StorageClient) -> list[int]:
-    csv_stream = storage_client.read_file(PV_SITES_CSV_FILE)
+def _get_all_pv_system_ids(storage_extractor: Extractor) -> list[int]:
+    csv_stream = storage_extractor.read_file(PV_SITES_CSV_FILE)
     build_pv_site_repo(csv_stream)
     return get_all_pv_system_ids()
 
@@ -177,7 +176,7 @@ def _main(config, args):
 
     pv_system_ids = (
         _parse_pv_system_ids(args.system_ids) if args.system_ids else
-        _get_all_pv_system_ids(get_storage_client(args.local_dir))
+        _get_all_pv_system_ids(get_storage_extractor(args.local_dir))
     )
 
     print(f"Processing {len(pv_system_ids)} PV site(s).\n")

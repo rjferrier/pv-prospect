@@ -1,6 +1,6 @@
 @startuml
 
-!include ./theme.puml
+!include theme.puml
 
 component "Weather\nAPI" as WeatherApi
 component "PV\nApi" as PvApi
@@ -21,6 +21,8 @@ database "Versioned Raw Data" as VersionedRawData {
   database "Weather CSVs" as WeatherVersionedRawData
   database "PV CSVs" as PvVersionedRawData
 }
+
+database "Versioned Project Data" as VersionedProjectData
 
 database "Versioned Model Data" as VersionedModelData {
   database "Weather Model Data" as WeatherVersionedModelData
@@ -76,9 +78,11 @@ PvModel <-- ModelTrainer : MP.3: trains
 WeatherApi <-- DataExtractor : EW.1: calls
 PvApi <-- DataExtractor : EP.1: calls
 
+VersionedProjectData <-- DataExtractor: pulls
 DataExtractor --> WeatherStagedRawData : EW.2: puts
 DataExtractor --> PvStagedRawData : EP.2: puts
 
+VersionedProjectData <-[hidden]- DataTransformer
 DataTransformer --> WeatherStagedRawData : TW.1: gets\nTP.1: gets
 DataTransformer --> PvStagedRawData : TP.2: gets
 

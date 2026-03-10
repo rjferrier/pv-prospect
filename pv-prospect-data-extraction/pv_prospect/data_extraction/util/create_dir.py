@@ -1,15 +1,15 @@
 import argparse
 from typing import Optional
 
-from pv_prospect.data_extraction.loaders import get_storage_client
+from pv_prospect.etl.factory import get_loader
 
 
 def create_dir(source_file: Optional[str], destination_path: Optional[str], local_dir: Optional[str]) -> None:
     """Create a directory in storage, using destination_path or falling back to source_file."""
     dest = _derive_dest_for_create(destination_path, source_file)
 
-    storage_client = get_storage_client(local_dir)
-    created = storage_client.create_folders(dest)
+    loader = get_loader(local_dir)
+    created = loader.create_folder(dest)
     if created:
         print(f"✓ Created directory: {dest}")
     else:

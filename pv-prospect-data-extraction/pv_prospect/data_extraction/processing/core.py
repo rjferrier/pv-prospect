@@ -14,9 +14,10 @@ from pv_prospect.common import (
     build_openmeteo_bounding_box_repo,
     get_pv_site_by_system_id,
 )
+from pv_prospect.etl.extractors.gcs import GcsExtractor
 from pv_prospect.data_extraction.extractors import get_extractor, SourceDescriptor
 from pv_prospect.data_extraction.extractors.base import TimeSeriesDescriptor
-from pv_prospect.data_extraction.loaders import get_storage_client
+from pv_prospect.etl.factory import get_loader, get_extractor as get_storage_extractor
 from pv_prospect.data_extraction.processing.value_objects import Task, Result
 
 TIMESERIES_FOLDER = 'timeseries'
@@ -39,14 +40,23 @@ def preprocess(
         source_descriptor: The source descriptor identifying the data source folder.
         local_dir: If provided, a local directory path where files will be created.
     """
-    storage_client = get_storage_client(local_dir)
+    loader = get_loader(local_dir)
     parent_folders = [TIMESERIES_FOLDER]
     folder_ids = [
-        storage_client.create_folder(f"{parent}/{source_descriptor}")
+        loader.create_folder(f"{parent}/{source_descriptor}")
         for parent in parent_folders
     ]
 
-    storage_client.provision_supporting_resources(DVC_FILE_PATH, SUPPORTING_RESOURCES)
+    gcs_extractor = GcsExtractor()
+    blob_paths = gcs_extractor.resolve_dvc_blob_paths(DVC_FILE_PATH, SUPPORTING_RESOURCES)
+    
+    for filename, src_blob_path in blob_paths.items():
+        if loader.file_exists(filename):
+            print(f"    {filename} already exists, skipping provisioning")
+            continue
+            
+        with gcs_extractor.read_file(src_blob_path) as f:
+            loader.write_text(filename, f.read(), overwrite=False)
 
     return folder_ids
 
@@ -75,12 +85,13 @@ def extract_and_load(
     """
     task = Task(source_descriptor, pv_system_id, date_range)
 
-    storage_client = get_storage_client(local_dir)
+    storage_extractor = get_storage_extractor(local_dir)
+    loader = get_loader(local_dir)
     build_pv_site_repo(
-        storage_client.read_file(PV_SITES_CSV_FILE)
+        storage_extractor.read_file(PV_SITES_CSV_FILE)
     )
     build_openmeteo_bounding_box_repo(
-        storage_client.read_file(OM_BOUNDING_BOXES_CSV_FILE)
+        storage_extractor.read_file(OM_BOUNDING_BOXES_CSV_FILE)
     )
 
     if dry_run:
@@ -94,7 +105,7 @@ def extract_and_load(
 
     def is_processable(ts_descriptor: TimeSeriesDescriptor) -> bool:
         file_path = get_csv_path(ts_descriptor)
-        return overwrite or not storage_client.file_exists(file_path)
+        return overwrite or not storage_extractor.file_exists(file_path)
 
     try:
         extractor = get_extractor(source_descriptor)
@@ -117,7 +128,7 @@ def extract_and_load(
 
         for ts in timeseries:
             ts_file_path = get_csv_path(ts.descriptor)
-            storage_client.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
+            loader.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
 
         print(f"    {task}: Success")
         return Result.success(task)

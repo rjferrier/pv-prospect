@@ -1,6 +1,6 @@
 import argparse
 from collections import defaultdict
-from pv_prospect.data_extraction.loaders.gdrive import GDriveClient, ResolvedFilePath
+from pv_prospect.etl.loaders.gdrive import GDriveClient, ResolvedFilePath
 
 
 def get_folder_id(client: GDriveClient, folder_path: str | None) -> str | None:
