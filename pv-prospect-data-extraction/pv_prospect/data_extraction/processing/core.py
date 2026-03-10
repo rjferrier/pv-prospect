@@ -13,7 +13,10 @@ from pv_prospect.common import (
     build_pv_site_repo,
     build_openmeteo_bounding_box_repo,
     get_pv_site_by_system_id,
+    map_from_env,
+    VarMapping,
 )
+from dataclasses import dataclass
 from pv_prospect.etl.extractors.gcs import GcsExtractor
 from pv_prospect.data_extraction.extractors import get_extractor, SourceDescriptor
 from pv_prospect.data_extraction.extractors.base import TimeSeriesDescriptor
@@ -25,12 +28,23 @@ PV_SITES_CSV_FILE = 'pv_sites.csv'
 OM_BOUNDING_BOXES_CSV_FILE = 'openmeteo_bounding_boxes.csv'
 
 SUPPORTING_RESOURCES = [PV_SITES_CSV_FILE, OM_BOUNDING_BOXES_CSV_FILE]
-DVC_FILE_PATH = os.environ.get('DVC_FILE_PATH', '/app/resources.dvc')
+
+
+@dataclass(frozen=True)
+class CoreConfig:
+    dvc_file_path: str
+
+    @classmethod
+    def from_env(cls) -> 'CoreConfig':
+        return map_from_env(cls, {
+            'dvc_file_path': VarMapping('DVC_FILE_PATH', str)
+        })
 
 
 def preprocess(
         source_descriptor: SourceDescriptor,
         local_dir: str | None,
+        config: CoreConfig | None = None,
 ) -> list[str]:
     """
     Preprocess before extraction: create folder structure and provision
@@ -39,7 +53,11 @@ def preprocess(
     Args:
         source_descriptor: The source descriptor identifying the data source folder.
         local_dir: If provided, a local directory path where files will be created.
+        config: Configuration containing DVC file path.
     """
+    if config is None:
+        config = CoreConfig.from_env()
+
     loader = get_loader(local_dir)
     parent_folders = [TIMESERIES_FOLDER]
     folder_ids = [
@@ -47,8 +65,8 @@ def preprocess(
         for parent in parent_folders
     ]
 
-    gcs_extractor = GcsExtractor()
-    blob_paths = gcs_extractor.resolve_dvc_blob_paths(DVC_FILE_PATH, SUPPORTING_RESOURCES)
+    gcs_extractor = GcsExtractor.from_env()
+    blob_paths = gcs_extractor.resolve_dvc_blob_paths(config.dvc_file_path, SUPPORTING_RESOURCES)
     
     for filename, src_blob_path in blob_paths.items():
         if loader.file_exists(filename):

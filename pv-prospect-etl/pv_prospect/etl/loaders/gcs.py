@@ -1,11 +1,9 @@
 import csv
-import os
 from io import StringIO
 from typing import Iterable
 
 from pv_prospect.etl.clients.gcs import GcsClient
-
-GCS_STAGING_PREFIX = 'staging'
+from pv_prospect.common import map_from_env, VarMapping
 
 
 class GcsLoader(GcsClient):
@@ -16,8 +14,14 @@ class GcsLoader(GcsClient):
     ``gs://<bucket>/staging/timeseries/om/file.csv``.
     """
 
-    def __init__(self, bucket_name: str = os.environ.get('GCS_BUCKET', 'pv-prospect-data'), prefix: str = GCS_STAGING_PREFIX) -> None:
+    def __init__(self, bucket_name: str, prefix: str = '') -> None:
         super().__init__(bucket_name=bucket_name, prefix=prefix)
+
+    @classmethod
+    def from_env(cls, bucket_name_env_var_name: str, prefix: str = '') -> 'GcsLoader':
+        return map_from_env(cls, {
+            'bucket_name': VarMapping(bucket_name_env_var_name, str)
+        }, prefix=prefix)
 
     def create_folder(self, folder_path: str) -> str | None:
         """No-op on GCS (flat namespace). Returns the prefixed path."""

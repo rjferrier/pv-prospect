@@ -22,7 +22,7 @@ def get_loader(local_dir: str | None) -> Loader:
         return LocalLoader(local_dir)
     else:
         print("Using GCS loader")
-        return GcsLoader()
+        return GcsLoader.from_env()
 
 
 def get_extractor(local_dir: str | None) -> Extractor:
@@ -41,4 +41,4 @@ def get_extractor(local_dir: str | None) -> Extractor:
         return LocalExtractor(local_dir)
     else:
         print("Using GCS extractor")
-        return GcsExtractor()
+        return GcsExtractor.from_env()

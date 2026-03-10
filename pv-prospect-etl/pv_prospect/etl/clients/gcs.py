@@ -1,7 +1,4 @@
-import os
 from google.cloud import storage as gcs
-
-GCS_BUCKET = os.environ.get('GCS_BUCKET', 'pv-prospect-data')
 
 
 class GcsClient:
@@ -10,7 +7,7 @@ class GcsClient:
     Paths are optionally scoped under a prefix.
     """
 
-    def __init__(self, bucket_name: str = GCS_BUCKET, prefix: str = "") -> None:
+    def __init__(self, bucket_name: str, prefix: str = '') -> None:
         self._client = gcs.Client()
         self._bucket = self._client.bucket(bucket_name)
         self._prefix = prefix.strip('/')

@@ -7,7 +7,7 @@ from typing import Callable, Collection
 import requests
 from pv_prospect.common import Location, PVSite
 from pv_prospect.data_extraction.extractors import TimeSeriesDescriptor, TimeSeries
-from pv_prospect.data_extraction.util import retry_on_429
+from pv_prospect.data_extraction.util.retry import retry_on_429
 from typing_extensions import deprecated
 
 MIN_TIME = time(4, 0)

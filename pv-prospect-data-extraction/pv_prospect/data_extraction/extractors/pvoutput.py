@@ -4,9 +4,9 @@ from datetime import date, datetime
 from typing import Optional, Collection
 
 import requests
-from pv_prospect.common import PVSite
+from pv_prospect.common import PVSite, map_from_env, VarMapping
 from pv_prospect.data_extraction.extractors import TimeSeriesDescriptor, TimeSeries
-from pv_prospect.data_extraction.util import map_from_env, VarMapping, retry_on_429
+from pv_prospect.data_extraction.util.retry import retry_on_429
 
 URL = "https://pvoutput.org/service/r2/getstatus.jsp"
 API_KEY_HEADER_NAME = "X-Pvoutput-Apikey"

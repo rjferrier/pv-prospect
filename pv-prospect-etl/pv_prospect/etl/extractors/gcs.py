@@ -1,17 +1,22 @@
 import io
 import json
-import os
 import yaml
-from typing import Iterable
 
 from pv_prospect.etl.clients.gcs import GcsClient
+from pv_prospect.common import map_from_env, VarMapping
 
 
 class GcsExtractor(GcsClient):
     """Storage client that reads blobs from a GCS bucket."""
 
-    def __init__(self, bucket_name: str = os.environ.get('GCS_BUCKET', 'pv-prospect-data'), prefix: str = "") -> None:
+    def __init__(self, bucket_name: str, prefix: str = None) -> None:
         super().__init__(bucket_name=bucket_name, prefix=prefix)
+
+    @classmethod
+    def from_env(cls, bucket_name_env_var_name: str, prefix: str = '') -> 'GcsLoader':
+        return map_from_env(cls, {
+            'bucket_name': VarMapping(bucket_name_env_var_name, str)
+        }, prefix=prefix)
 
     def read_file(self, file_path: str) -> io.TextIOWrapper:
         blob = self._bucket.blob(self._blob_path(file_path))
