@@ -22,3 +22,8 @@ output "versioned_model_data_bucket_name" {
   value       = google_storage_bucket.versioned_model_data.name
   description = "Name of the versioned model data bucket"
 }
+
+output "versioned_resources_bucket_name" {
+  value       = google_storage_bucket.versioned_resources.name
+  description = "Name of the versioned resources bucket"
+}

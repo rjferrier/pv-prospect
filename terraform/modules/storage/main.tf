@@ -55,6 +55,16 @@ resource "google_storage_bucket" "versioned_model_data" {
   }
 }
 
+resource "google_storage_bucket" "versioned_resources" {
+  name                        = "${var.bucket_prefix}-versioned-resources"
+  location                    = var.region
+  uniform_bucket_level_access = true
+
+  hierarchical_namespace {
+    enabled = true
+  }
+}
+
 resource "google_service_account" "dvc_sa" {
   account_id   = "dvc-sa-v3"
   display_name = "DVC SA"
@@ -70,5 +80,11 @@ resource "google_storage_bucket_iam_member" "dvc_sa_versioned_raw" {
 resource "google_storage_bucket_iam_member" "dvc_sa_versioned_model" {
   bucket = google_storage_bucket.versioned_model_data.name
   role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.dvc_sa.email}"
+}
+
+resource "google_storage_bucket_iam_member" "dvc_sa_versioned_resources" {
+  bucket = google_storage_bucket.versioned_resources.name
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.dvc_sa.email}"
 }
