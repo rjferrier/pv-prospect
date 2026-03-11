@@ -1,0 +1,16 @@
+
+versioned_resources_storage:
+  tracking:
+    backend: 'local'
+    base_dir: '/app/resources'
+  backend: 'gcs'
+  bucket_name: 'pv-prospect-versioned-resources'
+
+staged_raw_data_storage:
+  backend: 'gcs'
+  bucket_name: 'pv-prospect-staged-raw-data'
+
+task_queue:
+  task_spacing: 0.1
+  task_jitter: 0.05
+  join_timeout: 30

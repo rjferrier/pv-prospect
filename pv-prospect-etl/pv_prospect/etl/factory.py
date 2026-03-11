@@ -1,44 +1,34 @@
-from pv_prospect.etl.extractors.gcs import GcsExtractor
-from pv_prospect.etl.extractors.local import LocalExtractor
-from pv_prospect.etl.extractors.protocol import Extractor
-from pv_prospect.etl.loaders.gcs import GcsLoader
-from pv_prospect.etl.loaders.local import LocalLoader
-from pv_prospect.etl.loaders.protocol import Loader
+from pv_prospect.etl.storage_config import (
+    AnyStorageConfig, LocalStorageConfig, GcsStorageConfig
+)
+
+from .extract import (
+    Extractor, LocalExtractor, GcsExtractor
+)
+from .load import (
+    Loader, LocalLoader, GcsLoader
+)
 
 
-def get_loader(local_dir: str | None) -> Loader:
-    """
-    Get a loader for file operations.
+def get_loader(config: AnyStorageConfig) -> Loader:
+    if isinstance(config, LocalStorageConfig):
+        return LocalLoader(config.base_dir)
 
-    Args:
-        local_dir: If provided, returns a LocalLoader using this as the base directory.
-                   If None, returns a GcsLoader.
+    if isinstance(config, GcsStorageConfig):
+        return GcsLoader(config.bucket_name, config.prefix)
 
-    Returns:
-        Loader: Either a LocalLoader or GcsLoader
-    """
-    if local_dir:
-        print(f"Using local loader at {local_dir}")
-        return LocalLoader(local_dir)
-    else:
-        print("Using GCS loader")
-        return GcsLoader.from_env()
+    raise _not_implemented(config)
 
 
-def get_extractor(local_dir: str | None) -> Extractor:
-    """
-    Get an extractor for reading operations.
+def get_extractor(config: AnyStorageConfig) -> Extractor:
+    if isinstance(config, LocalStorageConfig):
+        return LocalExtractor(config.base_dir)
 
-    Args:
-        local_dir: If provided, returns a LocalExtractor using this as the base directory.
-                   If None, returns a GcsExtractor.
+    if isinstance(config, GcsStorageConfig):
+        return GcsExtractor(config.bucket_name, config.prefix)
 
-    Returns:
-        Extractor: Either a LocalExtractor or GcsExtractor
-    """
-    if local_dir:
-        print(f"Using local extractor at {local_dir}")
-        return LocalExtractor(local_dir)
-    else:
-        print("Using GCS extractor")
-        return GcsExtractor.from_env()
+    raise _not_implemented(config)
+
+
+def _not_implemented(discriminator: object):
+    return NotImplementedError(f"type of {discriminator} ({type(discriminator)}) is not recognised")

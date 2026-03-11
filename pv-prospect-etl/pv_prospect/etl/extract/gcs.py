@@ -1,6 +1,7 @@
 import io
 import json
 import yaml
+from pv_prospect.common.infrastructure.storage import GcsStorageLocation
 
 from pv_prospect.etl.clients.gcs import GcsClient
 from pv_prospect.common import map_from_env, VarMapping
@@ -8,15 +9,6 @@ from pv_prospect.common import map_from_env, VarMapping
 
 class GcsExtractor(GcsClient):
     """Storage client that reads blobs from a GCS bucket."""
-
-    def __init__(self, bucket_name: str, prefix: str = None) -> None:
-        super().__init__(bucket_name=bucket_name, prefix=prefix)
-
-    @classmethod
-    def from_env(cls, bucket_name_env_var_name: str, prefix: str = '') -> 'GcsLoader':
-        return map_from_env(cls, {
-            'bucket_name': VarMapping(bucket_name_env_var_name, str)
-        }, prefix=prefix)
 
     def read_file(self, file_path: str) -> io.TextIOWrapper:
         blob = self._bucket.blob(self._blob_path(file_path))
@@ -56,29 +48,3 @@ class GcsExtractor(GcsClient):
             })
 
         return files
-
-    def resolve_dvc_blob_paths(self, dvc_file_path: str, resource_files: list[str]) -> dict[str, str]:
-        """
-        Parse a directory .dvc file and resolve each requested file to its GCS
-        cache blob path.
-        """
-        with open(dvc_file_path) as f:
-            dvc_data = yaml.safe_load(f)
-        dir_hash = dvc_data['outs'][0]['md5'].removesuffix('.dir')
-
-        manifest_blob_path = f"files/md5/{dir_hash[:2]}/{dir_hash[2:]}.dir"
-        manifest_text = self._bucket.blob(manifest_blob_path).download_as_text()
-        manifest = json.loads(manifest_text)
-
-        hash_by_relpath = {entry['relpath']: entry['md5'] for entry in manifest}
-
-        result = {}
-        for filename in resource_files:
-            md5 = hash_by_relpath.get(filename)
-            if md5 is None:
-                raise FileNotFoundError(
-                    f"{filename} not found in DVC dir manifest (hash {dir_hash})"
-                )
-            result[filename] = f"files/md5/{md5[:2]}/{md5[2:]}"
-
-        return result

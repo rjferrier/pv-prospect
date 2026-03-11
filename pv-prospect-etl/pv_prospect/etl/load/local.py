@@ -1,6 +1,4 @@
 import csv
-import os
-from pathlib import Path
 from typing import Iterable
 
 from pv_prospect.etl.clients.local import LocalClient

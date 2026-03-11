@@ -55,7 +55,6 @@ def find_gaps(dates: List[datetime], interval_days: int) -> List[Tuple[datetime,
     for i in range(len(dates_sorted) - 1):
         current = dates_sorted[i]
         next_date = dates_sorted[i + 1]
-        expected_next = current + timedelta(days=interval_days)
         
         # Calculate the actual gap
         actual_gap = (next_date - current).days

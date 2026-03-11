@@ -15,11 +15,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
 from pv_prospect.common import DateRange, Period
+from pv_prospect.common.config_parser import get_config
 from pv_prospect.common.pv_site_repo import get_all_pv_system_ids, build_pv_site_repo
-from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
+from pv_prospect.etl.extract import Extractor
 from pv_prospect.etl.factory import get_extractor as get_storage_extractor
-from pv_prospect.etl.extractors.protocol import Extractor
+from pv_prospect.etl.storage_config import LocalStorageConfig
 
+from pv_prospect.data_extraction.config import DataExtractionConfig
+from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.processing_stats import ProcessingStats
 from pv_prospect.data_extraction.processing.value_objects import Result
@@ -135,6 +138,7 @@ def _get_all_pv_system_ids(storage_extractor: Extractor) -> list[int]:
 
 def _main() -> None:
     args = _parse_args()
+    config = get_config(DataExtractionConfig)
 
     # --- validate sources ---------------------------------------------------
     sources = [s.strip() for s in args.source.split(',')]
@@ -151,10 +155,15 @@ def _main() -> None:
         core.preprocess(sd, args.local_dir)
 
     # --- resolve PV system IDs ----------------------------------------------
+    staging_location_config = (
+        LocalStorageConfig(base_dir=args.local_dir, tracking=None) if args.local_dir else
+        config.staged_raw_data_storage
+    )
+
     pv_system_ids = (
         _parse_pv_system_ids(args.system_ids)
         if args.system_ids
-        else _get_all_pv_system_ids(get_storage_extractor(args.local_dir))
+        else _get_all_pv_system_ids(get_storage_extractor(staging_location_config))
     )
     print(f"Processing {len(pv_system_ids)} PV site(s).\n")
 

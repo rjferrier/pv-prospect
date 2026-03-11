@@ -14,9 +14,6 @@ class GcsLoader(GcsClient):
     ``gs://<bucket>/staging/timeseries/om/file.csv``.
     """
 
-    def __init__(self, bucket_name: str, prefix: str = '') -> None:
-        super().__init__(bucket_name=bucket_name, prefix=prefix)
-
     @classmethod
     def from_env(cls, bucket_name_env_var_name: str, prefix: str = '') -> 'GcsLoader':
         return map_from_env(cls, {

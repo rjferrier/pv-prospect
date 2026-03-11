@@ -13,7 +13,6 @@ from pv_prospect.data_extraction.processing.worker import app
 PV_SITES_CSV_FILE = core.PV_SITES_CSV_FILE
 OM_BOUNDING_BOXES_CSV_FILE = core.OM_BOUNDING_BOXES_CSV_FILE
 SUPPORTING_RESOURCES = core.SUPPORTING_RESOURCES
-DVC_FILE_PATH = core.DVC_FILE_PATH
 
 
 @app.task
