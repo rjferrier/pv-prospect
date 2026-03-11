@@ -4,7 +4,7 @@ from typing import Callable
 
 from celery.result import ResultSet, AsyncResult
 
-from pv_prospect.data_extraction.config import EtlConfig
+from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.common import DateRange
 from pv_prospect.data_extraction.extractors import SourceDescriptor
 from pv_prospect.data_extraction.processing.tasks import preprocess, extract_and_load
@@ -34,17 +34,17 @@ class TaskQueuer:
         self.join_timeout = join_timeout
 
     @classmethod
-    def from_config(cls, config: EtlConfig) -> 'TaskQueuer':
+    def from_config(cls, config: DataExtractionConfig) -> 'TaskQueuer':
         return cls(
-            task_spacing=config.task_spacing,
-            task_jitter=config.task_jitter,
-            join_timeout=config.join_timeout,
+            task_spacing=config.task_queue.task_spacing,
+            task_jitter=config.task_queue.task_jitter,
+            join_timeout=config.task_queue.join_timeout,
         )
 
     def preprocess(
             self, source_descriptors: list[SourceDescriptor], local_dir: str | None
     ) -> AsyncResultsWrapper:
-        print(f"Preprocessing for:", ', '.join(source_descriptors))
+        print("Preprocessing for:", ', '.join(source_descriptors))
         results_async = [
             preprocess.apply_async(args=(sd, local_dir), countdown=self._calculate_delay(i))
             for i, sd in enumerate(source_descriptors)
@@ -89,7 +89,7 @@ class TaskQueuer:
 def _preprocess_callback(results: list[list[str]]):
     folder_ids = [el for sublist in results for el in sublist if el]
     if not folder_ids:
-        print(f"No new folders to create.")
+        print("No new folders to create.")
         return
 
-    print(f"Created folders:", folder_ids)
+    print("Created folders:", folder_ids)

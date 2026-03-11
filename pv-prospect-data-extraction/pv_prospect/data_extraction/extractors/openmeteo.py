@@ -279,7 +279,7 @@ class OpenMeteoWeatherDataExtractor:
         except KeyError as e:
             raise ValueError(
                 f"Expected time resolution '{om_descriptor}' not found in response:\n"
-                f"{response.text}"
+                f"{json.dumps(json_data)}"
             ) from e
 
         # Get the headers (field names) and corresponding arrays

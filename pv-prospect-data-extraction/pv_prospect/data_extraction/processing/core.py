@@ -5,47 +5,40 @@ These are called by:
 - ``entrypoint.py`` for Cloud Run Jobs
 - ``tasks.py``      for legacy Celery execution (optional)
 """
-from datetime import date
 import os
+from datetime import date
 
 from pv_prospect.common import (
     DateRange,
     build_pv_site_repo,
     build_openmeteo_bounding_box_repo,
     get_pv_site_by_system_id,
-    map_from_env,
-    VarMapping,
 )
-from dataclasses import dataclass
-from pv_prospect.etl.extractors.gcs import GcsExtractor
+from pv_prospect.common.config_parser import get_config
+from pv_prospect.etl.extract.resolve.dvc import resolve_path
+from pv_prospect.etl.factory import (
+    get_loader as get_file_loader,
+    get_extractor as get_file_extractor
+)
+from pv_prospect.etl.storage_config import (
+    LocalStorageConfig,
+    GcsStorageConfig,
+)
+
+from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.extractors import get_extractor, SourceDescriptor
 from pv_prospect.data_extraction.extractors.base import TimeSeriesDescriptor
-from pv_prospect.etl.factory import get_loader, get_extractor as get_storage_extractor
 from pv_prospect.data_extraction.processing.value_objects import Task, Result
 
 TIMESERIES_FOLDER = 'timeseries'
 PV_SITES_CSV_FILE = 'pv_sites.csv'
 OM_BOUNDING_BOXES_CSV_FILE = 'openmeteo_bounding_boxes.csv'
 
+
 SUPPORTING_RESOURCES = [PV_SITES_CSV_FILE, OM_BOUNDING_BOXES_CSV_FILE]
 
 
-@dataclass(frozen=True)
-class CoreConfig:
-    dvc_file_path: str
-
-    @classmethod
-    def from_env(cls) -> 'CoreConfig':
-        return map_from_env(cls, {
-            'dvc_file_path': VarMapping('DVC_FILE_PATH', str)
-        })
-
-
-def preprocess(
-        source_descriptor: SourceDescriptor,
-        local_dir: str | None,
-        config: CoreConfig | None = None,
-) -> list[str]:
+def preprocess(source_descriptor: SourceDescriptor, local_dir: str | None) -> list[str]:
     """
     Preprocess before extraction: create folder structure and provision
     supporting resources (pv_sites.csv, openmeteo_bounding_boxes.csv).
@@ -53,28 +46,43 @@ def preprocess(
     Args:
         source_descriptor: The source descriptor identifying the data source folder.
         local_dir: If provided, a local directory path where files will be created.
-        config: Configuration containing DVC file path.
     """
-    if config is None:
-        config = CoreConfig.from_env()
+    config = get_config(DataExtractionConfig)
 
-    loader = get_loader(local_dir)
+    versioned_resources_extractor = get_file_extractor(config.versioned_resources_storage)
+
+    staging_location_config = (
+        LocalStorageConfig(base_dir=local_dir, tracking=None) if local_dir else
+        config.staged_raw_data_storage
+    )
+    staged_resources_loader = get_file_loader(staging_location_config)
+
     parent_folders = [TIMESERIES_FOLDER]
     folder_ids = [
-        loader.create_folder(f"{parent}/{source_descriptor}")
+        staged_resources_loader.create_folder(f"{parent}/{source_descriptor}")
         for parent in parent_folders
     ]
 
-    gcs_extractor = GcsExtractor.from_env()
-    blob_paths = gcs_extractor.resolve_dvc_blob_paths(config.dvc_file_path, SUPPORTING_RESOURCES)
-    
-    for filename, src_blob_path in blob_paths.items():
-        if loader.file_exists(filename):
+    dvc_config = config.versioned_resources_storage.tracking
+    if isinstance(dvc_config, LocalStorageConfig):
+        dvc_prefix = dvc_config.base_dir
+    elif isinstance(dvc_config, GcsStorageConfig):
+        dvc_prefix = dvc_config.prefix
+    else:
+        dvc_prefix = ''
+
+    resources = [
+        (filename, resolve_path(f'{dvc_prefix}/{filename}.dvc'))
+        for filename in SUPPORTING_RESOURCES
+    ]
+
+    for filename, blob_path in resources:
+        if staged_resources_loader.file_exists(filename):
             print(f"    {filename} already exists, skipping provisioning")
             continue
-            
-        with gcs_extractor.read_file(src_blob_path) as f:
-            loader.write_text(filename, f.read(), overwrite=False)
+
+        with versioned_resources_extractor.read_file(blob_path) as f:
+            staged_resources_loader.write_text(filename, f.read(), overwrite=False)
 
     return folder_ids
 
@@ -103,13 +111,20 @@ def extract_and_load(
     """
     task = Task(source_descriptor, pv_system_id, date_range)
 
-    storage_extractor = get_storage_extractor(local_dir)
-    loader = get_loader(local_dir)
+    config = get_config(DataExtractionConfig)
+
+    staging_location_config = (
+        LocalStorageConfig(base_dir=local_dir, tracking=None) if local_dir else
+        config.staged_raw_data_storage
+    )
+    resources_extractor = get_file_extractor(staging_location_config)
+    time_series_loader = get_file_loader(staging_location_config)
+
     build_pv_site_repo(
-        storage_extractor.read_file(PV_SITES_CSV_FILE)
+        resources_extractor.read_file(PV_SITES_CSV_FILE)
     )
     build_openmeteo_bounding_box_repo(
-        storage_extractor.read_file(OM_BOUNDING_BOXES_CSV_FILE)
+        resources_extractor.read_file(OM_BOUNDING_BOXES_CSV_FILE)
     )
 
     if dry_run:
@@ -123,7 +138,7 @@ def extract_and_load(
 
     def is_processable(ts_descriptor: TimeSeriesDescriptor) -> bool:
         file_path = get_csv_path(ts_descriptor)
-        return overwrite or not storage_extractor.file_exists(file_path)
+        return overwrite or not resources_extractor.file_exists(file_path)
 
     try:
         extractor = get_extractor(source_descriptor)
@@ -146,7 +161,7 @@ def extract_and_load(
 
         for ts in timeseries:
             ts_file_path = get_csv_path(ts.descriptor)
-            loader.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
+            time_series_loader.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
 
         print(f"    {task}: Success")
         return Result.success(task)
@@ -155,10 +170,6 @@ def extract_and_load(
         print(f"    {task}: ERROR: {e}")
         return Result.failure(task, e)
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _build_csv_file_path(
         time_series_folder: str,
