@@ -1,10 +1,8 @@
-from .bounding_box import BoundingBox
 from .date_range import DateRange, Period
 from .location import Location
-from .pv_site import PVSite, PanelGeometry, System, Shading
+from .pv_site import PanelGeometry, PVSite, Shading, System
 
 __all__ = [
-    'BoundingBox',
     'DateRange',
     'Period',
     'Location',
@@ -13,4 +11,3 @@ __all__ = [
     'PanelGeometry',
     'System',
 ]
-

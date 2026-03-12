@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from decimal import Decimal
-import math
 
 
 @dataclass(frozen=True)
@@ -22,23 +21,8 @@ class Location:
         """
         return cls(
             latitude=Decimal(str(round(latitude, 4))),
-            longitude=Decimal(str(round(longitude, 4)))
+            longitude=Decimal(str(round(longitude, 4))),
         )
 
     def get_coordinates(self) -> str:
-        return f"{self.latitude},{self.longitude}"
-
-    def euclidean_distance(self, other: 'Location') -> float:
-        """
-        Calculate the Euclidean distance between this location and another location.
-
-        Args:
-            other: Another Location instance
-
-        Returns:
-            The Euclidean distance as a float
-        """
-        lat_diff = float(self.latitude - other.latitude)
-        lon_diff = float(self.longitude - other.longitude)
-        return math.sqrt(lat_diff ** 2 + lon_diff ** 2)
-
+        return f'{self.latitude},{self.longitude}'
