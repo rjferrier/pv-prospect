@@ -1,34 +1,20 @@
 from enum import Enum
 from functools import lru_cache
 
-from pv_prospect.common import (
-    InterpolationStrategy, Location, PVSite,
-    get_openmeteo_bounding_box_by_pv_system_id,
-)
+from pv_prospect.common import Location, PVSite, get_location_by_pv_system_id
 from pv_prospect.data_extraction.extractors.openmeteo import (
-    OpenMeteoWeatherDataExtractor, Mode as OMMode, APISelector, TimeResolution, Fields, Models
+    APISelector,
+    Fields,
+    Models,
+    OpenMeteoWeatherDataExtractor,
+    TimeResolution,
 )
+from pv_prospect.data_extraction.extractors.openmeteo import Mode as OMMode
 from pv_prospect.data_extraction.extractors.pvoutput import PVOutputExtractor
 
-INTERPOLATION_STRATEGY = InterpolationStrategy.NEAREST
 
-
-def _nearest_location_getter(pv_site: PVSite) -> list[Location]:
-    bb = get_openmeteo_bounding_box_by_pv_system_id(pv_site.pvo_sys_id)
-    return [bb.nearest_vertex_location(pv_site.location)]
-
-
-def _bilinear_location_getter(pv_site: PVSite) -> list[Location]:
-    bb = get_openmeteo_bounding_box_by_pv_system_id(pv_site.pvo_sys_id)
-    return [v.location for v in bb.vertices]
-
-
-_LOCATION_GETTERS = {
-    InterpolationStrategy.NEAREST: _nearest_location_getter,
-    InterpolationStrategy.BILINEAR: _bilinear_location_getter,
-}
-
-_location_getter = _LOCATION_GETTERS[INTERPOLATION_STRATEGY]
+def _location_getter(pv_site: PVSite) -> list[Location]:
+    return [get_location_by_pv_system_id(pv_site.pvo_sys_id)]
 
 
 class SourceDescriptor(str, Enum):
@@ -56,7 +42,6 @@ def get_extractor(source_descriptor: SourceDescriptor):
     Returns:
         An extractor instance
     """
-    print(f"Using {INTERPOLATION_STRATEGY}")
     factory = _EXTRACTOR_FACTORIES[source_descriptor]
     return factory()
 
@@ -73,41 +58,50 @@ def supports_multi_date(source_descriptor: SourceDescriptor) -> bool:
 
 _EXTRACTOR_FACTORIES = {
     SourceDescriptor.PVOUTPUT: lambda: PVOutputExtractor.from_env(),
-    SourceDescriptor.OPENMETEO_QUARTERHOURLY: lambda: OpenMeteoWeatherDataExtractor.from_components(
-        location_getter=_location_getter,
-        api_selector=APISelector.FORECAST,
-        time_resolution=TimeResolution.QUARTERHOURLY,
-        fields=Fields.FORECAST,
-        models=Models.ALL_FORECAST,
+    SourceDescriptor.OPENMETEO_QUARTERHOURLY: lambda: (
+        OpenMeteoWeatherDataExtractor.from_components(
+            location_getter=_location_getter,
+            api_selector=APISelector.FORECAST,
+            time_resolution=TimeResolution.QUARTERHOURLY,
+            fields=Fields.FORECAST,
+            models=Models.ALL_FORECAST,
+        )
     ),
-    SourceDescriptor.OPENMETEO_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_components(
-        location_getter=_location_getter,
-        api_selector=APISelector.FORECAST,
-        time_resolution=TimeResolution.HOURLY,
-        fields=Fields.FORECAST,
-        models=Models.ALL_FORECAST,
+    SourceDescriptor.OPENMETEO_HOURLY: lambda: (
+        OpenMeteoWeatherDataExtractor.from_components(
+            location_getter=_location_getter,
+            api_selector=APISelector.FORECAST,
+            time_resolution=TimeResolution.HOURLY,
+            fields=Fields.FORECAST,
+            models=Models.ALL_FORECAST,
+        )
     ),
-    SourceDescriptor.OPENMETEO_SATELLITE: lambda: OpenMeteoWeatherDataExtractor.from_components(
-        location_getter=_location_getter,
-        api_selector=APISelector.SATELLITE,
-        time_resolution=TimeResolution.HOURLY,
-        fields=Fields.SOLAR_RADIATION,
-        models=Models.ALL_SATELLITE,
+    SourceDescriptor.OPENMETEO_SATELLITE: lambda: (
+        OpenMeteoWeatherDataExtractor.from_components(
+            location_getter=_location_getter,
+            api_selector=APISelector.SATELLITE,
+            time_resolution=TimeResolution.HOURLY,
+            fields=Fields.SOLAR_RADIATION,
+            models=Models.ALL_SATELLITE,
+        )
     ),
-    SourceDescriptor.OPENMETEO_HISTORICAL: lambda: OpenMeteoWeatherDataExtractor.from_components(
-        location_getter=_location_getter,
-        api_selector=APISelector.HISTORICAL,
-        time_resolution=TimeResolution.HOURLY,
-        fields=Fields.FORECAST,
-        models=Models.ALL_FORECAST,
+    SourceDescriptor.OPENMETEO_HISTORICAL: lambda: (
+        OpenMeteoWeatherDataExtractor.from_components(
+            location_getter=_location_getter,
+            api_selector=APISelector.HISTORICAL,
+            time_resolution=TimeResolution.HOURLY,
+            fields=Fields.FORECAST,
+            models=Models.ALL_FORECAST,
+        )
     ),
-    SourceDescriptor.OPENMETEO_V0_QUARTERHOURLY: lambda: OpenMeteoWeatherDataExtractor.from_mode(
-        location_getter=_location_getter,
-        mode=OMMode.QUARTERHOURLY
+    SourceDescriptor.OPENMETEO_V0_QUARTERHOURLY: lambda: (
+        OpenMeteoWeatherDataExtractor.from_mode(
+            location_getter=_location_getter, mode=OMMode.QUARTERHOURLY
+        )
     ),
-    SourceDescriptor.OPENMETEO_V0_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_mode(
-        location_getter=_location_getter,
-        mode=OMMode.HOURLY
+    SourceDescriptor.OPENMETEO_V0_HOURLY: lambda: (
+        OpenMeteoWeatherDataExtractor.from_mode(
+            location_getter=_location_getter, mode=OMMode.HOURLY
+        )
     ),
 }
-
