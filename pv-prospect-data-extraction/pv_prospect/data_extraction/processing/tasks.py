@@ -3,6 +3,7 @@
 Kept for backward compatibility with the existing Celery-based local
 development setup.  The Cloud Run path bypasses this module entirely.
 """
+
 from pv_prospect.common import DateRange
 from pv_prospect.data_extraction.extractors import SourceDescriptor
 from pv_prospect.data_extraction.processing import core
@@ -11,28 +12,32 @@ from pv_prospect.data_extraction.processing.worker import app
 
 # Re-export constants so existing imports (e.g. task_producer) keep working.
 PV_SITES_CSV_FILE = core.PV_SITES_CSV_FILE
-OM_BOUNDING_BOXES_CSV_FILE = core.OM_BOUNDING_BOXES_CSV_FILE
+LOCATION_MAPPING_CSV_FILE = core.LOCATION_MAPPING_CSV_FILE
 SUPPORTING_RESOURCES = core.SUPPORTING_RESOURCES
 
 
 @app.task
 def preprocess(
-        source_descriptor: SourceDescriptor,
-        local_dir: str | None,
-) -> list[str]:
+    source_descriptor: SourceDescriptor,
+    local_dir: str | None,
+) -> list[str | None]:
     return core.preprocess(source_descriptor, local_dir)
 
 
 @app.task
 def extract_and_load(
-        source_descriptor: SourceDescriptor,
-        pv_system_id: int,
-        date_range: DateRange,
-        local_dir: str | None,
-        overwrite: bool,
-        dry_run: bool,
+    source_descriptor: SourceDescriptor,
+    pv_system_id: int,
+    date_range: DateRange,
+    local_dir: str | None,
+    overwrite: bool,
+    dry_run: bool,
 ) -> Result:
     return core.extract_and_load(
-        source_descriptor, pv_system_id, date_range,
-        local_dir, overwrite, dry_run,
+        source_descriptor,
+        pv_system_id,
+        date_range,
+        local_dir,
+        overwrite,
+        dry_run,
     )

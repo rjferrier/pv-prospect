@@ -2,7 +2,6 @@ import pandas as pd
 
 from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
 
-
 DEFAULT_KEEP_COLUMNS = ('temperature', 'direct_normal_irradiance', 'diffuse_radiation')
 
 

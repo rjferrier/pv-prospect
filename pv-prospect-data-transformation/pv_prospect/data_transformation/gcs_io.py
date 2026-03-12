@@ -29,16 +29,20 @@ class GcsIoHelper:
         with io.BytesIO() as buf:
             df.to_parquet(buf, engine='pyarrow', index=False)
             blob = self._raw_bucket.blob(blob_path)
-            blob.upload_from_string(buf.getvalue(), content_type='application/octet-stream')
-            print(f"    Written to: gs://{self._raw_bucket.name}/{blob_path}")
+            blob.upload_from_string(
+                buf.getvalue(), content_type='application/octet-stream'
+            )
+            print(f'    Written to: gs://{self._raw_bucket.name}/{blob_path}')
 
     def write_parquet_to_model(self, df: pd.DataFrame, blob_path: str) -> None:
         """Write a DataFrame to the model bucket as a Parquet file (for final process steps)."""
         with io.BytesIO() as buf:
             df.to_parquet(buf, engine='pyarrow', index=False)
             blob = self._model_bucket.blob(blob_path)
-            blob.upload_from_string(buf.getvalue(), content_type='application/octet-stream')
-            print(f"    Written to: gs://{self._model_bucket.name}/{blob_path}")
+            blob.upload_from_string(
+                buf.getvalue(), content_type='application/octet-stream'
+            )
+            print(f'    Written to: gs://{self._model_bucket.name}/{blob_path}')
 
     def file_exists_in_raw(self, blob_path: str) -> bool:
         return self._raw_bucket.blob(blob_path).exists()

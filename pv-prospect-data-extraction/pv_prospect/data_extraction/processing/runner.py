@@ -10,22 +10,23 @@ Usage::
         --start-date 2025-06-01 --end-date 2025-06-30 \\
         --local-dir ./out --workers 4
 """
+
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
+from typing import Any
 
 from pv_prospect.common import DateRange, Period
 from pv_prospect.common.config_parser import get_config
-from pv_prospect.common.pv_site_repo import get_all_pv_system_ids, build_pv_site_repo
-from pv_prospect.etl.extract import Extractor
-from pv_prospect.etl.factory import get_extractor as get_storage_extractor
-from pv_prospect.etl.storage_config import LocalStorageConfig
-
+from pv_prospect.common.pv_site_repo import build_pv_site_repo, get_all_pv_system_ids
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.processing_stats import ProcessingStats
 from pv_prospect.data_extraction.processing.value_objects import Result
+from pv_prospect.etl.extract import Extractor
+from pv_prospect.etl.factory import get_extractor as get_storage_extractor
+from pv_prospect.etl.storage_config import LocalStorageConfig
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -42,36 +43,66 @@ SOURCE_DESCRIPTORS = {
 # Argument parsing (mirrors task_producer.py)
 # ---------------------------------------------------------------------------
 
-def _parse_args():
+
+def _parse_args() -> 'Any':
     parser = ArgumentParser(
         prog='data-extraction-runner',
         formatter_class=lambda prog: RawTextHelpFormatter(prog, width=120),
     )
     parser.add_argument(
         'source',
-        help="data source (comma-separated from: {} )".format(', '.join(SOURCE_DESCRIPTORS.keys())),
+        help='data source (comma-separated from: {} )'.format(
+            ', '.join(SOURCE_DESCRIPTORS.keys())
+        ),
     )
     parser.add_argument(
-        'system_ids', nargs='?', default=None,
-        help="system ID or comma-separated list of system IDs (e.g. 123 or 123,456). "
-             "If omitted, all systems will be processed.",
+        'system_ids',
+        nargs='?',
+        default=None,
+        help='system ID or comma-separated list of system IDs (e.g. 123 or 123,456). '
+        'If omitted, all systems will be processed.',
     )
     parser.add_argument(
-        '-d', '--start-date', type=str, default=None,
+        '-d',
+        '--start-date',
+        type=str,
+        default=None,
         help="start date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: yesterday)",
     )
     parser.add_argument(
-        '-e', '--end-date', type=str, default=None,
+        '-e',
+        '--end-date',
+        type=str,
+        default=None,
         help="end date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: start date + 1 day)",
     )
-    parser.add_argument('-r', '--reverse', action='store_true', help="process dates in reverse order")
-    parser.add_argument('-n', '--dry-run', action='store_true', help="show what would be done without writing")
-    parser.add_argument('-w', '--by-week', action='store_true', help="process one week at a time")
-    parser.add_argument('-l', '--local-dir', type=str, default=None, help="local directory instead of GCS")
-    parser.add_argument('-o', '--overwrite', action='store_true', help="overwrite existing CSV files")
     parser.add_argument(
-        '--workers', type=int, default=4,
-        help="max parallel threads (default: 4)",
+        '-r', '--reverse', action='store_true', help='process dates in reverse order'
+    )
+    parser.add_argument(
+        '-n',
+        '--dry-run',
+        action='store_true',
+        help='show what would be done without writing',
+    )
+    parser.add_argument(
+        '-w', '--by-week', action='store_true', help='process one week at a time'
+    )
+    parser.add_argument(
+        '-l',
+        '--local-dir',
+        type=str,
+        default=None,
+        help='local directory instead of GCS',
+    )
+    parser.add_argument(
+        '-o', '--overwrite', action='store_true', help='overwrite existing CSV files'
+    )
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=4,
+        help='max parallel threads (default: 4)',
     )
     return parser.parse_args()
 
@@ -79,6 +110,7 @@ def _parse_args():
 # ---------------------------------------------------------------------------
 # Date helpers (shared with task_producer.py)
 # ---------------------------------------------------------------------------
+
 
 def _parse_date(date_str: str) -> date:
     if date_str.lower() == 'today':
@@ -104,7 +136,7 @@ def _get_last_day_of_month(d: date) -> date:
     return date(y, next_m, 1) - timedelta(days=1)
 
 
-def _get_complete_date_range(args) -> DateRange:
+def _get_complete_date_range(args: 'Any') -> DateRange:
     yesterday = date.today() - timedelta(days=1)
     if args.start_date is None:
         start, start_is_month = yesterday, False
@@ -113,7 +145,11 @@ def _get_complete_date_range(args) -> DateRange:
         start = _parse_date(args.start_date)
 
     if args.end_date is None:
-        end = _get_last_day_of_month(start) if start_is_month else start + timedelta(days=1)
+        end = (
+            _get_last_day_of_month(start)
+            if start_is_month
+            else start + timedelta(days=1)
+        )
     else:
         if _is_month_format(args.end_date):
             end = _get_last_day_of_month(_parse_date(args.end_date))
@@ -136,6 +172,7 @@ def _get_all_pv_system_ids(storage_extractor: Extractor) -> list[int]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def _main() -> None:
     args = _parse_args()
     config = get_config(DataExtractionConfig)
@@ -145,8 +182,8 @@ def _main() -> None:
     invalid = [s for s in sources if s not in SOURCE_DESCRIPTORS]
     if invalid:
         raise ValueError(
-            f"Invalid source(s): {', '.join(invalid)}. "
-            f"Valid: {', '.join(SOURCE_DESCRIPTORS.keys())}"
+            f'Invalid source(s): {", ".join(invalid)}. '
+            f'Valid: {", ".join(SOURCE_DESCRIPTORS.keys())}'
         )
     source_descriptors = [SOURCE_DESCRIPTORS[s] for s in sources]
 
@@ -156,8 +193,9 @@ def _main() -> None:
 
     # --- resolve PV system IDs ----------------------------------------------
     staging_location_config = (
-        LocalStorageConfig(base_dir=args.local_dir, tracking=None) if args.local_dir else
-        config.staged_raw_data_storage
+        LocalStorageConfig(base_dir=args.local_dir, tracking=None)
+        if args.local_dir
+        else config.staged_raw_data_storage
     )
 
     pv_system_ids = (
@@ -165,11 +203,13 @@ def _main() -> None:
         if args.system_ids
         else _get_all_pv_system_ids(get_storage_extractor(staging_location_config))
     )
-    print(f"Processing {len(pv_system_ids)} PV site(s).\n")
+    print(f'Processing {len(pv_system_ids)} PV site(s).\n')
 
     # --- build work items ---------------------------------------------------
     complete_date_range = _get_complete_date_range(args)
-    sub_date_ranges = complete_date_range.split_by(Period.WEEK if args.by_week else Period.DAY)
+    sub_date_ranges = complete_date_range.split_by(
+        Period.WEEK if args.by_week else Period.DAY
+    )
     if args.reverse:
         sub_date_ranges.reverse()
 
@@ -186,10 +226,10 @@ def _main() -> None:
                     work_items.append((sd, pv_id, day_dr))
 
     if not work_items:
-        print("No tasks to process.")
+        print('No tasks to process.')
         return
 
-    print(f"Submitting {len(work_items)} tasks with {args.workers} workers.\n")
+    print(f'Submitting {len(work_items)} tasks with {args.workers} workers.\n')
 
     # --- fan-out with ThreadPoolExecutor ------------------------------------
     stats = ProcessingStats()
@@ -198,9 +238,12 @@ def _main() -> None:
         futures = {
             pool.submit(
                 core.extract_and_load,
-                sd, pv_id, dr,
+                sd,
+                pv_id,
+                dr,
                 args.local_dir,
-                args.overwrite, args.dry_run,
+                args.overwrite,
+                args.dry_run,
             ): (sd, pv_id, dr)
             for sd, pv_id, dr in work_items
         }
@@ -210,7 +253,7 @@ def _main() -> None:
                 stats.record(result)
             except Exception as exc:
                 sd, pv_id, dr = futures[future]
-                print(f"    UNHANDLED ERROR for {sd}/{pv_id}/{dr}: {exc}")
+                print(f'    UNHANDLED ERROR for {sd}/{pv_id}/{dr}: {exc}')
 
     stats.print_summary()
 

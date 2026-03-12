@@ -1,16 +1,16 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
 from datetime import date, timedelta
+from typing import Any
 
 from pv_prospect.common import DateRange, Period
 from pv_prospect.common.config_parser import get_config
-from pv_prospect.common.pv_site_repo import get_all_pv_system_ids, build_pv_site_repo
-from pv_prospect.etl.extract import Extractor
-from pv_prospect.etl.factory import get_extractor as get_storage_extractor
-
+from pv_prospect.common.pv_site_repo import build_pv_site_repo, get_all_pv_system_ids
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.processing.task_queuer import TaskQueuer
 from pv_prospect.data_extraction.processing.tasks import PV_SITES_CSV_FILE
+from pv_prospect.etl.extract import Extractor
+from pv_prospect.etl.factory import get_extractor as get_storage_extractor
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -23,56 +23,65 @@ SOURCE_DESCRIPTORS = {
 }
 
 
-def _parse_args():
+def _parse_args() -> 'Any':
     parser = ArgumentParser(
-        prog='data-extraction-task-producer', formatter_class=lambda prog: RawTextHelpFormatter(prog, width=120)
+        prog='data-extraction-task-producer',
+        formatter_class=lambda prog: RawTextHelpFormatter(prog, width=120),
     )
     parser.format_help()
     parser.add_argument(
         'source',
-        help="data source (comma-separated from: {} )".format(', '.join(SOURCE_DESCRIPTORS.keys()))
+        help='data source (comma-separated from: {} )'.format(
+            ', '.join(SOURCE_DESCRIPTORS.keys())
+        ),
     )
-    parser.add_argument('system_ids',
-                        nargs='?',
-                        default=None,
-                        help="system ID or comma-separated list of system IDs (e.g. 123 or 123,456). If omitted, all systems will be processed.")
     parser.add_argument(
-        '-d', '--start-date',
+        'system_ids',
+        nargs='?',
+        default=None,
+        help='system ID or comma-separated list of system IDs (e.g. 123 or 123,456). If omitted, all systems will be processed.',
+    )
+    parser.add_argument(
+        '-d',
+        '--start-date',
         type=str,
         help="start date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: yesterday)",
-        default=None
+        default=None,
     )
     parser.add_argument(
-        '-e', '--end-date',
+        '-e',
+        '--end-date',
         type=str,
-        help="end date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: start date plus one day)"
+        help="end date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: start date plus one day)",
     )
     parser.add_argument(
-        '-r', '--reverse',
-        action="store_true",
-        help="process dates in reverse order"
+        '-r', '--reverse', action='store_true', help='process dates in reverse order'
     )
     parser.add_argument(
-        '-n', '--dry-run',
+        '-n',
+        '--dry-run',
         action='store_true',
-        help='Show what would be done, but do not upload or modify any files.'
+        help='Show what would be done, but do not upload or modify any files.',
     )
     parser.add_argument(
-        '-w', '--by-week',
+        '-w',
+        '--by-week',
         action='store_true',
-        help="Process one week at a time instead of one day at a time."
+        help='Process one week at a time instead of one day at a time.',
     )
 
     parser.add_argument(
-        '-l', '--local-dir',
+        '-l',
+        '--local-dir',
         type=str,
         default=None,
-        help='Write files to a local directory instead of uploading to Google Drive. Specify the directory path.'
+        help='Write files to a local directory instead of uploading to Google Drive. Specify the directory path.',
     )
     parser.add_argument(
-        '-o', '--overwrite',
+        '-o',
+        '--overwrite',
         action='store_true',
-        help='Overwrite existing CSV files. By default, existing files are skipped.'
+        help='Overwrite existing CSV files. By default, existing files are skipped.',
     )
     return parser.parse_args()
 
@@ -88,10 +97,10 @@ def _parse_date(date_str: str) -> date:
     if len(date_str) == 7 and date_str[4] == '-':
         try:
             year, month = date_str.split('-')
-            year = int(year)
-            month = int(month)
+            year_int = int(year)
+            month_int = int(month)
             # Return the first day of the month
-            return date(year, month, 1)
+            return date(year_int, month_int, 1)
         except (ValueError, IndexError):
             pass
 
@@ -113,7 +122,7 @@ def _get_last_day_of_month(year_month_date: date) -> date:
     return last_day_of_month
 
 
-def _get_complete_date_range(args) -> DateRange:
+def _get_complete_date_range(args: 'Any') -> DateRange:
     """
     Parse and convert the command-line date arguments into a DateRange.
 
@@ -151,7 +160,7 @@ def _get_complete_date_range(args) -> DateRange:
     return DateRange(start, end)
 
 
-def _parse_pv_system_ids(system_ids_str: str):
+def _parse_pv_system_ids(system_ids_str: str) -> list[int]:
     return [int(s.strip()) for s in system_ids_str.split(',') if s.strip()]
 
 
@@ -161,7 +170,7 @@ def _get_all_pv_system_ids(storage_extractor: Extractor) -> list[int]:
     return get_all_pv_system_ids()
 
 
-def _main(config, args):
+def _main(config: DataExtractionConfig, args: 'Any') -> None:
     task_queuer = TaskQueuer.from_config(config)
 
     # Parse comma-separated sources
@@ -170,40 +179,43 @@ def _main(config, args):
     source_descriptor_keys = SOURCE_DESCRIPTORS.keys()
     invalid = [s for s in sources if s not in source_descriptor_keys]
     if invalid:
-        raise ValueError(f"Invalid source(s): {', '.join(invalid)}. Valid options: {', '.join(source_descriptor_keys)}")
+        raise ValueError(
+            f'Invalid source(s): {", ".join(invalid)}. Valid options: {", ".join(source_descriptor_keys)}'
+        )
 
     source_descriptors = [SOURCE_DESCRIPTORS[source] for source in sources]
-    task_queuer.preprocess(
-        source_descriptors, args.local_dir
-    ).wait_for_completion()
+    task_queuer.preprocess(source_descriptors, args.local_dir).wait_for_completion()
 
     pv_system_ids = (
-        _parse_pv_system_ids(args.system_ids) if args.system_ids else
-        _get_all_pv_system_ids(get_storage_extractor(args.local_dir))
+        _parse_pv_system_ids(args.system_ids)
+        if args.system_ids
+        else _get_all_pv_system_ids(get_storage_extractor(args.local_dir))
     )
 
-    print(f"Processing {len(pv_system_ids)} PV site(s).\n")
+    print(f'Processing {len(pv_system_ids)} PV site(s).\n')
 
     complete_date_range = _get_complete_date_range(args)
 
     # Split into date ranges first (by week or by day)
-    sub_date_ranges = complete_date_range.split_by(Period.WEEK if args.by_week else Period.DAY)
+    sub_date_ranges = complete_date_range.split_by(
+        Period.WEEK if args.by_week else Period.DAY
+    )
     if args.reverse:
         sub_date_ranges.reverse()
 
     # Loop over dates first, then sources
     for date_range in sub_date_ranges:
-        print(f"Processing {date_range}")
+        print(f'Processing {date_range}')
 
         for source in sources:
             source_descriptor = SOURCE_DESCRIPTORS[source]
-            print(f"  Processing {source_descriptor}")
+            print(f'  Processing {source_descriptor}')
 
             # Determine which date ranges to use for this source
             if args.by_week and not supports_multi_date(source_descriptor):
                 # Extractor doesn't support multi-date, decompose week into single days
                 daily_ranges = date_range.split_by(Period.DAY)
-                print(f"  Decomposing week into {len(daily_ranges)} days")
+                print(f'  Decomposing week into {len(daily_ranges)} days')
                 date_ranges_to_process = daily_ranges
             else:
                 # Use the date range as-is
@@ -213,7 +225,9 @@ def _main(config, args):
 
             for dr in date_ranges_to_process:
                 for pv_system_id in pv_system_ids:
-                    print(f"    Adding {source_descriptor} for System {pv_system_id}, {dr}")
+                    print(
+                        f'    Adding {source_descriptor} for System {pv_system_id}, {dr}'
+                    )
 
                     task_queuer.extract_and_load(
                         source_descriptor,
@@ -222,12 +236,12 @@ def _main(config, args):
                         args.local_dir,
                         args.overwrite,
                         args.dry_run,
-                        counter
+                        counter,
                     )
                     counter += 1
 
             if counter == 0:
-                print("No tasks/results were generated.")
+                print('No tasks/results were generated.')
                 return
 
 

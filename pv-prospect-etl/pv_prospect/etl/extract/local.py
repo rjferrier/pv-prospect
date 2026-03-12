@@ -12,11 +12,16 @@ class LocalExtractor(LocalClient):
         full_path = self.base_dir / file_path
 
         if not full_path.exists():
-            raise FileNotFoundError(f"File not found: {full_path}")
+            raise FileNotFoundError(f'File not found: {full_path}')
 
         return open(full_path, 'r', encoding='utf-8')
 
-    def list_files(self, folder_path: str | None = None, pattern: str = "*", recursive: bool = False) -> list[dict]:
+    def list_files(
+        self,
+        folder_path: str | None = None,
+        pattern: str = '*',
+        recursive: bool = False,
+    ) -> list[dict]:
         """List files in a local directory."""
         if folder_path:
             search_dir = self.base_dir / folder_path
@@ -27,19 +32,25 @@ class LocalExtractor(LocalClient):
             return []
 
         files = []
-        glob_pattern = f"**/{pattern}" if recursive else pattern
+        glob_pattern = f'**/{pattern}' if recursive else pattern
 
         for file_path in search_dir.glob(glob_pattern):
             if file_path.is_file():
                 relative_path = file_path.relative_to(self.base_dir)
-                parent_path = str(relative_path.parent) if relative_path.parent != Path('.') else ''
+                parent_path = (
+                    str(relative_path.parent)
+                    if relative_path.parent != Path('.')
+                    else ''
+                )
 
-                files.append({
-                    'id': str(relative_path),  # Use relative path as ID
-                    'name': file_path.name,
-                    'path': str(relative_path),
-                    'parent_path': parent_path,
-                    'created_time': file_path.stat().st_ctime,
-                })
+                files.append(
+                    {
+                        'id': str(relative_path),  # Use relative path as ID
+                        'name': file_path.name,
+                        'path': str(relative_path),
+                        'parent_path': parent_path,
+                        'created_time': file_path.stat().st_ctime,
+                    }
+                )
 
         return files

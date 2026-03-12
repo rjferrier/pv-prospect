@@ -1,5 +1,6 @@
-import re
 import argparse
+import re
+
 from pv_prospect.etl.loaders.gdrive import GDriveClient, ResolvedFilePath
 
 
@@ -21,7 +22,12 @@ def get_folder_id(client: GDriveClient, folder_path: str | None) -> str | None:
     return parent_id
 
 
-def list_files_recursive(client: GDriveClient, folder_id: str | None, mime_type: str | None = None, prefix: str = "") -> list[dict]:
+def list_files_recursive(
+    client: GDriveClient,
+    folder_id: str | None,
+    mime_type: str | None = None,
+    prefix: str = '',
+) -> list[dict]:
     """
     Recursively list all files in the specified folder, including subdirectories.
     Returns list of dicts with 'id', 'name', 'path' (relative path from search root), and 'parent_id'.
@@ -34,19 +40,23 @@ def list_files_recursive(client: GDriveClient, folder_id: str | None, mime_type:
     files = client.search(search_path, mime_type=mime_type)
 
     for file in files:
-        file_path = f"{prefix}{file['name']}" if prefix else file['name']
-        files_with_paths.append({
-            'id': file['id'],
-            'name': file['name'],
-            'path': file_path,
-            'parent_id': folder_id if folder_id else file.get('parents', [None])[0]
-        })
+        file_path = f'{prefix}{file["name"]}' if prefix else file['name']
+        files_with_paths.append(
+            {
+                'id': file['id'],
+                'name': file['name'],
+                'path': file_path,
+                'parent_id': folder_id if folder_id else file.get('parents', [None])[0],
+            }
+        )
 
     # Get all subfolders and recurse
     folder_search_path = ResolvedFilePath(parent_id=folder_id)
-    folders = client.search(folder_search_path, mime_type='application/vnd.google-apps.folder')
+    folders = client.search(
+        folder_search_path, mime_type='application/vnd.google-apps.folder'
+    )
     for folder in folders:
-        folder_path = f"{prefix}{folder['name']}/" if prefix else f"{folder['name']}/"
+        folder_path = f'{prefix}{folder["name"]}/' if prefix else f'{folder["name"]}/'
         files_with_paths.extend(
             list_files_recursive(client, folder['id'], mime_type, folder_path)
         )
@@ -69,7 +79,14 @@ def _split_path(path: str) -> tuple[str, str]:
     return '', path
 
 
-def process_files(folder_path: str | None, pattern: str, replacement: str, mime_type: str | None = None, dry_run: bool = False, delete_on_duplicate: bool = False):
+def process_files(
+    folder_path: str | None,
+    pattern: str,
+    replacement: str,
+    mime_type: str | None = None,
+    dry_run: bool = False,
+    delete_on_duplicate: bool = False,
+) -> None:
     """
     Rename files in a Google Drive folder according to a regex pattern.
     Supports directory changes in pattern/replacement (e.g., 'olddir/(.*)', 'newdir/\1').
@@ -109,58 +126,70 @@ def process_files(folder_path: str | None, pattern: str, replacement: str, mime_
             if existing_target and existing_target['id'] != file_id:
                 if delete_on_duplicate:
                     if dry_run:
-                        print(f"Would delete duplicate: {new_path} (id: {existing_target['id']})")
+                        print(
+                            f'Would delete duplicate: {new_path} (id: {existing_target["id"]})'
+                        )
                         deleted_count += 1
                     else:
                         try:
                             client.trash_file(existing_target['id'])
-                            print(f"Deleted duplicate: {new_path} (id: {existing_target['id']})")
+                            print(
+                                f'Deleted duplicate: {new_path} (id: {existing_target["id"]})'
+                            )
                             # Remove from map so we don't try to process it later
                             del existing_files[new_path]
                             deleted_count += 1
                         except Exception as e:
-                            print(f"Error deleting duplicate {existing_target['id']}: {e}")
+                            print(
+                                f'Error deleting duplicate {existing_target["id"]}: {e}'
+                            )
                             continue
                 else:
-                    print(f"Skipping: {old_path} -> {new_path} (target already exists)")
+                    print(f'Skipping: {old_path} -> {new_path} (target already exists)')
                     continue
 
             if dry_run:
-                print(f"Would rename: {old_path} -> {new_path}")
+                print(f'Would rename: {old_path} -> {new_path}')
             else:
                 # Determine if we need to move to a different folder
                 if old_dir != new_dir:
                     # Build new parent path
+                    new_parent_path: str | None
                     if folder_path and new_dir:
-                        new_parent_path = f"{folder_path}/{new_dir}"
+                        new_parent_path = f'{folder_path}/{new_dir}'
                     elif new_dir:
                         new_parent_path = new_dir
                     else:
                         new_parent_path = folder_path
 
-                    new_parent_id = get_folder_id(client, new_parent_path) if new_parent_path else None
+                    new_parent_id: str | None = (
+                        get_folder_id(client, new_parent_path)
+                        if new_parent_path
+                        else None
+                    )
                     if new_parent_id is None:
                         new_parent_id = root_folder_id
                     client.move_file(file_id, file['parent_id'], new_parent_id)
-                    print(f"Moved: {old_path} -> {new_path}")
+                    print(f'Moved: {old_path} -> {new_path}')
 
                 # Rename if name changed
                 if old_name != new_name:
                     client.rename_file(file_id, new_name)
                     if old_dir == new_dir:
-                        print(f"Renamed: {old_path} -> {new_path}")
+                        print(f'Renamed: {old_path} -> {new_path}')
 
                 # Update the existing_files map with the new path
                 existing_files[new_path] = file
 
             renamed_count += 1
         else:
-            print(f"Skipping: {old_path} (no match)")
+            print(f'Skipping: {old_path} (no match)')
 
-    print(f"\n{'Would rename' if dry_run else 'Renamed/moved'} {renamed_count} file(s)")
+    print(f'\n{"Would rename" if dry_run else "Renamed/moved"} {renamed_count} file(s)')
     if delete_on_duplicate and deleted_count > 0:
-        print(f"{'Would delete' if dry_run else 'Deleted'} {deleted_count} duplicate file(s)")
-
+        print(
+            f'{"Would delete" if dry_run else "Deleted"} {deleted_count} duplicate file(s)'
+        )
 
 
 if __name__ == '__main__':
@@ -171,30 +200,24 @@ if __name__ == '__main__':
         'folder_path',
         nargs='?',
         default=None,
-        help='Path to folder in Google Drive (e.g., "data/pvoutput"). If omitted, searches from root.'
+        help='Path to folder in Google Drive (e.g., "data/pvoutput"). If omitted, searches from root.',
+    )
+    parser.add_argument('pattern', help='Regex pattern to match against filenames')
+    parser.add_argument(
+        'replacement', help='Replacement string (can use regex groups like \\1, \\2)'
     )
     parser.add_argument(
-        'pattern',
-        help='Regex pattern to match against filenames'
-    )
-    parser.add_argument(
-        'replacement',
-        help='Replacement string (can use regex groups like \\1, \\2)'
-    )
-    parser.add_argument(
-        '--mime-type',
-        help='Optional MIME type filter (e.g., "text/csv")',
-        default=None
+        '--mime-type', help='Optional MIME type filter (e.g., "text/csv")', default=None
     )
     parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Show what would be renamed without actually renaming'
+        help='Show what would be renamed without actually renaming',
     )
     parser.add_argument(
         '--delete-on-duplicate',
         action='store_true',
-        help='Delete existing files if renaming would cause a duplicate'
+        help='Delete existing files if renaming would cause a duplicate',
     )
 
     args = parser.parse_args()
@@ -205,5 +228,5 @@ if __name__ == '__main__':
         args.replacement,
         args.mime_type,
         args.dry_run,
-        args.delete_on_duplicate
+        args.delete_on_duplicate,
     )

@@ -14,7 +14,7 @@ class GcsClient:
 
     def _blob_path(self, relative_path: str) -> str:
         """Prepend the prefix to *relative_path*."""
-        return f"{self._prefix}/{relative_path}" if self._prefix else relative_path
+        return f'{self._prefix}/{relative_path}' if self._prefix else relative_path
 
     def file_exists(self, file_path: str) -> bool:
         return self._bucket.blob(self._blob_path(file_path)).exists()

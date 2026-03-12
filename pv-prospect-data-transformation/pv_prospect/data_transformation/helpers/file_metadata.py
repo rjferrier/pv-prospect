@@ -3,14 +3,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
-from pathlib import Path
-from typing import ClassVar, Optional, Iterator
+from typing import ClassVar, Iterator, Optional
 
 
 class DataSource(Enum):
-    OPENMETEO_HISTORICAL = "openmeteo-historical"
-    OPENMETEO_QUARTERHOURLY = "openmeteo-quarterhourly"
-    PV_OUTPUT = "pvoutput"
+    OPENMETEO_HISTORICAL = 'openmeteo-historical'
+    OPENMETEO_QUARTERHOURLY = 'openmeteo-quarterhourly'
+    PV_OUTPUT = 'pvoutput'
 
 
 @dataclass
@@ -33,29 +32,31 @@ class RawDataFileMetadata:
         return cls(data_source, pv_system_id, from_date)
 
     @property
-    def period_in_days(self):
+    def period_in_days(self) -> int:
         return 7 if self.data_source is DataSource.OPENMETEO_HISTORICAL else 1
 
     @property
-    def from_date(self):
+    def from_date(self) -> date:
         return self.date_
 
     @property
-    def to_date(self):
+    def to_date(self) -> date:
         return self.date_ + timedelta(days=self.period_in_days)
 
     def get_date_range(self) -> Iterator[date]:
         return (self.date_ + timedelta(days=i) for i in range(self.period_in_days))
 
-    def get_file_name(self) -> Path:
-        stem = '_'.join((self.data_source.value, str(self.pv_system_id), date_to_str(self.date_)))
+    def get_file_name(self) -> str:
+        stem = '_'.join(
+            (self.data_source.value, str(self.pv_system_id), date_to_str(self.date_))
+        )
         return stem + self.FILE_SUFFIX
 
     def replace(
-            self,
-            data_source: Optional[DataSource] = None,
-            pv_system_id: Optional[int] = None,
-            date_: Optional[date] = None
+        self,
+        data_source: Optional[DataSource] = None,
+        pv_system_id: Optional[int] = None,
+        date_: Optional[date] = None,
     ) -> 'RawDataFileMetadata':
         data_source = data_source or self.data_source
         pv_system_id = pv_system_id or self.pv_system_id
@@ -71,6 +72,7 @@ class OpenMeteoFileMetadata:
     where LAT and LON have decimal points stripped and are to 4 decimal places
     Example: openmeteo-historical_526604_07799_20260112.csv -> lat=52.6604, lon=0.7799
     """
+
     FILENAME_PATTERN: ClassVar[re.Pattern] = re.compile(
         r'^(.+)_([-]?\d+)_([-]?\d+)_(\d{8})\.csv$'
     )
@@ -94,15 +96,15 @@ class OpenMeteoFileMetadata:
         return cls(data_source, latitude, longitude, from_date)
 
     @property
-    def period_in_days(self):
+    def period_in_days(self) -> int:
         return 7 if self.data_source is DataSource.OPENMETEO_HISTORICAL else 1
 
     @property
-    def from_date(self):
+    def from_date(self) -> date:
         return self.date_
 
     @property
-    def to_date(self):
+    def to_date(self) -> date:
         return self.date_ + timedelta(days=self.period_in_days)
 
 
@@ -128,4 +130,4 @@ def _str_to_coordinate(coord_str: str) -> Decimal:
 
 
 def date_to_str(date_: date) -> str:
-    return "%04d%02d%02d" % (date_.year, date_.month, date_.day)
+    return '%04d%02d%02d' % (date_.year, date_.month, date_.day)

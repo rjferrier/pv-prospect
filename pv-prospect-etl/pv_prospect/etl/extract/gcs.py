@@ -1,10 +1,9 @@
 import io
 import json
-import yaml
-from pv_prospect.common.infrastructure.storage import GcsStorageLocation
+
+import yaml  # type: ignore[import-untyped]
 
 from pv_prospect.etl.clients.gcs import GcsClient
-from pv_prospect.common import map_from_env, VarMapping
 
 
 class GcsExtractor(GcsClient):
@@ -15,8 +14,17 @@ class GcsExtractor(GcsClient):
         data = blob.download_as_bytes()
         return io.TextIOWrapper(io.BytesIO(data), encoding='utf-8')
 
-    def list_files(self, folder_path: str | None = None, pattern: str = "*", recursive: bool = False) -> list[dict]:
-        prefix = self._blob_path(folder_path) + '/' if folder_path else (self._prefix + '/' if self._prefix else '')
+    def list_files(
+        self,
+        folder_path: str | None = None,
+        pattern: str = '*',
+        recursive: bool = False,
+    ) -> list[dict]:
+        prefix = (
+            self._blob_path(folder_path) + '/'
+            if folder_path
+            else (self._prefix + '/' if self._prefix else '')
+        )
         blobs = self._bucket.list_blobs(prefix=prefix)
 
         files = []
@@ -37,14 +45,16 @@ class GcsExtractor(GcsClient):
             # Strip the global prefix to get a "relative" path
             rel = blob.name
             if self._prefix and rel.startswith(self._prefix + '/'):
-                rel = rel[len(self._prefix) + 1:]
+                rel = rel[len(self._prefix) + 1 :]
             parent = '/'.join(rel.split('/')[:-1])
 
-            files.append({
-                'id': blob.name,
-                'name': name,
-                'path': rel,
-                'parent_path': parent,
-            })
+            files.append(
+                {
+                    'id': blob.name,
+                    'name': name,
+                    'path': rel,
+                    'parent_path': parent,
+                }
+            )
 
         return files

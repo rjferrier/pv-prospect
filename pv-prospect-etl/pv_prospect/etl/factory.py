@@ -1,13 +1,11 @@
 from pv_prospect.etl.storage_config import (
-    AnyStorageConfig, LocalStorageConfig, GcsStorageConfig
+    AnyStorageConfig,
+    GcsStorageConfig,
+    LocalStorageConfig,
 )
 
-from .extract import (
-    Extractor, LocalExtractor, GcsExtractor
-)
-from .load import (
-    Loader, LocalLoader, GcsLoader
-)
+from .extract import Extractor, GcsExtractor, LocalExtractor
+from .load import GcsLoader, Loader, LocalLoader
 
 
 def get_loader(config: AnyStorageConfig) -> Loader:
@@ -30,5 +28,7 @@ def get_extractor(config: AnyStorageConfig) -> Extractor:
     raise _not_implemented(config)
 
 
-def _not_implemented(discriminator: object):
-    return NotImplementedError(f"type of {discriminator} ({type(discriminator)}) is not recognised")
+def _not_implemented(discriminator: object) -> NotImplementedError:
+    return NotImplementedError(
+        f'type of {discriminator} ({type(discriminator)}) is not recognised'
+    )

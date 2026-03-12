@@ -63,10 +63,10 @@ CATEGORICAL_FEATURES = [
 # ---------------------------------------------------------------------------
 
 WEATHER_CODE_LABELS = {
-    0:  'clear_sky',
-    1:  'mainly_clear',
-    2:  'partly_cloudy',
-    3:  'overcast',
+    0: 'clear_sky',
+    1: 'mainly_clear',
+    2: 'partly_cloudy',
+    3: 'overcast',
     45: 'fog',
     48: 'rime_fog',
     51: 'drizzle_light',
@@ -128,14 +128,16 @@ if CATEGORICAL_FEATURES:
         drop_first=False,
         dtype=int,
     )
-    train_features = pd.concat([train_features_raw[CONTINUOUS_FEATURES], ohe_dummies], axis=1)
+    train_features = pd.concat(
+        [train_features_raw[CONTINUOUS_FEATURES], ohe_dummies], axis=1
+    )
 else:
     train_features = train_features_raw[CONTINUOUS_FEATURES]
 
-print("Features used for modelling:")
+print('Features used for modelling:')
 print(list(train_features.columns))
-print(f"\nNumber of samples: {len(train_features)}")
-print(f"Number of features: {train_features.shape[1]}")
+print(f'\nNumber of samples: {len(train_features)}')
+print(f'Number of features: {train_features.shape[1]}')
 
 # ---------------------------------------------------------------------------
 # Feature scaling  (continuous features only)
@@ -151,15 +153,17 @@ train_scaled_df = pd.DataFrame(
     index=train_features.index,
 )
 if CATEGORICAL_FEATURES:
-    train_scaled_df = pd.concat([train_scaled_df, train_features[ohe_dummies.columns]], axis=1)
+    train_scaled_df = pd.concat(
+        [train_scaled_df, train_features[ohe_dummies.columns]], axis=1
+    )
 
 train_scaled = train_scaled_df.to_numpy()
 
-print("\n" + "="*70)
-print("FEATURE SCALING APPLIED  (continuous features only)")
-print("="*70)
-print("\nOriginal continuous-feature statistics:")
+print('\n' + '=' * 70)
+print('FEATURE SCALING APPLIED  (continuous features only)')
+print('=' * 70)
+print('\nOriginal continuous-feature statistics:')
 print(train_features[CONTINUOUS_FEATURES].describe())
-print("\n" + "="*70)
-print("Scaled continuous-feature statistics (mean≈0, std≈1):")
+print('\n' + '=' * 70)
+print('Scaled continuous-feature statistics (mean≈0, std≈1):')
 print(train_scaled_df[CONTINUOUS_FEATURES].describe())
