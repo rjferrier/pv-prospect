@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from abc import ABCMeta, abstractmethod
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Optional, Union
 
@@ -9,25 +10,24 @@ class Backend(Enum):
 
 
 @dataclass
-class StorageConfig:
-    tracking: Optional['AnyStorageConfig']
+class StorageConfig(metaclass=ABCMeta):
+    prefix: str = field(default='')
+    tracking: Optional['AnyStorageConfig'] = field(default=None)
+
+    @classmethod
+    @abstractmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'StorageConfig': ...
 
 
 @dataclass
 class LocalStorageConfig(StorageConfig):
     """Local storage configuration."""
 
-    base_dir: str = ''
-
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'LocalStorageConfig':
-        tracking_data = data.get('tracking')
-        tracking = (
-            parse_storage_config(tracking_data)
-            if isinstance(tracking_data, dict)
-            else None
+        return cls(
+            prefix=data['prefix'], tracking=parse_tracking_config(data.get('tracking'))
         )
-        return cls(base_dir=data['base_dir'], tracking=tracking)
 
 
 @dataclass
@@ -35,20 +35,13 @@ class GcsStorageConfig(StorageConfig):
     """GCS storage configuration."""
 
     bucket_name: str = ''
-    prefix: str = ''
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'GcsStorageConfig':
-        tracking_data = data.get('tracking')
-        tracking = (
-            parse_storage_config(tracking_data)
-            if isinstance(tracking_data, dict)
-            else None
-        )
         return cls(
             bucket_name=data['bucket_name'],
             prefix=data.get('prefix', ''),
-            tracking=tracking,
+            tracking=parse_tracking_config(data.get('tracking')),
         )
 
 
@@ -71,3 +64,9 @@ def parse_storage_config(data: Dict[str, Any]) -> AnyStorageConfig:
         return GcsStorageConfig.from_dict(data)
 
     raise ValueError(f'Unsupported storage backend: {backend}')
+
+
+def parse_tracking_config(tracking_data: Any | None) -> AnyStorageConfig | None:
+    if not tracking_data:
+        return None
+    return parse_storage_config(tracking_data)

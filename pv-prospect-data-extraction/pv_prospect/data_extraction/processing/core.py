@@ -23,10 +23,7 @@ from pv_prospect.data_extraction.processing.value_objects import Result, Task
 from pv_prospect.etl.extract.resolve.dvc import resolve_path
 from pv_prospect.etl.factory import get_extractor as get_file_extractor
 from pv_prospect.etl.factory import get_loader as get_file_loader
-from pv_prospect.etl.storage_config import (
-    GcsStorageConfig,
-    LocalStorageConfig,
-)
+from pv_prospect.etl.storage_config import LocalStorageConfig
 
 TIMESERIES_FOLDER = 'timeseries'
 PV_SITES_CSV_FILE = 'pv_sites.csv'
@@ -54,7 +51,7 @@ def preprocess(
     )
 
     staging_location_config = (
-        LocalStorageConfig(base_dir=local_dir, tracking=None)
+        LocalStorageConfig(prefix=local_dir)
         if local_dir
         else config.staged_raw_data_storage
     )
@@ -67,15 +64,8 @@ def preprocess(
     ]
 
     dvc_config = config.versioned_resources_storage.tracking
-    if isinstance(dvc_config, LocalStorageConfig):
-        dvc_prefix = dvc_config.base_dir
-    elif isinstance(dvc_config, GcsStorageConfig):
-        dvc_prefix = dvc_config.prefix
-    else:
-        dvc_prefix = ''
-
     resources = [
-        (filename, resolve_path(f'{dvc_prefix}/{filename}.dvc'))
+        (filename, resolve_path(f'{dvc_config.prefix}/{filename}.dvc'))
         for filename in SUPPORTING_RESOURCES
     ]
 
@@ -117,7 +107,7 @@ def extract_and_load(
     config = get_config(DataExtractionConfig)
 
     staging_location_config = (
-        LocalStorageConfig(base_dir=local_dir, tracking=None)
+        LocalStorageConfig(prefix=local_dir)
         if local_dir
         else config.staged_raw_data_storage
     )

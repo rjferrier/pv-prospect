@@ -10,7 +10,7 @@ from .load import GcsLoader, Loader, LocalLoader
 
 def get_loader(config: AnyStorageConfig) -> Loader:
     if isinstance(config, LocalStorageConfig):
-        return LocalLoader(config.base_dir)
+        return LocalLoader(config.prefix)
 
     if isinstance(config, GcsStorageConfig):
         return GcsLoader(config.bucket_name, config.prefix)
@@ -20,7 +20,7 @@ def get_loader(config: AnyStorageConfig) -> Loader:
 
 def get_extractor(config: AnyStorageConfig) -> Extractor:
     if isinstance(config, LocalStorageConfig):
-        return LocalExtractor(config.base_dir)
+        return LocalExtractor(config.prefix)
 
     if isinstance(config, GcsStorageConfig):
         return GcsExtractor(config.bucket_name, config.prefix)
