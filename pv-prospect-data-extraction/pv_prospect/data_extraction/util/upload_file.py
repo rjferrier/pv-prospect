@@ -30,7 +30,7 @@ def upload_file(
     if local_dir:
         from pv_prospect.etl.storage_config import LocalStorageConfig
 
-        storage_config = LocalStorageConfig(base_dir=local_dir, tracking=None)
+        storage_config = LocalStorageConfig(prefix=local_dir)
     else:
         from pv_prospect.common.config_parser import get_config
         from pv_prospect.data_extraction.config import DataExtractionConfig

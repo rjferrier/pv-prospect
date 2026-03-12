@@ -193,7 +193,7 @@ def _main() -> None:
 
     # --- resolve PV system IDs ----------------------------------------------
     staging_location_config = (
-        LocalStorageConfig(base_dir=args.local_dir, tracking=None)
+        LocalStorageConfig(prefix=args.local_dir, tracking=None)
         if args.local_dir
         else config.staged_raw_data_storage
     )

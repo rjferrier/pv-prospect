@@ -1,4 +1,4 @@
 versioned_resources_storage:
   tracking:
     backend: 'local'
-    base_dir: '../resources'
+    prefix: '../resources'

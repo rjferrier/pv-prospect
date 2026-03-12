@@ -2,7 +2,7 @@
 versioned_resources_storage:
   tracking:
     backend: 'local'
-    base_dir: '/app/resources'
+    prefix: '/app/resources'
   backend: 'gcs'
   bucket_name: 'pv-prospect-versioned-resources'
 
