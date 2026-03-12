@@ -101,5 +101,4 @@ DataVersioner -> VCRepo : V.5: pushes (using Git)
 InMemoryData ---> VersionedModelData : L.1: pulls
 InMemoryData ---> StagedModelData : L.2: gets
 
-
 @enduml

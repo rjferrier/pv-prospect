@@ -36,3 +36,12 @@ repos:
     hooks:
       - id: bandit
         exclude: ^.*/tests/.*$
+
+  - repo: local
+    hooks:
+      - id: render-diagrams
+        name: Render PlantUML diagrams
+        language: script
+        entry: .hooks/render-diagrams.sh
+        files: ^doc/.*\.puml$
+        pass_filenames: true
