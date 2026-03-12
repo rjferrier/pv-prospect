@@ -1,6 +1,6 @@
 # Cloud Run Module
 
-This module manages the Cloud Run Job responsible for executing the data extraction tasks. 
+This module manages the Cloud Run Job responsible for executing the data extraction tasks.
 
 Instead of multiple job definitions, a single parameterized job is used. The Cloud Workflow orchestrator injects environment variables like `JOB_TYPE` to switch between `preprocess` and `extract_and_load` modes dynamically at runtime.
 

@@ -36,7 +36,9 @@ LOCATION_MAPPING_CSV_FILE = 'location_mapping.csv'
 SUPPORTING_RESOURCES = [PV_SITES_CSV_FILE, LOCATION_MAPPING_CSV_FILE]
 
 
-def preprocess(source_descriptor: SourceDescriptor, local_dir: str | None) -> list[str]:
+def preprocess(
+    source_descriptor: SourceDescriptor, local_dir: str | None
+) -> list[str | None]:
     """
     Preprocess before extraction: create folder structure and provision
     supporting resources (pv_sites.csv, location_mapping.csv).

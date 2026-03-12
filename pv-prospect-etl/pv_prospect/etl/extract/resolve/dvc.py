@@ -1,6 +1,4 @@
-from pathlib import Path, PurePosixPath
-
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 
 def resolve_path(source_or_tracking_path: str) -> str:

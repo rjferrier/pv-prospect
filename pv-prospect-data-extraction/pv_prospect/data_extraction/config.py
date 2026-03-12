@@ -1,16 +1,15 @@
 """Configuration management for the ETL pipeline."""
+
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from pv_prospect.etl.storage_config import (
-    AnyStorageConfig,
-    parse_storage_config
-)
+from pv_prospect.etl.storage_config import AnyStorageConfig, parse_storage_config
 
 
 @dataclass
 class TaskQueueConfig:
     """Configuration for tasks queue."""
+
     task_spacing: float
     task_jitter: float
     join_timeout: int
@@ -20,13 +19,14 @@ class TaskQueueConfig:
         return cls(
             task_spacing=data['task_spacing'],
             task_jitter=data['task_jitter'],
-            join_timeout=data['join_timeout']
+            join_timeout=data['join_timeout'],
         )
 
 
 @dataclass
 class DataExtractionConfig:
     """Configuration for ETL processing behavior."""
+
     versioned_resources_storage: AnyStorageConfig
     staged_raw_data_storage: AnyStorageConfig
     task_queue: TaskQueueConfig
@@ -41,5 +41,5 @@ class DataExtractionConfig:
             ),
             staged_raw_data_storage=parse_storage_config(
                 data['staged_raw_data_storage']
-            )
+            ),
         )

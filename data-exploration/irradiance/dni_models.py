@@ -9,16 +9,16 @@ This module provides various methods for calculating DNI including:
 Author: Data Exploration Team
 Date: December 2025
 """
-from types import SimpleNamespace
 
-import numpy as np
-import pandas as pd
-import pvlib
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Optional
-from solarpy import standard2solar_time, beam_irradiance
+
+import numpy as np
+import pandas as pd
+import pvlib
+from solarpy import beam_irradiance, standard2solar_time
 
 # This should be between 0.17 (optimum for Simplified Solis) and 0.33 (for Ineichen)
 MIN_DNI_COEFFICIENT = 0.2
@@ -26,6 +26,7 @@ MIN_DNI_COEFFICIENT = 0.2
 
 class DniModel(Enum):
     """Enum representing different DNI calculation models."""
+
     SOLARPY = 'solarpy'
     PVLIB_INEICHEN = 'pvlib_ineichen'
     PVLIB_SIMPLIFIED_SOLIS = 'pvlib_simplified_solis'
@@ -79,10 +80,7 @@ def get_cloud_cover_dni_coefficient(cloud_cover_percent):
 
 
 def calculate_direct_normal_irradiance(
-    dt: datetime,
-    latitude: float,
-    longitude: float,
-    altitude: float
+    dt: datetime, latitude: float, longitude: float, altitude: float
 ) -> float:
     """
     Calculate Direct Normal Irradiance using solarpy library.
@@ -97,7 +95,7 @@ def calculate_direct_normal_irradiance(
         DNI in W/m²
     """
     solar_time = standard2solar_time(dt, longitude)
-    return max(0., beam_irradiance(altitude, solar_time, latitude))
+    return max(0.0, beam_irradiance(altitude, solar_time, latitude))
 
 
 def calculate_pvlib_dni_bulk(
@@ -105,7 +103,7 @@ def calculate_pvlib_dni_bulk(
     latitude: float,
     longitude: float,
     altitude: float,
-    model: str = 'ineichen'
+    model: str = 'ineichen',
 ) -> pd.Series:
     """
     Calculate Direct Normal Irradiance using pvlib's clear sky models.
@@ -138,8 +136,7 @@ def calculate_pvlib_dni_bulk(
 
 
 def load_dqydj_data(
-    dqydj_dir: Path = Path('resources/dqydj'),
-    verbose: bool = True
+    dqydj_dir: Path = Path('resources/dqydj'), verbose: bool = True
 ) -> Dict[str, pd.DataFrame]:
     """
     Load DQYDJ reference data for comparison.
@@ -161,7 +158,7 @@ def load_dqydj_data(
         'March': 'dqydj-solar-irradiance-20250302.csv',
         'June': 'dqydj-solar-irradiance-20230608.csv',
         'September': 'dqydj-solar-irradiance-20230905.csv',
-        'December': 'dqydj-solar-irradiance-20221215.csv'
+        'December': 'dqydj-solar-irradiance-20221215.csv',
     }
 
     dqydj_data = {}
@@ -173,13 +170,13 @@ def load_dqydj_data(
             df['time'] = pd.to_datetime(df['time'])
             dqydj_data[month] = df
             if verbose:
-                print(f"Loaded DQYDJ data for {month}: {len(df)} records")
+                print(f'Loaded DQYDJ data for {month}: {len(df)} records')
         else:
             if verbose:
-                print(f"Warning: DQYDJ file not found for {month}: {filepath}")
+                print(f'Warning: DQYDJ file not found for {month}: {filepath}')
 
     if verbose:
-        print(f"\nLoaded DQYDJ data for {len(dqydj_data)} months")
+        print(f'\nLoaded DQYDJ data for {len(dqydj_data)} months')
 
     return dqydj_data
 
@@ -190,7 +187,7 @@ def calculate_dni_for_dataframe(
     longitude: float,
     altitude: float,
     time_column: str = 'time',
-    models: list = None
+    models: list = None,
 ) -> pd.DataFrame:
     """
     Calculate DNI using multiple models for all timestamps in a DataFrame.
@@ -209,14 +206,20 @@ def calculate_dni_for_dataframe(
     """
     if models is None:
         # Default to all calculation models (exclude DQYDJ which requires separate data)
-        models = [DniModel.SOLARPY, DniModel.PVLIB_INEICHEN, DniModel.PVLIB_SIMPLIFIED_SOLIS]
+        models = [
+            DniModel.SOLARPY,
+            DniModel.PVLIB_INEICHEN,
+            DniModel.PVLIB_SIMPLIFIED_SOLIS,
+        ]
 
     result_df = df.copy()
 
     for model in models:
         if model == DniModel.SOLARPY:
             result_df[model.column_name] = result_df[time_column].apply(
-                lambda dt: calculate_direct_normal_irradiance(dt, latitude, longitude, altitude)
+                lambda dt: calculate_direct_normal_irradiance(
+                    dt, latitude, longitude, altitude
+                )
             )
         elif model in [DniModel.PVLIB_INEICHEN, DniModel.PVLIB_SIMPLIFIED_SOLIS]:
             times_utc = pd.DatetimeIndex(result_df[time_column])
@@ -228,8 +231,8 @@ def calculate_dni_for_dataframe(
         elif model == DniModel.DQYDJ:
             # DQYDJ requires separate data loading and cannot be calculated
             raise ValueError(
-                "DQYDJ model requires loading separate reference data files. "
-                "Use load_dqydj_data() instead."
+                'DQYDJ model requires loading separate reference data files. '
+                'Use load_dqydj_data() instead.'
             )
 
     return result_df

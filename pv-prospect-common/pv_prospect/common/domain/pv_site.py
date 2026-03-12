@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
-from typing import Optional, List
+from typing import List, Optional
 
 from numpy import deg2rad
 from spherical_coordinates import az_zd_to_cx_cy_cz
@@ -53,5 +53,4 @@ class PVSite:
     installation_date: Optional[date] = None
 
     def __str__(self) -> str:
-        return f"{self.name} (system_id={self.pvo_sys_id})"
-
+        return f'{self.name} (system_id={self.pvo_sys_id})'

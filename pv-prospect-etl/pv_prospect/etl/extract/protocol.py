@@ -11,7 +11,12 @@ class Extractor(Protocol):
         """Check if a file exists."""
         ...
 
-    def list_files(self, folder_path: str | None = None, pattern: str = "*", recursive: bool = False) -> list[dict]:
+    def list_files(
+        self,
+        folder_path: str | None = None,
+        pattern: str = '*',
+        recursive: bool = False,
+    ) -> list[dict]:
         """
         List files in a directory.
         Returns list of dicts with 'id', 'name', 'path', and parent information.

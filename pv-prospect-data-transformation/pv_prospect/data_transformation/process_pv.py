@@ -1,10 +1,9 @@
 import numpy as np
 import pandas as pd
 import pvlib
+
 from pv_prospect.common import PVSite
-
 from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
-
 
 ALTITUDE = 0
 
@@ -40,17 +39,11 @@ def process_pv(
     pvoutput_df['time'] = pd.to_datetime(pvoutput_df['time'])
 
     # Align PV-output times to weather times and inner-join
-    pvo_reduced = reduce_rows(
-        pvoutput_df[['time', 'power']], weather_df['time']
-    )
-    joined = weather_df.join(
-        pvo_reduced.set_index('time'), on='time', how='inner'
-    )
+    pvo_reduced = reduce_rows(pvoutput_df[['time', 'power']], weather_df['time'])
+    joined = weather_df.join(pvo_reduced.set_index('time'), on='time', how='inner')
 
     # Calculate POA irradiance
-    joined['plane_of_array_irradiance'] = _calculate_poa_irradiance(
-        joined, pv_site
-    )
+    joined['plane_of_array_irradiance'] = _calculate_poa_irradiance(joined, pv_site)
 
     # Select columns
     columns_to_keep = ['time'] + [col for col in keep_columns if col in joined.columns]

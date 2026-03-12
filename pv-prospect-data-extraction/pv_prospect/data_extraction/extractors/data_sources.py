@@ -1,5 +1,6 @@
 from enum import Enum
 from functools import lru_cache
+from typing import Any
 
 from pv_prospect.common import Location, PVSite, get_location_by_pv_system_id
 from pv_prospect.data_extraction.extractors.openmeteo import (
@@ -31,7 +32,7 @@ class SourceDescriptor(str, Enum):
 
 
 @lru_cache(maxsize=None)
-def get_extractor(source_descriptor: SourceDescriptor):
+def get_extractor(source_descriptor: SourceDescriptor) -> 'Any':
     """Get an extractor instance for the given source descriptor.
 
     Results are cached to avoid recreating extractors for the same source.

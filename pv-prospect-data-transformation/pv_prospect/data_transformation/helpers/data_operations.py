@@ -61,7 +61,7 @@ def reduce_rows(df: pd.DataFrame, ref_times: pd.Series) -> pd.DataFrame:
         interval_starts = []
         interval_ends = []
 
-        for i, idx in enumerate(interval_rows.index):
+        for _i, idx in enumerate(interval_rows.index):
             # End time is the current row's time
             end_time = df.loc[idx, 'time']
             interval_ends.append(end_time)
@@ -85,7 +85,7 @@ def reduce_rows(df: pd.DataFrame, ref_times: pd.Series) -> pd.DataFrame:
 
         # Calculate durations for each interval
         durations = []
-        for start, end in zip(interval_starts, interval_ends):
+        for start, end in zip(interval_starts, interval_ends, strict=True):
             duration = (end - start).total_seconds()
             durations.append(duration)
 
@@ -103,7 +103,9 @@ def reduce_rows(df: pd.DataFrame, ref_times: pd.Series) -> pd.DataFrame:
                 row_data[col] = float('nan')
             else:
                 # Time-weighted average
-                weighted_sum = sum(val * dur for val, dur in zip(values, durations))
+                weighted_sum = sum(
+                    val * dur for val, dur in zip(values, durations, strict=True)
+                )
                 row_data[col] = weighted_sum / total_duration
 
         result_rows.append(row_data)

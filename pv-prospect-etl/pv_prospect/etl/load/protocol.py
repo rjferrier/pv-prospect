@@ -1,4 +1,4 @@
-from typing import Protocol, Iterable
+from typing import Iterable, Protocol
 
 
 class Loader(Protocol):
@@ -6,7 +6,9 @@ class Loader(Protocol):
         """Create a folder structure. Returns folder ID/path if created, None if already exists."""
         ...
 
-    def write_csv(self, file_path: str, rows: Iterable[Iterable[str]], overwrite: bool = False) -> None:
+    def write_csv(
+        self, file_path: str, rows: Iterable[Iterable[str]], overwrite: bool = False
+    ) -> None:
         """Write CSV data to storage."""
         ...
 

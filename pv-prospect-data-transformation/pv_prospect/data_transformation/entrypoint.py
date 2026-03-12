@@ -123,12 +123,12 @@ def main() -> None:
                 io_helper.write_parquet_to_model(processed_df, out_path)
 
     elif step == 'process_pv':
-        pv_system_id = int(os.environ['PV_SYSTEM_ID'])
+        pv_sys_id = int(os.environ['PV_SYSTEM_ID'])
         _load_resources(io_helper, raw_bucket)
-        pv_site = get_pv_site_by_system_id(pv_system_id)
+        pv_site = get_pv_site_by_system_id(pv_sys_id)
 
         # 1. Load cleaned PV data
-        in_pv_path = f'cleaned/timeseries/pvoutput/{pv_system_id}/pvoutput_{pv_system_id}_{date_str}.parquet'
+        in_pv_path = f'cleaned/timeseries/pvoutput/{pv_sys_id}/pvoutput_{pv_sys_id}_{date_str}.parquet'
         pv_blob = io_helper._raw_bucket.blob(in_pv_path)
         if not pv_blob.exists():
             print(f'[process_pv] Cleaned PV data not found: {in_pv_path}')
@@ -162,7 +162,7 @@ def main() -> None:
             weather_df=cleaned_weather_df, pvoutput_df=cleaned_pv_df, pv_site=pv_site
         )
 
-        out_path = f'{pv_system_id}/processed_pv_{pv_system_id}_{date_str}.parquet'
+        out_path = f'{pv_sys_id}/processed_pv_{pv_sys_id}_{date_str}.parquet'
         io_helper.write_parquet_to_model(processed_df, out_path)
 
     else:

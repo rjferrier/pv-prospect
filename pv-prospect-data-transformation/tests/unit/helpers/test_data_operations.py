@@ -1,43 +1,52 @@
 """Tests for reduce_rows function"""
+
 import pandas as pd
 import pytest
-from pytz import timezone
 from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
+from pytz import timezone
 
 UTC = timezone('UTC')
 
 
 @pytest.fixture
-def sample_dataframe():
+def sample_dataframe() -> pd.DataFrame:
     """Create a sample dataframe with time, energy, and power columns."""
     data = {
-        'time': pd.to_datetime([
-            '2023-09-15 23:00:00',
-            '2023-09-15 23:05:00',
-            '2023-09-15 23:10:00',
-            '2023-09-15 23:15:00',
-            '2023-09-15 23:20:00',
-            '2023-09-15 23:25:00',
-            '2023-09-15 23:30:00',
-            '2023-09-15 23:35:00',
-        ]).tz_localize(UTC),
+        'time': pd.to_datetime(
+            [
+                '2023-09-15 23:00:00',
+                '2023-09-15 23:05:00',
+                '2023-09-15 23:10:00',
+                '2023-09-15 23:15:00',
+                '2023-09-15 23:20:00',
+                '2023-09-15 23:25:00',
+                '2023-09-15 23:30:00',
+                '2023-09-15 23:35:00',
+            ]
+        ).tz_localize(UTC),
         'energy': [2.0, 11.0, 21.0, 31.0, 46.0, 62.0, 87.0, 99.0],
-        'power': [28, 108, 120, 120, 180, float('nan'), 192, 201]
+        'power': [28, 108, 120, 120, 180, float('nan'), 192, 201],
     }
     return pd.DataFrame(data)
 
 
 @pytest.fixture
-def reference_times():
+def reference_times() -> pd.Series:
     """Create reference times for aggregation."""
-    return pd.Series(pd.to_datetime([
-        '2023-09-15 23:00:00',
-        '2023-09-15 23:15:00',
-        '2023-09-15 23:30:00',
-    ]).tz_localize(UTC))
+    return pd.Series(
+        pd.to_datetime(
+            [
+                '2023-09-15 23:00:00',
+                '2023-09-15 23:15:00',
+                '2023-09-15 23:30:00',
+            ]
+        ).tz_localize(UTC)
+    )
 
 
-def test_reduce_rows_time_weighted_average(sample_dataframe, reference_times):
+def test_reduce_rows_time_weighted_average(
+    sample_dataframe: pd.DataFrame, reference_times: pd.Series
+) -> None:
     """Test that reduce_rows correctly performs time-weighted averaging."""
     result = reduce_rows(sample_dataframe, reference_times)
 
@@ -48,7 +57,9 @@ def test_reduce_rows_time_weighted_average(sample_dataframe, reference_times):
     assert list(result.columns) == ['time', 'energy', 'power']
 
 
-def test_reduce_rows_first_interval_calculation(sample_dataframe, reference_times):
+def test_reduce_rows_first_interval_calculation(
+    sample_dataframe: pd.DataFrame, reference_times: pd.Series
+) -> None:
     """Test the calculation for the first result interval (23:15:00)."""
     # Intervals: 23:00->23:05 (energy=11, power=108),
     #            23:05->23:10 (energy=21, power=120),
@@ -64,7 +75,9 @@ def test_reduce_rows_first_interval_calculation(sample_dataframe, reference_time
     assert first_row['power'] == pytest.approx(116.0)
 
 
-def test_reduce_rows_second_interval_calculation(sample_dataframe, reference_times):
+def test_reduce_rows_second_interval_calculation(
+    sample_dataframe: pd.DataFrame, reference_times: pd.Series
+) -> None:
     """Test the calculation for the second result interval (23:30:00)."""
     # Intervals: 23:15->23:20 (energy=46, power=180),
     #            23:20->23:25 (energy=62, power=NaN),
@@ -80,7 +93,9 @@ def test_reduce_rows_second_interval_calculation(sample_dataframe, reference_tim
     assert pd.isna(second_row['power'])
 
 
-def test_reduce_rows_handles_nan_values(sample_dataframe, reference_times):
+def test_reduce_rows_handles_nan_values(
+    sample_dataframe: pd.DataFrame, reference_times: pd.Series
+) -> None:
     """Test that NaN values in any interval result in NaN output."""
     result = reduce_rows(sample_dataframe, reference_times)
 
@@ -90,7 +105,9 @@ def test_reduce_rows_handles_nan_values(sample_dataframe, reference_times):
     assert not pd.isna(result.iloc[1]['energy'])
 
 
-def test_reduce_rows_omits_insufficient_data_rows(sample_dataframe, reference_times):
+def test_reduce_rows_omits_insufficient_data_rows(
+    sample_dataframe: pd.DataFrame, reference_times: pd.Series
+) -> None:
     """Test that rows without sufficient data are omitted."""
     result = reduce_rows(sample_dataframe, reference_times)
 
@@ -99,7 +116,7 @@ def test_reduce_rows_omits_insufficient_data_rows(sample_dataframe, reference_ti
     assert len(result) == 2  # Only 2 out of 3 reference times
 
 
-def test_reduce_rows_empty_dataframe():
+def test_reduce_rows_empty_dataframe() -> None:
     """Test that empty dataframe returns empty result."""
     empty_df = pd.DataFrame(columns=['time', 'energy', 'power'])
     ref_times = pd.Series(pd.to_datetime(['2023-09-15 23:15:00']).tz_localize(UTC))
@@ -110,7 +127,7 @@ def test_reduce_rows_empty_dataframe():
     assert list(result.columns) == ['time', 'energy', 'power']
 
 
-def test_reduce_rows_empty_reference_times(sample_dataframe):
+def test_reduce_rows_empty_reference_times(sample_dataframe: pd.DataFrame) -> None:
     """Test that empty reference times returns empty result."""
     empty_ref_times = pd.Series([], dtype='datetime64[ns, UTC]')
 
@@ -119,7 +136,7 @@ def test_reduce_rows_empty_reference_times(sample_dataframe):
     assert result.empty
 
 
-def test_reduce_rows_missing_time_column():
+def test_reduce_rows_missing_time_column() -> None:
     """Test that missing time column raises ValueError."""
     df_no_time = pd.DataFrame({'energy': [1, 2, 3], 'power': [10, 20, 30]})
     ref_times = pd.Series(pd.to_datetime(['2023-09-15 23:15:00']).tz_localize(UTC))

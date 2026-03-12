@@ -1,5 +1,6 @@
 import argparse
 from collections import defaultdict
+
 from pv_prospect.etl.loaders.gdrive import GDriveClient, ResolvedFilePath
 
 
@@ -21,7 +22,12 @@ def get_folder_id(client: GDriveClient, folder_path: str | None) -> str | None:
     return parent_id
 
 
-def list_files_recursive(client: GDriveClient, folder_id: str | None, mime_type: str | None = None, prefix: str = "") -> list[dict]:
+def list_files_recursive(
+    client: GDriveClient,
+    folder_id: str | None,
+    mime_type: str | None = None,
+    prefix: str = '',
+) -> list[dict]:
     """
     Recursively list all files in the specified folder, including subdirectories.
     Returns list of dicts with 'id', 'name', 'path' (relative path from search root), 'parent_id', and 'createdTime'.
@@ -34,20 +40,24 @@ def list_files_recursive(client: GDriveClient, folder_id: str | None, mime_type:
     files = client.search(search_path, mime_type=mime_type)
 
     for file in files:
-        file_path = f"{prefix}{file['name']}" if prefix else file['name']
-        files_with_paths.append({
-            'id': file['id'],
-            'name': file['name'],
-            'path': file_path,
-            'parent_id': folder_id if folder_id else file.get('parents', [None])[0],
-            'createdTime': file.get('createdTime', '')
-        })
+        file_path = f'{prefix}{file["name"]}' if prefix else file['name']
+        files_with_paths.append(
+            {
+                'id': file['id'],
+                'name': file['name'],
+                'path': file_path,
+                'parent_id': folder_id if folder_id else file.get('parents', [None])[0],
+                'createdTime': file.get('createdTime', ''),
+            }
+        )
 
     # Get all subfolders and recurse
     folder_search_path = ResolvedFilePath(parent_id=folder_id)
-    folders = client.search(folder_search_path, mime_type='application/vnd.google-apps.folder')
+    folders = client.search(
+        folder_search_path, mime_type='application/vnd.google-apps.folder'
+    )
     for folder in folders:
-        folder_path = f"{prefix}{folder['name']}/" if prefix else f"{folder['name']}/"
+        folder_path = f'{prefix}{folder["name"]}/' if prefix else f'{folder["name"]}/'
         files_with_paths.extend(
             list_files_recursive(client, folder['id'], mime_type, folder_path)
         )
@@ -55,7 +65,7 @@ def list_files_recursive(client: GDriveClient, folder_id: str | None, mime_type:
     return files_with_paths
 
 
-def remove_duplicate_csvs(folder_path: str | None, dry_run: bool = False):
+def remove_duplicate_csvs(folder_path: str | None, dry_run: bool = False) -> None:
     """
     Remove duplicate CSV files with identical names in the same folder.
     Keeps the latest file (by creation time) and removes all others.
@@ -66,7 +76,7 @@ def remove_duplicate_csvs(folder_path: str | None, dry_run: bool = False):
     """
     client = GDriveClient.build_service()
     parent_folder_id = get_folder_id(client, folder_path)
-    
+
     # Only search for CSV files
     files = list_files_recursive(client, parent_folder_id, mime_type='text/csv')
 
@@ -78,7 +88,7 @@ def remove_duplicate_csvs(folder_path: str | None, dry_run: bool = False):
 
     deleted_count = 0
 
-    for (parent_id, name), file_group in files_by_location.items():
+    for (_parent_id, _name), file_group in files_by_location.items():
         if len(file_group) > 1:
             # Sort by creation time in reverse to keep the latest
             file_group.sort(key=lambda f: f['createdTime'], reverse=True)
@@ -88,22 +98,24 @@ def remove_duplicate_csvs(folder_path: str | None, dry_run: bool = False):
             duplicates = file_group[1:]
 
             print(f"\nFound {len(duplicates)} duplicate(s) of '{kept_file['path']}'")
-            print(f"  Keeping: {kept_file['id']} (created {kept_file['createdTime']})")
+            print(f'  Keeping: {kept_file["id"]} (created {kept_file["createdTime"]})')
 
             for dup in duplicates:
                 if dry_run:
-                    print(f"  Would delete: {dup['id']} (created {dup['createdTime']})")
+                    print(f'  Would delete: {dup["id"]} (created {dup["createdTime"]})')
                 else:
                     try:
                         client.trash_file(dup['id'])
-                        print(f"  Deleted: {dup['id']} (created {dup['createdTime']})")
+                        print(f'  Deleted: {dup["id"]} (created {dup["createdTime"]})')
                     except Exception as e:
-                        print(f"  Error deleting {dup['id']}: {e}")
+                        print(f'  Error deleting {dup["id"]}: {e}')
                         continue
 
                 deleted_count += 1
 
-    print(f"\n{'Would delete' if dry_run else 'Deleted'} {deleted_count} duplicate CSV file(s)")
+    print(
+        f'\n{"Would delete" if dry_run else "Deleted"} {deleted_count} duplicate CSV file(s)'
+    )
 
 
 if __name__ == '__main__':
@@ -114,17 +126,14 @@ if __name__ == '__main__':
         'folder_path',
         nargs='?',
         default=None,
-        help='Path to folder in Google Drive (e.g., "pvoutput"). If omitted, searches from the root data folder.'
+        help='Path to folder in Google Drive (e.g., "pvoutput"). If omitted, searches from the root data folder.',
     )
     parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Show what would be deleted without actually deleting'
+        help='Show what would be deleted without actually deleting',
     )
 
     args = parser.parse_args()
 
-    remove_duplicate_csvs(
-        args.folder_path,
-        args.dry_run
-    )
+    remove_duplicate_csvs(args.folder_path, args.dry_run)

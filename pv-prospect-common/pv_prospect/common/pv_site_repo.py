@@ -1,15 +1,13 @@
 import csv
 from datetime import date
-from io import TextIOWrapper
-from typing import Optional
+from typing import Optional, TextIO
 
-from .domain import PVSite, Location, System, PanelGeometry
+from .domain import Location, PanelGeometry, PVSite, System
 
-
-pv_sites_by_system_id = {}
+pv_sites_by_system_id: dict[int, PVSite] = {}
 
 
-def build_pv_site_repo(csv_stream: TextIOWrapper) -> None:
+def build_pv_site_repo(csv_stream: TextIO) -> None:
     """
     Build the PV site repository by loading PV site data from a CSV text stream.
     Or simply return if it is already built.
@@ -62,7 +60,9 @@ def get_pv_site_by_system_id(system_id: int) -> PVSite:
     return pv_sites_by_system_id[system_id]
 
 
-def create_pv_sites_by_system_id(pv_site_csv_stream: TextIOWrapper) -> dict[int, PVSite]:
+def create_pv_sites_by_system_id(
+    pv_site_csv_stream: TextIO,
+) -> dict[int, PVSite]:
     pv_site_csv_stream.seek(0)
 
     reader = csv.DictReader(pv_site_csv_stream)
@@ -88,26 +88,27 @@ def _create_pv_site_from_csv_row(row: dict) -> PVSite:
 
     # Create panel and inverter systems
     panel_system = System(
-        brand=row['panel_brand'],
-        capacity=int(row['panels_capacity'])
+        brand=row['panel_brand'], capacity=int(row['panels_capacity'])
     )
 
     inverter_system = System(
-        brand=row['inverter_brand'],
-        capacity=int(row['inverter_capacity'])
+        brand=row['inverter_brand'], capacity=int(row['inverter_capacity'])
     )
 
     # Create panel geometries
     panel_geometries = [
-        geometry for i in (1, 2)
+        geometry
+        for i in (1, 2)
         if (geometry := _create_panel_geometry_from_row(row, i)) is not None
     ]
 
     if not panel_geometries:
-        raise ValueError("At least one panel geometry must be defined in the CSV row")
+        raise ValueError('At least one panel geometry must be defined in the CSV row')
 
     installation_date_str = row.get('installation_date')
-    installation_date = date.fromisoformat(installation_date_str) if installation_date_str else None
+    installation_date = (
+        date.fromisoformat(installation_date_str) if installation_date_str else None
+    )
 
     return PVSite(
         pvo_sys_id=int(row['pvoutput_system_id']),
@@ -117,7 +118,7 @@ def _create_pv_site_from_csv_row(row: dict) -> PVSite:
         panel_system=panel_system,
         panel_geometries=panel_geometries,
         inverter_system=inverter_system,
-        installation_date=installation_date
+        installation_date=installation_date,
     )
 
 
@@ -143,5 +144,5 @@ def _create_panel_geometry_from_row(row: dict, index: int) -> Optional[PanelGeom
     return PanelGeometry(
         azimuth=int(azimuth_entry) if azimuth_entry else 180,
         tilt=int(tilt_entry) if tilt_entry else 0,
-        area_fraction=float(area_fraction_entry) if area_fraction_entry else 1.0
+        area_fraction=float(area_fraction_entry) if area_fraction_entry else 1.0,
     )

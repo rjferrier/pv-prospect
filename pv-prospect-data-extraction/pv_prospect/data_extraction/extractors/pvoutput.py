@@ -1,27 +1,28 @@
 import time
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Optional, Collection
+from typing import Collection, Optional
 
-import requests
-from pv_prospect.common import PVSite, map_from_env, VarMapping
-from pv_prospect.data_extraction.extractors import TimeSeriesDescriptor, TimeSeries
+import requests  # type: ignore[import-untyped]
+
+from pv_prospect.common import PVSite, VarMapping, map_from_env
+from pv_prospect.data_extraction.extractors import TimeSeries, TimeSeriesDescriptor
 from pv_prospect.data_extraction.util.retry import retry_on_429
 
-URL = "https://pvoutput.org/service/r2/getstatus.jsp"
-API_KEY_HEADER_NAME = "X-Pvoutput-Apikey"
-OWN_SYSTEM_ID_HEADER_NAME = "X-Pvoutput-SystemId"
+URL = 'https://pvoutput.org/service/r2/getstatus.jsp'
+API_KEY_HEADER_NAME = 'X-Pvoutput-Apikey'
+OWN_SYSTEM_ID_HEADER_NAME = 'X-Pvoutput-SystemId'
 
 # Response headers from PVOutput API
-RATE_LIMIT_HEADER = "X-Rate-Limit-Limit"
-RATE_LIMIT_REMAINING_HEADER = "X-Rate-Limit-Remaining"
-RATE_LIMIT_RESET_HEADER = "X-Rate-Limit-Reset"
+RATE_LIMIT_HEADER = 'X-Rate-Limit-Limit'
+RATE_LIMIT_REMAINING_HEADER = 'X-Rate-Limit-Remaining'
+RATE_LIMIT_RESET_HEADER = 'X-Rate-Limit-Reset'
 
 
 CONSTANT_QUERY_PARAMS = {
-    'h': 1,         # Get full status (see FIELDS)
-    'limit': 288,   # Get all statuses for the day
-    'asc': 1,       # Ascending order
+    'h': 1,  # Get full status (see FIELDS)
+    'limit': 288,  # Get all statuses for the day
+    'asc': 1,  # Ascending order
 }
 
 
@@ -36,7 +37,7 @@ HEADER = [
     'energy_used',
     'power_used',
     'temperature',
-    'voltage'
+    'voltage',
 ]
 
 
@@ -56,12 +57,12 @@ class PVOutputRateLimiter:
     (which would be unreliable since each worker maintains its own instance).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.rate_limit: Optional[int] = None
         self.reset_time: Optional[datetime] = None
         self._first_update = True
 
-    def update_from_headers(self, headers: dict[str, str]):
+    def update_from_headers(self, headers: dict[str, str]) -> None:
         """
         Update rate limit info from API response headers.
 
@@ -78,11 +79,15 @@ class PVOutputRateLimiter:
 
         # Print rate limit info on first update
         if self._first_update and self.rate_limit is not None:
-            reset_time_str = self.reset_time.strftime('%H:%M:%S') if self.reset_time else 'unknown'
-            print(f"ℹ️  Rate limit: {self.rate_limit} requests per hour (resets at {reset_time_str})")
+            reset_time_str = (
+                self.reset_time.strftime('%H:%M:%S') if self.reset_time else 'unknown'
+            )
+            print(
+                f'ℹ️  Rate limit: {self.rate_limit} requests per hour (resets at {reset_time_str})'
+            )
             self._first_update = False
 
-    def wait_if_needed(self):
+    def wait_if_needed(self) -> None:
         """
         Check if we need to wait for rate limit to reset.
         This should be called when a rate limit error (HTTP 403) is encountered.
@@ -92,16 +97,25 @@ class PVOutputRateLimiter:
             if current_time < self.reset_time:
                 sleep_seconds = (self.reset_time - current_time).total_seconds()
                 if sleep_seconds > 0:
-                    limit_info = f" (limit: {self.rate_limit})" if self.rate_limit else ""
-                    print(f"\n⚠️  Rate limit reached{limit_info}.")
-                    print(f"   Sleeping for {sleep_seconds:.1f} seconds until {self.reset_time.strftime('%H:%M:%S')}...\n")
+                    limit_info = (
+                        f' (limit: {self.rate_limit})' if self.rate_limit else ''
+                    )
+                    print(f'\n⚠️  Rate limit reached{limit_info}.')
+                    print(
+                        f'   Sleeping for {sleep_seconds:.1f} seconds until {self.reset_time.strftime("%H:%M:%S")}...\n'
+                    )
                     time.sleep(sleep_seconds)
                     # Reset after sleeping
                     self.reset_time = None
 
 
 class PVOutputExtractor:
-    def __init__(self, api_key: str, system_id: str, rate_limiter: Optional[PVOutputRateLimiter] = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        system_id: str,
+        rate_limiter: Optional[PVOutputRateLimiter] = None,
+    ) -> None:
         self.api_key = api_key
         self.system_id = system_id
         self.rate_limiter = rate_limiter if rate_limiter else PVOutputRateLimiter()
@@ -109,18 +123,27 @@ class PVOutputExtractor:
     @classmethod
     def from_env(cls) -> 'PVOutputExtractor':
         rate_limiter = PVOutputRateLimiter()
-        extractor = map_from_env(PVOutputExtractor, {
-            'api_key': VarMapping('PVO_API_KEY', str),
-            'system_id': VarMapping('PVO_SYSTEM_ID', str)
-        }, rate_limiter=rate_limiter)
+        extractor = map_from_env(
+            PVOutputExtractor,
+            {
+                'api_key': VarMapping('PVO_API_KEY', str),
+                'system_id': VarMapping('PVO_SYSTEM_ID', str),
+            },
+            rate_limiter=rate_limiter,
+        )
         return extractor
 
-    def get_time_series_descriptors(self, pv_site: PVSite) -> list[TimeSeriesDescriptor]:
+    def get_time_series_descriptors(
+        self, pv_site: PVSite
+    ) -> list[TimeSeriesDescriptor]:
         return [PVOutputTimeSeriesDescriptor(pv_site.pvo_sys_id)]
 
     @retry_on_429
     def extract(
-            self, time_series_descriptors: Collection[PVOutputTimeSeriesDescriptor], date_: date, end_date: date = None
+        self,
+        time_series_descriptors: Collection[PVOutputTimeSeriesDescriptor],
+        date_: date,
+        end_date: Optional[date] = None,
     ) -> list[TimeSeries]:
         """
         Extract PV output status data for a single date from the PVOutput API for the given site.
@@ -144,18 +167,18 @@ class PVOutputExtractor:
         headers = {
             API_KEY_HEADER_NAME: self.api_key,
             OWN_SYSTEM_ID_HEADER_NAME: self.system_id,
-            'X-Rate-Limit': '1'  # Request rate limit information in response headers
+            'X-Rate-Limit': '1',  # Request rate limit information in response headers
         }
 
-        ts_descriptor = time_series_descriptors[0]
+        ts_descriptor = next(iter(time_series_descriptors))
 
         params = {
-            'sid1': str(ts_descriptor),        # Target system ID from PVSite
-            'd': date_.strftime('%Y%m%d'),     # Date in YYYYMMDD format
-            **CONSTANT_QUERY_PARAMS
+            'sid1': str(ts_descriptor),  # Target system ID from PVSite
+            'd': date_.strftime('%Y%m%d'),  # Date in YYYYMMDD format
+            **CONSTANT_QUERY_PARAMS,
         }
 
-        response = requests.get(URL, headers=headers, params=params)
+        response = requests.get(URL, headers=headers, params=params, timeout=60)
 
         # Handle rate limit errors specially
         if response.status_code == 403:
@@ -164,7 +187,7 @@ class PVOutputExtractor:
             # Wait until rate limit resets
             self.rate_limiter.wait_if_needed()
             # Retry the request
-            response = requests.get(URL, headers=headers, params=params)
+            response = requests.get(URL, headers=headers, params=params, timeout=60)
 
         response.raise_for_status()
 
@@ -179,10 +202,7 @@ class PVOutputExtractor:
 
 def _to_clean_entries(text: str) -> list[list[str]]:
     lines = text.split(';')
-    return [
-        [_delete_if_nan(entry) for entry in line.split(',')]
-        for line in lines
-    ]
+    return [[_delete_if_nan(entry) for entry in line.split(',')] for line in lines]
 
 
 def _delete_if_nan(text: str) -> str:

@@ -20,6 +20,7 @@ For **extract_and_load**:
     DRY_RUN           — ``true`` or ``false`` (default ``false``)
     BY_WEEK           — ``true`` or ``false`` (chunking hint)
 """
+
 import os
 import sys
 from datetime import date
@@ -39,10 +40,10 @@ def main() -> None:
     if job_type == 'preprocess':
         source_descriptor = SourceDescriptor(os.environ['SOURCE_DESCRIPTOR'])
 
-        print(f"[entrypoint] preprocess: {source_descriptor}")
+        print(f'[entrypoint] preprocess: {source_descriptor}')
         core.preprocess(
             source_descriptor=source_descriptor,
-            local_dir=None,          # Cloud Run always writes to GCS
+            local_dir=None,  # Cloud Run always writes to GCS
         )
 
     elif job_type == 'extract_and_load':
@@ -55,12 +56,14 @@ def main() -> None:
         by_week = _env_bool('BY_WEEK')
 
         complete_date_range = DateRange(start_date, end_date)
-        print(f"[entrypoint] extract_and_load: {source_descriptor}, "
-              f"site={pv_system_id}, {complete_date_range}, by_week={by_week}")
+        print(
+            f'[entrypoint] extract_and_load: {source_descriptor}, '
+            f'site={pv_system_id}, {complete_date_range}, by_week={by_week}'
+        )
 
         split_period = Period.WEEK if by_week else Period.DAY
         sub_date_ranges = complete_date_range.split_by(split_period)
-        
+
         if by_week and not supports_multi_date(source_descriptor):
             # Fall back to days if the source doesn't support multi-date extraction
             final_ranges = []
@@ -78,10 +81,10 @@ def main() -> None:
                 overwrite=overwrite,
                 dry_run=dry_run,
             )
-            print(f"[entrypoint] {dr}: {result.type.value}")
+            print(f'[entrypoint] {dr}: {result.type.value}')
 
     else:
-        print(f"[entrypoint] ERROR: unknown JOB_TYPE={job_type!r}", file=sys.stderr)
+        print(f'[entrypoint] ERROR: unknown JOB_TYPE={job_type!r}', file=sys.stderr)
         sys.exit(1)
 
 

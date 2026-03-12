@@ -1,34 +1,33 @@
+import csv
 import io
 import json
 import time
-import csv
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
 from io import StringIO
 from tempfile import SpooledTemporaryFile
-from typing import Optional, Any, Callable, TypeVar, Iterator
+from typing import Any, Callable, Iterator, Optional, TypeVar
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from importlib_resources import files
 
 import pv_prospect.data_extraction.resources as resources
 
+CREDS_FILENAME = 'gdrive_credentials.json'
+TOKEN_FILENAME = 'gdrive_token.json'  # nosec B105
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
-CREDS_FILENAME = "gdrive_credentials.json"
-TOKEN_FILENAME = "gdrive_token.json"
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-
-FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder'
 CSV_MIME_TYPE = 'text/csv'
-DATA_FOLDER_NAME = "data"
+DATA_FOLDER_NAME = 'data'
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
@@ -48,7 +47,7 @@ def get_credentials() -> Credentials:
         try:
             creds.refresh(Request())
         except RefreshError:
-            print("Credentials have been revoked or expired, need to re-authenticate.")
+            print('Credentials have been revoked or expired, need to re-authenticate.')
             creds = _get_new_creds()
     else:
         # No valid credentials exist, get new ones
@@ -56,7 +55,7 @@ def get_credentials() -> Credentials:
 
     # Save the credentials for the next run
     token_path = files(resources).joinpath(TOKEN_FILENAME)
-    with token_path.open("w") as token:
+    with token_path.open('w') as token:
         token.write(creds.to_json())
 
     return creds
@@ -67,7 +66,7 @@ def _read_creds_from_token_file() -> Optional[Credentials]:
 
     # Check if token file exists
     try:
-        with token_path.open("r") as f:
+        with token_path.open('r') as f:
             token_data = f.read()
     except (FileNotFoundError, OSError):
         return None
@@ -95,18 +94,22 @@ def _get_new_creds() -> Credentials:
 
 def retry_on_500(func: Callable[..., T]) -> Callable[..., T]:
     """Decorator to retry a function on HTTP 500 errors with exponential backoff"""
-    def wrapper(*args, **kwargs) -> T:
+
+    def wrapper(*args: Any, **kwargs: Any) -> T:
         for attempt in range(MAX_RETRIES):
             try:
                 return func(*args, **kwargs)
             except HttpError as e:
                 if e.resp.status == 500 and attempt < MAX_RETRIES - 1:
                     delay = RETRY_DELAY * (attempt + 1)
-                    print(f"HTTP 500 error in {func.__name__}, retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                    print(
+                        f'HTTP 500 error in {func.__name__}, retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})'
+                    )
                     time.sleep(delay)
                 else:
                     raise
-        # raise RuntimeError(f"Retry logic failed unexpectedly for {func.__name__}")
+        raise RuntimeError(f'Retry logic failed unexpectedly for {func.__name__}')
+
     return wrapper
 
 
@@ -121,9 +124,9 @@ class GDriveClient:
         self.service = service
 
     @classmethod
-    def build_service(cls) -> "GDriveClient":
+    def build_service(cls) -> 'GDriveClient':
         """Factory method to build a Google Drive service instance with credentials."""
-        service = build("drive", "v3", credentials=get_credentials())
+        service = build('drive', 'v3', credentials=get_credentials())
         return cls(service)
 
     def create_folder(self, folder_path: str) -> str | None:
@@ -155,12 +158,17 @@ class GDriveClient:
             except FileNotFoundError:
                 parent_id = self._create_folder_internal(resolved_path)
                 created_any = True
-                print(f"    Created folder: {part}")
+                print(f'    Created folder: {part}')
 
         return parent_id if created_any else None
 
     @retry_on_500
-    def download_file(self, file_path: ResolvedFilePath, destination_path: str, mime_type: Optional[str] = None) -> None:
+    def download_file(
+        self,
+        file_path: ResolvedFilePath,
+        destination_path: str,
+        mime_type: Optional[str] = None,
+    ) -> None:
         """
         Downloads a file from Google Drive to the local file system.
 
@@ -179,7 +187,9 @@ class GDriveClient:
             self._download_to_stream(file_id, fh)
 
     @contextmanager
-    def download_to_stream(self, file_path: ResolvedFilePath, mime_type: Optional[str] = None) -> Iterator[io.BytesIO]:
+    def download_to_stream(
+        self, file_path: ResolvedFilePath, mime_type: Optional[str] = None
+    ) -> Iterator[io.BytesIO]:
         """
         Context manager that downloads a file from Google Drive into a BytesIO stream.
 
@@ -235,19 +245,30 @@ class GDriveClient:
         """
         # If no parent_id is specified, default to the data folder
         if folder_path.parent_id is None and folder_path.name != DATA_FOLDER_NAME:
-            search_path = ResolvedFilePath(name=folder_path.name, parent_id=self._get_data_folder_id())
+            search_path = ResolvedFilePath(
+                name=folder_path.name, parent_id=self._get_data_folder_id()
+            )
         else:
             search_path = folder_path
 
         existing_folders = self.search(search_path, mime_type=FOLDER_MIME_TYPE)
         if len(existing_folders) > 1:
-            raise RuntimeError(f"More than one folder named '{folder_path.name}' exists in the specified location.")
+            raise RuntimeError(
+                f"More than one folder named '{folder_path.name}' exists in the specified location."
+            )
         if not existing_folders:
-            raise FileNotFoundError(f"Folder '{folder_path.name}' not found in the specified location.")
+            raise FileNotFoundError(
+                f"Folder '{folder_path.name}' not found in the specified location."
+            )
 
-        return existing_folders[0]["id"]
+        return existing_folders[0]['id']
 
-    def list_files(self, folder_path: str | None = None, pattern: str = "*", recursive: bool = False) -> list[dict]:
+    def list_files(
+        self,
+        folder_path: str | None = None,
+        pattern: str = '*',
+        recursive: bool = False,
+    ) -> list[dict]:
         """
         List files in a Google Drive folder.
 
@@ -292,7 +313,14 @@ class GDriveClient:
 
         if recursive:
             # Recursively list all files
-            files.extend(self._list_files_recursive(folder_id, base_path, mime_filter, name_filter))
+            files.extend(
+                self._list_files_recursive(
+                    folder_id or self._get_data_folder_id(),
+                    base_path,
+                    mime_filter,
+                    name_filter,
+                )
+            )
         else:
             # List only files in this folder
             search_path = ResolvedFilePath(name=None, parent_id=folder_id)
@@ -304,14 +332,18 @@ class GDriveClient:
                     continue
 
                 # Construct relative path
-                file_rel_path = f"{base_path}/{file['name']}" if base_path else file['name']
+                file_rel_path = (
+                    f'{base_path}/{file["name"]}' if base_path else file['name']
+                )
 
-                files.append({
-                    'id': file['id'],
-                    'name': file['name'],
-                    'path': file_rel_path,
-                    'parent_path': base_path,
-                })
+                files.append(
+                    {
+                        'id': file['id'],
+                        'name': file['name'],
+                        'path': file_rel_path,
+                        'parent_path': base_path,
+                    }
+                )
 
         return files
 
@@ -330,10 +362,10 @@ class GDriveClient:
                 fileId=file_id,
                 addParents=new_parent_id,
                 removeParents=old_parent_id,
-                fields='id, parents'
+                fields='id, parents',
             ).execute()
         except HttpError as error:
-            print(f"Error while moving file {file_id}: {error}")
+            print(f'Error while moving file {file_id}: {error}')
             raise
 
     def read_file(self, file_path: str) -> io.TextIOWrapper:
@@ -370,18 +402,20 @@ class GDriveClient:
             new_name (str): The new name for the file.
         """
         try:
-            self.service.files().update(fileId=file_id, body={'name': new_name}).execute()
+            self.service.files().update(
+                fileId=file_id, body={'name': new_name}
+            ).execute()
         except HttpError as error:
-            print(f"Error while renaming file {file_id}: {error}")
+            print(f'Error while renaming file {file_id}: {error}')
             raise
 
     @retry_on_500
     def search(
-            self,
-            file_path: ResolvedFilePath,
-            *,
-            mime_type: Optional[str] = None,
-            include_trashed: bool = False
+        self,
+        file_path: ResolvedFilePath,
+        *,
+        mime_type: Optional[str] = None,
+        include_trashed: bool = False,
     ) -> list[dict]:
         """
         Search for files/folders based on name, parent, and optional mime type.
@@ -394,16 +428,24 @@ class GDriveClient:
         Returns:
             list[dict]: List of matching files/folders
         """
-        query_str = _build_query_string(file_path.name, mime_type, file_path.parent_id, include_trashed)
+        query_str = _build_query_string(
+            file_path.name, mime_type, file_path.parent_id, include_trashed
+        )
 
-        def search_files(page_token: Optional[str] = None) -> tuple[list[dict], Optional[str]]:
-            results = self.service.files().list(
-                q=query_str,
-                spaces="drive",
-                fields="nextPageToken, files(id, name, parents)",
-                pageToken=page_token
-            ).execute()
-            return results.get("files", []), results.get("nextPageToken", None)
+        def search_files(
+            page_token: Optional[str] = None,
+        ) -> tuple[list[dict], Optional[str]]:
+            results = (
+                self.service.files()
+                .list(
+                    q=query_str,
+                    spaces='drive',
+                    fields='nextPageToken, files(id, name, parents)',
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+            return results.get('files', []), results.get('nextPageToken', None)
 
         try:
             files_, next_page_token = search_files()
@@ -424,9 +466,11 @@ class GDriveClient:
             file_id (str): The ID of the file to trash.
         """
         try:
-            self.service.files().update(fileId=file_id, body={'trashed': True}).execute()
+            self.service.files().update(
+                fileId=file_id, body={'trashed': True}
+            ).execute()
         except HttpError as error:
-            print(f"Error while trashing file {file_id}: {error}")
+            print(f'Error while trashing file {file_id}: {error}')
             raise
 
     @retry_on_500
@@ -438,9 +482,11 @@ class GDriveClient:
             file_id (str): The ID of the file to restore.
         """
         try:
-            self.service.files().update(fileId=file_id, body={'trashed': False}).execute()
+            self.service.files().update(
+                fileId=file_id, body={'trashed': False}
+            ).execute()
         except HttpError as error:
-            print(f"Error while restoring file {file_id}: {error}")
+            print(f'Error while restoring file {file_id}: {error}')
             raise
 
     @retry_on_500
@@ -454,11 +500,13 @@ class GDriveClient:
         try:
             self.service.files().delete(fileId=file_id).execute()
         except HttpError as error:
-            print(f"Error while deleting file {file_id}: {error}")
+            print(f'Error while deleting file {file_id}: {error}')
             raise
 
     @retry_on_500
-    def upload_file(self, media_body: MediaIoBaseUpload, file_path: ResolvedFilePath, mimetype: str) -> str:
+    def upload_file(
+        self, media_body: MediaIoBaseUpload, file_path: ResolvedFilePath, mimetype: str
+    ) -> str:
         """
         Uploads a file to Google Drive in the specified parent folder.
 
@@ -473,7 +521,7 @@ class GDriveClient:
         file_metadata = {
             'name': file_path.name,
             'parents': [file_path.parent_id] if file_path.parent_id else [],
-            'mimeType': mimetype
+            'mimeType': mimetype,
         }
         try:
             file = (
@@ -483,10 +531,10 @@ class GDriveClient:
             )
             return file.get('id')
         except HttpError as error:
-            print(f"An error occurred while uploading {file_path.name}: {error}")
+            print(f'An error occurred while uploading {file_path.name}: {error}')
             raise
 
-    def write_csv(self, file_path: str, rows, overwrite: bool = False) -> None:
+    def write_csv(self, file_path: str, rows: 'Any', overwrite: bool = False) -> None:
         """Upload CSV data to Google Drive.
 
         If overwrite is False and a matching CSV already exists, raise FileExistsError.
@@ -497,7 +545,7 @@ class GDriveClient:
         # Check for existing files
         existing_files = self.search(resolved_file_path, mime_type=CSV_MIME_TYPE)
         if existing_files and not overwrite:
-            raise FileExistsError(f"File already exists on Google Drive: {file_path}")
+            raise FileExistsError(f'File already exists on Google Drive: {file_path}')
 
         # If overwrite requested, trash existing files
         if existing_files and overwrite:
@@ -505,7 +553,7 @@ class GDriveClient:
                 try:
                     self.trash_file(f['id'])
                 except Exception as e:
-                    print(f"Warning: failed to trash existing file {f.get('id')}: {e}")
+                    print(f'Warning: failed to trash existing file {f.get("id")}: {e}')
 
         with SpooledTemporaryFile(mode='w+b') as tmp:
             # Write CSV data as text first
@@ -521,8 +569,6 @@ class GDriveClient:
             media_body = MediaIoBaseUpload(tmp, mimetype=CSV_MIME_TYPE, resumable=True)
             # resolved_file_path = self.resolve_path(file_path)  # already resolved above
             self.upload_file(media_body, resolved_file_path, CSV_MIME_TYPE)
-
-
 
     # Private methods (alphabetically)
 
@@ -540,18 +586,17 @@ class GDriveClient:
             HttpError: If the API request fails
         """
         folder_metadata = {
-            "name": folder_path.name,
-            "mimeType": FOLDER_MIME_TYPE,
-            "parents": [folder_path.parent_id] if folder_path.parent_id else []
+            'name': folder_path.name,
+            'mimeType': FOLDER_MIME_TYPE,
+            'parents': [folder_path.parent_id] if folder_path.parent_id else [],
         }
         try:
-            folder = self.service.files().create(
-                body=folder_metadata,
-                fields="id"
-            ).execute()
-            return folder.get("id")
+            folder = (
+                self.service.files().create(body=folder_metadata, fields='id').execute()
+            )
+            return folder.get('id')
         except HttpError as error:
-            print(f"Error while creating folder {folder_path.name}: {error}")
+            print(f'Error while creating folder {folder_path.name}: {error}')
             raise
 
     def _download_to_stream(self, file_id: str, stream: io.IOBase) -> None:
@@ -573,12 +618,12 @@ class GDriveClient:
             try:
                 status, done = downloader.next_chunk()
                 if status:
-                    print(f"Download {int(status.progress() * 100)}%.")
+                    print(f'Download {int(status.progress() * 100)}%.')
             except HttpError as error:
-                print(f"An error occurred while downloading file: {error}")
+                print(f'An error occurred while downloading file: {error}')
                 raise
 
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=1)  # noqa: B019
     def _get_data_folder_id(self) -> str:
         """
         Get the ID of the root data folder, caching it for subsequent calls.
@@ -592,28 +637,35 @@ class GDriveClient:
         existing_folders = self.search(data_folder_path, mime_type=FOLDER_MIME_TYPE)
 
         if len(existing_folders) > 1:
-            raise RuntimeError(f"More than one folder named '{DATA_FOLDER_NAME}' exists at the root level.")
+            raise RuntimeError(
+                f"More than one folder named '{DATA_FOLDER_NAME}' exists at the root level."
+            )
         if not existing_folders:
             # Create the data folder if it doesn't exist
             folder_metadata = {
-                "name": DATA_FOLDER_NAME,
-                "mimeType": FOLDER_MIME_TYPE,
+                'name': DATA_FOLDER_NAME,
+                'mimeType': FOLDER_MIME_TYPE,
             }
             try:
-                folder = self.service.files().create(
-                    body=folder_metadata,
-                    fields="id"
-                ).execute()
-                folder_id = folder.get("id")
-                print(f"    Created root data folder: {DATA_FOLDER_NAME}")
+                folder = (
+                    self.service.files()
+                    .create(body=folder_metadata, fields='id')
+                    .execute()
+                )
+                folder_id = folder.get('id')
+                print(f'    Created root data folder: {DATA_FOLDER_NAME}')
                 return folder_id
             except HttpError as error:
-                print(f"Error while creating root data folder {DATA_FOLDER_NAME}: {error}")
+                print(
+                    f'Error while creating root data folder {DATA_FOLDER_NAME}: {error}'
+                )
                 raise
         else:
-            return existing_folders[0]["id"]
+            return existing_folders[0]['id']
 
-    def _get_file_id(self, file_path: ResolvedFilePath, mime_type: Optional[str] = None) -> str:
+    def _get_file_id(
+        self, file_path: ResolvedFilePath, mime_type: Optional[str] = None
+    ) -> str:
         """
         Search for a file by name and return its ID.
 
@@ -629,7 +681,9 @@ class GDriveClient:
         """
         files_ = self.search(file_path, mime_type=mime_type)
         if not files_:
-            raise FileNotFoundError(f"File '{file_path.name}' not found in the specified Google Drive folder.")
+            raise FileNotFoundError(
+                f"File '{file_path.name}' not found in the specified Google Drive folder."
+            )
         return files_[0]['id']
 
     @retry_on_500
@@ -645,7 +699,13 @@ class GDriveClient:
         """
         return self.service.files().get_media(fileId=file_id)
 
-    def _list_files_recursive(self, folder_id: str, base_path: str, mime_filter: str | None, name_filter: str | None) -> list[dict]:
+    def _list_files_recursive(
+        self,
+        folder_id: str,
+        base_path: str,
+        mime_filter: str | None,
+        name_filter: str | None,
+    ) -> list[dict]:
         """
         Recursively list files in a folder and its subfolders.
 
@@ -675,20 +735,28 @@ class GDriveClient:
                 continue
 
             # Construct relative path
-            file_rel_path = f"{base_path}/{file['name']}" if base_path else file['name']
+            file_rel_path = f'{base_path}/{file["name"]}' if base_path else file['name']
 
-            files.append({
-                'id': file['id'],
-                'name': file['name'],
-                'path': file_rel_path,
-                'parent_path': base_path,
-            })
+            files.append(
+                {
+                    'id': file['id'],
+                    'name': file['name'],
+                    'path': file_rel_path,
+                    'parent_path': base_path,
+                }
+            )
 
         # Get subfolders and recurse
         subfolders = self.search(search_path, mime_type=FOLDER_MIME_TYPE)
         for folder in subfolders:
-            subfolder_path = f"{base_path}/{folder['name']}" if base_path else folder['name']
-            files.extend(self._list_files_recursive(folder['id'], subfolder_path, mime_filter, name_filter))
+            subfolder_path = (
+                f'{base_path}/{folder["name"]}' if base_path else folder['name']
+            )
+            files.extend(
+                self._list_files_recursive(
+                    folder['id'], subfolder_path, mime_filter, name_filter
+                )
+            )
 
         return files
 
@@ -705,7 +773,7 @@ class GDriveClient:
         """
         parts = [p for p in path.split('/') if p]
         if not parts:
-            raise ValueError("Path must not be empty")
+            raise ValueError('Path must not be empty')
 
         file_name = parts[-1]
         # Start from the data folder
@@ -720,14 +788,14 @@ class GDriveClient:
 
 def _format_date(date_: date) -> str:
     """Format date as YYYYMMDD string"""
-    return "%04d%02d%02d" % (date_.year, date_.month, date_.day)
+    return '%04d%02d%02d' % (date_.year, date_.month, date_.day)
 
 
 def _build_query_string(
-        file_name: str | None,
-        mime_type: str | None,
-        parent_id: str | None,
-        include_trashed: bool = False
+    file_name: str | None,
+    mime_type: str | None,
+    parent_id: str | None,
+    include_trashed: bool = False,
 ) -> str:
     query_conditions = []
     if file_name:
@@ -737,6 +805,6 @@ def _build_query_string(
     if parent_id:
         query_conditions.append(f"'{parent_id}' in parents")
     if not include_trashed:
-        query_conditions.append("trashed = false")
-    query_str = " and ".join(query_conditions)
+        query_conditions.append('trashed = false')
+    query_str = ' and '.join(query_conditions)
     return query_str

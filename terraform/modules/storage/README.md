@@ -46,4 +46,3 @@ output "dvc_sa" {
   value = module.storage.service_account_email
 }
 ```
-

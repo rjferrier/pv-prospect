@@ -1,6 +1,7 @@
-import pandas as pd
-from pytz import timezone
+from typing import Any
 
+import pandas as pd
+from pytz import timezone  # type: ignore[import-untyped]
 
 UKTZ = timezone('Europe/London')
 UTC = timezone('UTC')
@@ -23,10 +24,9 @@ def clean_pvoutput(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
 
     # Synthesise UTC time from date + time columns
-    result['time'] = (
-        pd.to_datetime(result['date'].astype(str) + 'T' + result['time'])
-        .apply(_undo_uk_daylight_savings)
-    )
+    result['time'] = pd.to_datetime(
+        result['date'].astype(str) + 'T' + result['time']
+    ).apply(_undo_uk_daylight_savings)
     result.drop('date', axis=1, inplace=True)
 
     # Keep only time and power
@@ -38,6 +38,6 @@ def clean_pvoutput(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _undo_uk_daylight_savings(dt_local):
+def _undo_uk_daylight_savings(dt_local: Any) -> Any:
     """Convert UK local time to UTC, accounting for daylight savings."""
     return UKTZ.localize(dt_local).astimezone(UTC).replace(tzinfo=None)

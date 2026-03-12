@@ -1,11 +1,9 @@
-from typing import Protocol
 from dataclasses import dataclass
+from typing import Protocol
 
 
-@dataclass(frozen=True)
 class TimeSeriesDescriptor(Protocol):
-    def __str__(self) -> str:
-        ...
+    def __str__(self) -> str: ...
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Mapping, TypeVar, Generic
+from typing import Any, Generic, Mapping, TypeVar
 
 T = TypeVar('T')
 
@@ -30,7 +30,9 @@ class ExtractedValue[T]:
         return self.value is None
 
 
-def map_from_env(cls: type[T], env_mappings: dict[str, VarMapping[T]], **kwargs) -> T:
+def map_from_env(
+    cls: type[T], env_mappings: dict[str, VarMapping[Any]], **kwargs: Any
+) -> T:
     env_values = {
         attr_name: _extract_value(os.environ, mapping)
         for attr_name, mapping in env_mappings.items()
@@ -38,15 +40,17 @@ def map_from_env(cls: type[T], env_mappings: dict[str, VarMapping[T]], **kwargs)
 
     env_var_names = _get_names_of_env_vars_with_missing_values(env_mappings, env_values)
     if env_var_names:
-        raise ValueError(f"Missing environment variables: {', '.join(env_var_names)}")
+        raise ValueError(f'Missing environment variables: {", ".join(env_var_names)}')
 
     return cls(**env_values, **kwargs)
 
 
-def _extract_value(env: Mapping[str, str], mapping: VarMapping[T]) -> T:
+def _extract_value(env: Mapping[str, str], mapping: VarMapping[Any]) -> Any | None:
     raw_value = env.get(mapping.env_var_name)
     return mapping.target_type(raw_value) if raw_value is not None else None
 
 
-def _get_names_of_env_vars_with_missing_values(mappings: dict[str, VarMapping[T]], values: dict[str, T]) -> list[str]:
+def _get_names_of_env_vars_with_missing_values(
+    mappings: dict[str, VarMapping[Any]], values: dict[str, Any]
+) -> list[str]:
     return [mappings[k].env_var_name for k, v in values.items() if v is None]

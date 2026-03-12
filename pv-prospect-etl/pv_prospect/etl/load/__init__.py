@@ -1,9 +1,5 @@
-from .protocol import Loader
-from .local import LocalLoader
 from .gcs import GcsLoader
+from .local import LocalLoader
+from .protocol import Loader
 
-__all__ = [
-    'Loader',
-    'LocalLoader',
-    'GcsLoader'
-]
+__all__ = ['Loader', 'LocalLoader', 'GcsLoader']

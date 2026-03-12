@@ -2,11 +2,12 @@ from pathlib import Path
 
 import pandas as pd
 
-
 CSV_LOAD_BATCH_SIZE = 5
 
 
-def read_and_combine_csv_rows(directory: Path, filename_or_filenames: str | list[str]) -> pd.DataFrame | None:
+def read_and_combine_csv_rows(
+    directory: Path, filename_or_filenames: str | list[str]
+) -> pd.DataFrame | None:
     """
     Read and combine multiple CSV files efficiently using pandas.
 
@@ -36,14 +37,14 @@ def read_and_combine_csv_rows(directory: Path, filename_or_filenames: str | list
         df = _read_and_concat_csv(file_paths)
 
     except Exception as e:
-        print(f"  Error reading CSV files: {e}")
+        print(f'  Error reading CSV files: {e}')
         if len(file_paths) == 1:
             raise
 
-        print(f"  Falling back to individual file reading...")
+        print('  Falling back to individual file reading...')
         df = _combine_in_batches(file_paths)
         if df is not None:
-            print(f"  Successfully loaded files using fallback method")
+            print('  Successfully loaded files using fallback method')
 
     return df
 
@@ -66,7 +67,7 @@ def _combine_in_batches(file_paths: list[str]) -> pd.DataFrame | None:
     batch_df = None
 
     for i in range(0, len(file_paths), CSV_LOAD_BATCH_SIZE):
-        paths = file_paths[i:i + CSV_LOAD_BATCH_SIZE]
+        paths = file_paths[i : i + CSV_LOAD_BATCH_SIZE]
         try:
             df = _read_and_concat_csv(paths)
 
@@ -76,11 +77,13 @@ def _combine_in_batches(file_paths: list[str]) -> pd.DataFrame | None:
                 batch_df = pd.concat([batch_df, df], ignore_index=True)
 
         except Exception as batch_error:
-            print(f"  Error reading batch {i // CSV_LOAD_BATCH_SIZE + 1}: {batch_error}")
+            print(
+                f'  Error reading batch {i // CSV_LOAD_BATCH_SIZE + 1}: {batch_error}'
+            )
             continue
 
     if batch_df is not None:
-        print(f"  Successfully loaded files using fallback method")
+        print('  Successfully loaded files using fallback method')
 
     return batch_df
 

@@ -11,11 +11,12 @@ class Period(Enum):
 @dataclass(frozen=True)
 class DateRange:
     """Represents a date range with start and end (exclusive)."""
+
     start: date
     end: date
 
     def __str__(self) -> str:
-        return self.start.strftime('%Y-%m-%d') + " to " + self.end.strftime('%Y-%m-%d')
+        return self.start.strftime('%Y-%m-%d') + ' to ' + self.end.strftime('%Y-%m-%d')
 
     @classmethod
     def of_single_day(cls, date_: date) -> 'DateRange':
@@ -82,10 +83,11 @@ class DateRange:
 
             # Only include if the full week (ending on Sunday) fits within range
             if week_end_date <= last_sunday:
-                week_ranges.append(DateRange(current, week_end_date + timedelta(days=1)))  # +1 to make end exclusive
+                week_ranges.append(
+                    DateRange(current, week_end_date + timedelta(days=1))
+                )  # +1 to make end exclusive
 
             # Move to next Monday
             current = current + timedelta(days=7)
 
         return week_ranges
-

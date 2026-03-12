@@ -1,5 +1,6 @@
-from celery import Celery
 import os
+
+from celery import Celery
 
 # Import and register custom JSON serialization types
 from pv_prospect.data_extraction.processing.serialization import register_custom_types
@@ -16,7 +17,7 @@ app = Celery(
     'processor',
     broker=broker_url,
     backend=result_backend,
-    include=['pv_prospect.data_extraction.processing.tasks']
+    include=['pv_prospect.data_extraction.processing.tasks'],
 )
 
 # Optional configuration, see the application user guide.

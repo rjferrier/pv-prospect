@@ -2,7 +2,6 @@ import pandas as pd
 
 from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
 
-
 # Default columns to exclude from output
 DEFAULT_EXCLUDED_COLUMNS = {
     'pressure_msl',
@@ -48,7 +47,7 @@ def clean_weather(
     suffix = f'_{weather_model}'
     for col in df.columns:
         if col.endswith(suffix):
-            clean_name = col[:-len(suffix)]
+            clean_name = col[: -len(suffix)]
             if clean_name not in excluded_columns:
                 result[clean_name] = df[col]
 
