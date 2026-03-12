@@ -16,9 +16,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import Any
 
-from pv_prospect.common import DateRange, Period
+from pv_prospect.common import (
+    DateRange,
+    Period,
+    build_location_mapping_repo,
+    build_pv_site_repo,
+)
 from pv_prospect.common.config_parser import get_config
-from pv_prospect.common.pv_site_repo import build_pv_site_repo, get_all_pv_system_ids
+from pv_prospect.common.pv_site_repo import get_all_pv_system_ids
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.processing import core
@@ -26,6 +31,7 @@ from pv_prospect.data_extraction.processing.processing_stats import ProcessingSt
 from pv_prospect.data_extraction.processing.value_objects import Result
 from pv_prospect.etl.extract import Extractor
 from pv_prospect.etl.factory import get_extractor as get_storage_extractor
+from pv_prospect.etl.factory import get_loader as get_storage_loader
 from pv_prospect.etl.storage_config import LocalStorageConfig
 
 SOURCE_DESCRIPTORS = {
@@ -163,9 +169,11 @@ def _parse_pv_system_ids(s: str) -> list[int]:
     return [int(x.strip()) for x in s.split(',') if x.strip()]
 
 
-def _get_all_pv_system_ids(storage_extractor: Extractor) -> list[int]:
+def _init_repos(storage_extractor: Extractor) -> None:
     build_pv_site_repo(storage_extractor.read_file(core.PV_SITES_CSV_FILE))
-    return get_all_pv_system_ids()
+    build_location_mapping_repo(
+        storage_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -187,21 +195,34 @@ def _main() -> None:
         )
     source_descriptors = [SOURCE_DESCRIPTORS[s] for s in sources]
 
-    # --- preprocess (sequential, one per source) ----------------------------
-    for sd in source_descriptors:
-        core.preprocess(sd, args.local_dir)
-
-    # --- resolve PV system IDs ----------------------------------------------
+    # --- resolve storage backends -------------------------------------------
     staging_location_config = (
-        LocalStorageConfig(prefix=args.local_dir, tracking=None)
+        LocalStorageConfig(prefix=args.local_dir)
         if args.local_dir
         else config.staged_raw_data_storage
     )
+    staging_extractor = get_storage_extractor(staging_location_config)
+    staging_loader = get_storage_loader(staging_location_config)
 
+    versioned_extractor = get_storage_extractor(config.versioned_resources_storage)
+    dvc_prefix = (
+        config.versioned_resources_storage.tracking.prefix
+        if config.versioned_resources_storage.tracking
+        else ''
+    )
+
+    # --- preprocess (sequential, one per source) ----------------------------
+    for sd in source_descriptors:
+        core.preprocess(sd, versioned_extractor, staging_loader, dvc_prefix)
+
+    # --- initialise in-memory repos ----------------------------------------
+    _init_repos(staging_extractor)
+
+    # --- resolve PV system IDs ----------------------------------------------
     pv_system_ids = (
         _parse_pv_system_ids(args.system_ids)
         if args.system_ids
-        else _get_all_pv_system_ids(get_storage_extractor(staging_location_config))
+        else get_all_pv_system_ids()
     )
     print(f'Processing {len(pv_system_ids)} PV site(s).\n')
 
@@ -241,7 +262,8 @@ def _main() -> None:
                 sd,
                 pv_id,
                 dr,
-                args.local_dir,
+                staging_extractor,
+                staging_loader,
                 args.overwrite,
                 args.dry_run,
             ): (sd, pv_id, dr)
