@@ -25,9 +25,18 @@ import os
 import sys
 from datetime import date
 
-from pv_prospect.common import DateRange, Period
+from pv_prospect.common import (
+    DateRange,
+    Period,
+    build_location_mapping_repo,
+    build_pv_site_repo,
+)
+from pv_prospect.common.config_parser import get_config
+from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.processing import core
+from pv_prospect.etl.factory import get_extractor as get_storage_extractor
+from pv_prospect.etl.factory import get_loader as get_storage_loader
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -36,6 +45,13 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
+    config = get_config(DataExtractionConfig)
+
+    # Cloud Run always uses GCS — resolve storage backends once.
+    staging_extractor = get_storage_extractor(config.staged_raw_data_storage)
+    staging_loader = get_storage_loader(config.staged_raw_data_storage)
+    versioned_extractor = get_storage_extractor(config.versioned_resources_storage)
+    dvc_prefix = config.versioned_resources_storage.tracking.prefix
 
     if job_type == 'preprocess':
         source_descriptor = SourceDescriptor(os.environ['SOURCE_DESCRIPTOR'])
@@ -43,7 +59,9 @@ def main() -> None:
         print(f'[entrypoint] preprocess: {source_descriptor}')
         core.preprocess(
             source_descriptor=source_descriptor,
-            local_dir=None,  # Cloud Run always writes to GCS
+            versioned_resources_extractor=versioned_extractor,
+            staged_resources_loader=staging_loader,
+            dvc_prefix=dvc_prefix,
         )
 
     elif job_type == 'extract_and_load':
@@ -59,6 +77,12 @@ def main() -> None:
         print(
             f'[entrypoint] extract_and_load: {source_descriptor}, '
             f'site={pv_system_id}, {complete_date_range}, by_week={by_week}'
+        )
+
+        # Initialise in-memory repos once
+        build_pv_site_repo(staging_extractor.read_file(core.PV_SITES_CSV_FILE))
+        build_location_mapping_repo(
+            staging_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
         )
 
         split_period = Period.WEEK if by_week else Period.DAY
@@ -77,7 +101,8 @@ def main() -> None:
                 source_descriptor=source_descriptor,
                 pv_system_id=pv_system_id,
                 date_range=dr,
-                local_dir=None,
+                resources_extractor=staging_extractor,
+                time_series_loader=staging_loader,
                 overwrite=overwrite,
                 dry_run=dry_run,
             )
