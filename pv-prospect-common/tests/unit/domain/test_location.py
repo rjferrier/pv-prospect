@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from pv_prospect.common.domain.location import Location
+from pv_prospect.common.domain import Location
 
 
 class TestLocationGetCoordinates:

@@ -11,14 +11,14 @@ from datetime import date
 from typing import Any, Callable
 
 from pv_prospect.common import DateRange
-from pv_prospect.data_extraction.extractors import SourceDescriptor
-from pv_prospect.data_extraction.extractors.base import (
+from pv_prospect.data_extraction import (
+    SourceDescriptor,
     TimeSeriesDataExtractor,
     TimeSeriesDescriptor,
 )
 from pv_prospect.data_extraction.processing.value_objects import Result, Task
 from pv_prospect.etl import Extractor, Loader
-from pv_prospect.etl.storage.base import FileSystem
+from pv_prospect.etl.storage import FileSystem
 
 TIMESERIES_FOLDER = 'timeseries'
 PV_SITES_CSV_FILE = 'pv_sites.csv'
@@ -29,7 +29,7 @@ SUPPORTING_RESOURCES = [PV_SITES_CSV_FILE, LOCATION_MAPPING_CSV_FILE]
 
 
 def preprocess(
-    resolve_path: Callable[[str], str],
+    resolve_dvc_path: Callable[[str], str],
     versioned_resources_fs: FileSystem,
     staged_resources_fs: FileSystem,
     dvc_prefix: str,
@@ -40,7 +40,7 @@ def preprocess(
     supporting resources (pv_sites.csv, location_mapping.csv).
 
     Args:
-        resolve_path: Resolves a .dvc tracking file path to its storage location.
+        resolve_dvc_path: Resolves a .dvc tracking file path to its storage location.
         versioned_resources_fs: FileSystem for reading versioned resources.
         staged_resources_fs: FileSystem for writing to the staging location.
         dvc_prefix: Prefix path for resolving .dvc tracking files.
@@ -56,7 +56,7 @@ def preprocess(
     ]
 
     resources = [
-        (filename, resolve_path(f'{dvc_prefix}/{filename}.dvc'))
+        (filename, resolve_dvc_path(f'{dvc_prefix}/{filename}.dvc'))
         for filename in SUPPORTING_RESOURCES
     ]
 

@@ -5,7 +5,7 @@ from datetime import date
 from kombu.utils.json import register_type
 
 from pv_prospect.common import DateRange
-from pv_prospect.data_extraction.extractors import SourceDescriptor
+from pv_prospect.data_extraction import SourceDescriptor
 from pv_prospect.data_extraction.processing.value_objects import (
     FailureDetails,
     Result,

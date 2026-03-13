@@ -8,8 +8,8 @@ import requests  # type: ignore[import-untyped]
 from typing_extensions import deprecated
 
 from pv_prospect.common import Location, PVSite
-from pv_prospect.data_extraction.extractors import TimeSeries, TimeSeriesDescriptor
-from pv_prospect.data_extraction.util.retry import retry_on_429
+from pv_prospect.data_extraction import TimeSeries, TimeSeriesDescriptor
+from pv_prospect.data_extraction.util import retry_on_429
 
 MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)

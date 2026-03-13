@@ -5,8 +5,8 @@ from typing import Callable
 from celery.result import AsyncResult, ResultSet
 
 from pv_prospect.common import DateRange
+from pv_prospect.data_extraction import SourceDescriptor
 from pv_prospect.data_extraction.config import DataExtractionConfig
-from pv_prospect.data_extraction.extractors import SourceDescriptor
 from pv_prospect.data_extraction.processing.tasks import extract_and_load, preprocess
 
 

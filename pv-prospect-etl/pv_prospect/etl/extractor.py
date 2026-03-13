@@ -1,7 +1,7 @@
 import io
 from typing import TextIO
 
-from pv_prospect.etl.storage.base import FileEntry, FileSystem
+from pv_prospect.etl.storage import FileEntry, FileSystem
 
 
 class Extractor:

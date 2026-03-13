@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from pv_prospect.etl.storage.base import FileEntry, StorageConfig
+from pv_prospect.etl.storage import FileEntry, StorageConfig
 
 
 @dataclass

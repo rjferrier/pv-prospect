@@ -3,13 +3,13 @@
 import io
 from decimal import Decimal
 
-from pv_prospect.common.domain.location import Location
+from pv_prospect.common import build_location_mapping_repo
+from pv_prospect.common.domain import Location
 from pv_prospect.common.location_mapping import (
     _location_by_pv_system_id,
     _parse_coordinate,
     _parse_row,
     _str_to_coordinate,
-    build_location_mapping_repo,
 )
 
 

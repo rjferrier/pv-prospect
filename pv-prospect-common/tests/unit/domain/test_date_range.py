@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from pv_prospect.common.domain.date_range import DateRange, Period
+from pv_prospect.common.domain import DateRange, Period
 
 
 def test_str_formats_as_date_range():

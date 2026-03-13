@@ -2,7 +2,7 @@ import csv
 from decimal import Decimal
 from typing import TextIO
 
-from .domain.location import Location
+from .domain import Location
 
 _location_by_pv_system_id: dict[int, Location] = {}
 
