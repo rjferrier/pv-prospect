@@ -64,18 +64,22 @@ def map_from_yaml(cls: Type[T], runtime_env: str, config_dir: str) -> T:
         raise ValueError(f'Missing required configuration value: {e}') from e
 
 
-def get_config(cls: Type[T]) -> T:
+def resolve_env_config(
+    runtime_env: str | None,
+    config_dir: str | None,
+    container_path_exists: bool,
+) -> tuple[str, str]:
     """
-    Load configuration from YAML files using the provided factory.
-    Reads 'RUNTIME_ENV' and 'CONFIG_DIR' from the environment.
-    If not explicitly provided, defaults to Production ('default', '/app/resources')
-    if running in a container, or Local ('local', 'resources') if running natively.
-    """
-    runtime_env = os.getenv('RUNTIME_ENV')
-    config_dir = os.getenv('CONFIG_DIR')
+    Resolve the runtime environment and config directory from the given inputs.
 
+    If neither is provided, falls back to container defaults when
+    container_path_exists is True, or local defaults otherwise.
+
+    Returns:
+        Tuple of (runtime_env, config_dir).
+    """
     if not runtime_env and not config_dir:
-        if os.path.exists('/app/resources'):
+        if container_path_exists:
             runtime_env = 'default'
             config_dir = '/app/resources'
         else:
@@ -84,5 +88,21 @@ def get_config(cls: Type[T]) -> T:
 
     runtime_env = runtime_env or 'default'
     config_dir = config_dir or '/app/resources'
+
+    return runtime_env, config_dir
+
+
+def get_config(cls: Type[T]) -> T:
+    """
+    Load configuration from YAML files using the provided factory.
+    Reads 'RUNTIME_ENV' and 'CONFIG_DIR' from the environment.
+    If not explicitly provided, defaults to Production ('default', '/app/resources')
+    if running in a container, or Local ('local', 'resources') if running natively.
+    """
+    runtime_env, config_dir = resolve_env_config(
+        os.getenv('RUNTIME_ENV'),
+        os.getenv('CONFIG_DIR'),
+        os.path.exists('/app/resources'),
+    )
 
     return map_from_yaml(cls, runtime_env, config_dir)

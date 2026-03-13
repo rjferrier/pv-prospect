@@ -30,7 +30,7 @@ def build_pv_site_repo(csv_stream: TextIO) -> None:
 
     reader = csv.DictReader(csv_stream)
     for row in reader:
-        pv_site = _create_pv_site_from_csv_row(row)
+        pv_site = create_pv_site_from_csv_row(row)
         pv_sites_by_system_id[pv_site.pvo_sys_id] = pv_site
 
 
@@ -66,11 +66,11 @@ def create_pv_sites_by_system_id(
     pv_site_csv_stream.seek(0)
 
     reader = csv.DictReader(pv_site_csv_stream)
-    pv_sites = (_create_pv_site_from_csv_row(row) for row in reader)
+    pv_sites = (create_pv_site_from_csv_row(row) for row in reader)
     return {pv_site.pvo_sys_id: pv_site for pv_site in pv_sites}
 
 
-def _create_pv_site_from_csv_row(row: dict) -> PVSite:
+def create_pv_site_from_csv_row(row: dict) -> PVSite:
     """
     Create a PVSite object from a CSV row dictionary.
 
@@ -99,7 +99,7 @@ def _create_pv_site_from_csv_row(row: dict) -> PVSite:
     panel_geometries = [
         geometry
         for i in (1, 2)
-        if (geometry := _create_panel_geometry_from_row(row, i)) is not None
+        if (geometry := create_panel_geometry_from_row(row, i)) is not None
     ]
 
     if not panel_geometries:
@@ -122,7 +122,7 @@ def _create_pv_site_from_csv_row(row: dict) -> PVSite:
     )
 
 
-def _create_panel_geometry_from_row(row: dict, index: int) -> Optional[PanelGeometry]:
+def create_panel_geometry_from_row(row: dict, index: int) -> Optional[PanelGeometry]:
     """
     Create a PanelGeometry from CSV row data for a given index (1 or 2).
 
