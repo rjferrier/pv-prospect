@@ -21,15 +21,21 @@ from pv_prospect.common import (
     Period,
     build_location_mapping_repo,
     build_pv_site_repo,
+    get_pv_site_by_system_id,
 )
 from pv_prospect.common.config_parser import get_config
 from pv_prospect.common.pv_site_repo import get_all_pv_system_ids
 from pv_prospect.data_extraction.config import DataExtractionConfig
-from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
+from pv_prospect.data_extraction.extractors import (
+    SourceDescriptor,
+    get_extractor,
+    supports_multi_date,
+)
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.processing_stats import ProcessingStats
 from pv_prospect.data_extraction.processing.value_objects import Result
 from pv_prospect.etl.extract import Extractor
+from pv_prospect.etl.extract.resolve import dvc
 from pv_prospect.etl.factory import get_extractor as get_storage_extractor
 from pv_prospect.etl.factory import get_loader as get_storage_loader
 from pv_prospect.etl.storage_config import LocalStorageConfig
@@ -205,15 +211,13 @@ def _main() -> None:
     staging_loader = get_storage_loader(staging_location_config)
 
     versioned_extractor = get_storage_extractor(config.versioned_resources_storage)
-    dvc_prefix = (
-        config.versioned_resources_storage.tracking.prefix
-        if config.versioned_resources_storage.tracking
-        else ''
-    )
+    dvc_prefix = config.versioned_resources_storage.tracking.prefix
 
     # --- preprocess (sequential, one per source) ----------------------------
     for sd in source_descriptors:
-        core.preprocess(sd, versioned_extractor, staging_loader, dvc_prefix)
+        core.preprocess(
+            dvc.resolve_path, versioned_extractor, staging_loader, dvc_prefix, sd
+        )
 
     # --- initialise in-memory repos ----------------------------------------
     _init_repos(staging_extractor)
@@ -259,11 +263,13 @@ def _main() -> None:
         futures = {
             pool.submit(
                 core.extract_and_load,
+                get_pv_site_by_system_id,
+                get_extractor,
                 sd,
-                pv_id,
-                dr,
                 staging_extractor,
                 staging_loader,
+                pv_id,
+                dr,
                 args.overwrite,
                 args.dry_run,
             ): (sd, pv_id, dr)

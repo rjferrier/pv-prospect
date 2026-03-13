@@ -1,8 +1,9 @@
 from enum import Enum
 from functools import lru_cache
-from typing import Any
+from typing import Callable
 
 from pv_prospect.common import Location, PVSite, get_location_by_pv_system_id
+from pv_prospect.data_extraction.extractors.base import TimeSeriesDataExtractor
 from pv_prospect.data_extraction.extractors.openmeteo import (
     APISelector,
     Fields,
@@ -32,7 +33,7 @@ class SourceDescriptor(str, Enum):
 
 
 @lru_cache(maxsize=None)
-def get_extractor(source_descriptor: SourceDescriptor) -> 'Any':
+def get_extractor(source_descriptor: SourceDescriptor) -> TimeSeriesDataExtractor:
     """Get an extractor instance for the given source descriptor.
 
     Results are cached to avoid recreating extractors for the same source.
@@ -57,7 +58,7 @@ def supports_multi_date(source_descriptor: SourceDescriptor) -> bool:
     return source_descriptor in _MULTI_DATE_EXTRACTORS
 
 
-_EXTRACTOR_FACTORIES = {
+_EXTRACTOR_FACTORIES: dict[SourceDescriptor, Callable[[], TimeSeriesDataExtractor]] = {
     SourceDescriptor.PVOUTPUT: lambda: PVOutputExtractor.from_env(),
     SourceDescriptor.OPENMETEO_QUARTERHOURLY: lambda: (
         OpenMeteoWeatherDataExtractor.from_components(

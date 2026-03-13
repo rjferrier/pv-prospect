@@ -293,7 +293,6 @@ class OpenMeteoWeatherDataExtractor:
         date_: date,
         end_date: Optional[date] = None,
     ) -> list[TimeSeries]:
-
         ts_descriptors = list(time_series_descriptors)
 
         start_datetime = datetime.combine(date_, MIN_TIME)

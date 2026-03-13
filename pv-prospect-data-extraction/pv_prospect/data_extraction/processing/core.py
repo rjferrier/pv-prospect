@@ -8,13 +8,16 @@ These are called by:
 
 import os
 from datetime import date
+from typing import Any, Callable
 
-from pv_prospect.common import DateRange, get_pv_site_by_system_id
-from pv_prospect.data_extraction.extractors import SourceDescriptor, get_extractor
-from pv_prospect.data_extraction.extractors.base import TimeSeriesDescriptor
+from pv_prospect.common import DateRange
+from pv_prospect.data_extraction.extractors import SourceDescriptor
+from pv_prospect.data_extraction.extractors.base import (
+    TimeSeriesDataExtractor,
+    TimeSeriesDescriptor,
+)
 from pv_prospect.data_extraction.processing.value_objects import Result, Task
 from pv_prospect.etl.extract import Extractor
-from pv_prospect.etl.extract.resolve.dvc import resolve_path
 from pv_prospect.etl.load import Loader
 
 TIMESERIES_FOLDER = 'timeseries'
@@ -26,20 +29,22 @@ SUPPORTING_RESOURCES = [PV_SITES_CSV_FILE, LOCATION_MAPPING_CSV_FILE]
 
 
 def preprocess(
-    source_descriptor: SourceDescriptor,
+    resolve_path: Callable[[str], str],
     versioned_resources_extractor: Extractor,
     staged_resources_loader: Loader,
     dvc_prefix: str,
+    source_descriptor: SourceDescriptor,
 ) -> list[str | None]:
     """
     Preprocess before extraction: create folder structure and provision
     supporting resources (pv_sites.csv, location_mapping.csv).
 
     Args:
-        source_descriptor: The source descriptor identifying the data source folder.
+        resolve_path: Resolves a .dvc tracking file path to its storage location.
         versioned_resources_extractor: Extractor for reading versioned resources.
         staged_resources_loader: Loader for writing to the staging location.
         dvc_prefix: Prefix path for resolving .dvc tracking files.
+        source_descriptor: The source descriptor identifying the data source folder.
     """
     parent_folders = [TIMESERIES_FOLDER]
     folder_ids = [
@@ -64,11 +69,13 @@ def preprocess(
 
 
 def extract_and_load(
+    get_pv_site: Callable[[int], Any],
+    get_ts_data_extractor: Callable[[SourceDescriptor], TimeSeriesDataExtractor],
     source_descriptor: SourceDescriptor,
-    pv_system_id: int,
-    date_range: DateRange,
     resources_extractor: Extractor,
     time_series_loader: Loader,
+    pv_system_id: int,
+    date_range: DateRange,
     overwrite: bool,
     dry_run: bool,
 ) -> Result:
@@ -76,13 +83,15 @@ def extract_and_load(
     Extract data for a single PV system/date-range and load to storage.
 
     Args:
-        source_descriptor: The source descriptor identifying the extractor.
-        pv_system_id: PV system identifier.
-        date_range: DateRange containing start date and optional end date.
+        get_pv_site: Retrieves a PVSite by integer system ID, or None if not found.
+        get_ts_data_extractor: Returns a data extractor for the given source descriptor.
+        source_descriptor: Identifies the data source and its extractor.
         resources_extractor: Extractor for reading staged resources.
         time_series_loader: Loader for writing time series CSVs.
+        pv_system_id: PV system identifier.
+        date_range: DateRange containing start date and optional end date.
         overwrite: If True, overwrite existing files.
-        dry_run: If True, perform a dry run (do not write files).
+        dry_run: If True, preview without writing files.
 
     Returns:
         Result of the extraction and load operation.
@@ -94,7 +103,7 @@ def extract_and_load(
         return Result.skipped_dry_run(task)
 
     def get_csv_path(ts_descriptor: TimeSeriesDescriptor) -> str:
-        return _build_csv_file_path(
+        return build_csv_file_path(
             TIMESERIES_FOLDER,
             source_descriptor,
             ts_descriptor,
@@ -106,8 +115,8 @@ def extract_and_load(
         return overwrite or not resources_extractor.file_exists(file_path)
 
     try:
-        extractor = get_extractor(source_descriptor)
-        pv_site = get_pv_site_by_system_id(pv_system_id)
+        extractor = get_ts_data_extractor(source_descriptor)
+        pv_site = get_pv_site(pv_system_id)
         if not pv_site or not pv_site.pvo_sys_id:
             raise ValueError('Unable to retrieve PVSite object')
 
@@ -138,7 +147,7 @@ def extract_and_load(
         return Result.failure(task, e)
 
 
-def _build_csv_file_path(
+def build_csv_file_path(
     time_series_folder: str,
     source_descriptor: 'SourceDescriptor',
     time_series_descriptor: 'TimeSeriesDescriptor',

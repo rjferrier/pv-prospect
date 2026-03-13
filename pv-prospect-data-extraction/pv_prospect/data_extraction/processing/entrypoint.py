@@ -30,11 +30,17 @@ from pv_prospect.common import (
     Period,
     build_location_mapping_repo,
     build_pv_site_repo,
+    get_pv_site_by_system_id,
 )
 from pv_prospect.common.config_parser import get_config
 from pv_prospect.data_extraction.config import DataExtractionConfig
-from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
+from pv_prospect.data_extraction.extractors import (
+    SourceDescriptor,
+    get_extractor,
+    supports_multi_date,
+)
 from pv_prospect.data_extraction.processing import core
+from pv_prospect.etl.extract.resolve import dvc
 from pv_prospect.etl.factory import get_extractor as get_storage_extractor
 from pv_prospect.etl.factory import get_loader as get_storage_loader
 
@@ -58,10 +64,11 @@ def main() -> None:
 
         print(f'[entrypoint] preprocess: {source_descriptor}')
         core.preprocess(
-            source_descriptor=source_descriptor,
-            versioned_resources_extractor=versioned_extractor,
-            staged_resources_loader=staging_loader,
-            dvc_prefix=dvc_prefix,
+            dvc.resolve_path,
+            versioned_extractor,
+            staging_loader,
+            dvc_prefix,
+            source_descriptor,
         )
 
     elif job_type == 'extract_and_load':
@@ -98,13 +105,15 @@ def main() -> None:
 
         for dr in final_ranges:
             result = core.extract_and_load(
-                source_descriptor=source_descriptor,
-                pv_system_id=pv_system_id,
-                date_range=dr,
-                resources_extractor=staging_extractor,
-                time_series_loader=staging_loader,
-                overwrite=overwrite,
-                dry_run=dry_run,
+                get_pv_site_by_system_id,
+                get_extractor,
+                source_descriptor,
+                staging_extractor,
+                staging_loader,
+                pv_system_id,
+                dr,
+                overwrite,
+                dry_run,
             )
             print(f'[entrypoint] {dr}: {result.type.value}')
 
