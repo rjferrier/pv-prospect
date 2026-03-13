@@ -34,8 +34,9 @@ from pv_prospect.data_extraction.extractors import (
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.processing_stats import ProcessingStats
 from pv_prospect.data_extraction.processing.value_objects import Result
-from pv_prospect.etl import Extractor, Loader
+from pv_prospect.etl import Extractor
 from pv_prospect.etl.storage.backends.local import LocalStorageConfig
+from pv_prospect.etl.storage.base import FileSystem
 from pv_prospect.etl.storage.factory import get_filesystem
 from pv_prospect.etl.storage.resolve import dvc
 
@@ -174,11 +175,10 @@ def _parse_pv_system_ids(s: str) -> list[int]:
     return [int(x.strip()) for x in s.split(',') if x.strip()]
 
 
-def _init_repos(storage_extractor: Extractor) -> None:
-    build_pv_site_repo(storage_extractor.read_file(core.PV_SITES_CSV_FILE))
-    build_location_mapping_repo(
-        storage_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
-    )
+def _init_repos(staging_fs: FileSystem) -> None:
+    extractor = Extractor(staging_fs)
+    build_pv_site_repo(extractor.read_file(core.PV_SITES_CSV_FILE))
+    build_location_mapping_repo(extractor.read_file(core.LOCATION_MAPPING_CSV_FILE))
 
 
 # ---------------------------------------------------------------------------
@@ -207,20 +207,18 @@ def _main() -> None:
         else config.staged_raw_data_storage
     )
     staging_fs = get_filesystem(staging_location_config)
-    staging_extractor = Extractor(staging_fs)
-    staging_loader = Loader(staging_fs)
-
-    versioned_extractor = Extractor(get_filesystem(config.versioned_resources_storage))
-    dvc_prefix = config.versioned_resources_storage.tracking.prefix
+    versioned_resources_fs = get_filesystem(config.versioned_resources_storage)
+    tracking = config.versioned_resources_storage.tracking
+    dvc_prefix = tracking.prefix if tracking else ''
 
     # --- preprocess (sequential, one per source) ----------------------------
     for sd in source_descriptors:
         core.preprocess(
-            dvc.resolve_path, versioned_extractor, staging_loader, dvc_prefix, sd
+            dvc.resolve_path, versioned_resources_fs, staging_fs, dvc_prefix, sd
         )
 
     # --- initialise in-memory repos ----------------------------------------
-    _init_repos(staging_extractor)
+    _init_repos(staging_fs)
 
     # --- resolve PV system IDs ----------------------------------------------
     pv_system_ids = (
@@ -266,8 +264,7 @@ def _main() -> None:
                 get_pv_site_by_system_id,
                 get_extractor,
                 sd,
-                staging_extractor,
-                staging_loader,
+                staging_fs,
                 pv_id,
                 dr,
                 args.overwrite,

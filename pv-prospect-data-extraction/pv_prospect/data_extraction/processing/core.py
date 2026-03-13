@@ -18,6 +18,7 @@ from pv_prospect.data_extraction.extractors.base import (
 )
 from pv_prospect.data_extraction.processing.value_objects import Result, Task
 from pv_prospect.etl import Extractor, Loader
+from pv_prospect.etl.storage.base import FileSystem
 
 TIMESERIES_FOLDER = 'timeseries'
 PV_SITES_CSV_FILE = 'pv_sites.csv'
@@ -29,8 +30,8 @@ SUPPORTING_RESOURCES = [PV_SITES_CSV_FILE, LOCATION_MAPPING_CSV_FILE]
 
 def preprocess(
     resolve_path: Callable[[str], str],
-    versioned_resources_extractor: Extractor,
-    staged_resources_loader: Loader,
+    versioned_resources_fs: FileSystem,
+    staged_resources_fs: FileSystem,
     dvc_prefix: str,
     source_descriptor: SourceDescriptor,
 ) -> list[str | None]:
@@ -40,14 +41,17 @@ def preprocess(
 
     Args:
         resolve_path: Resolves a .dvc tracking file path to its storage location.
-        versioned_resources_extractor: Extractor for reading versioned resources.
-        staged_resources_loader: Loader for writing to the staging location.
+        versioned_resources_fs: FileSystem for reading versioned resources.
+        staged_resources_fs: FileSystem for writing to the staging location.
         dvc_prefix: Prefix path for resolving .dvc tracking files.
         source_descriptor: The source descriptor identifying the data source folder.
     """
+    extractor = Extractor(versioned_resources_fs)
+    loader = Loader(staged_resources_fs)
+
     parent_folders = [TIMESERIES_FOLDER]
     folder_ids: list[str | None] = [
-        staged_resources_loader.create_folder(f'{parent}/{source_descriptor}')
+        loader.create_folder(f'{parent}/{source_descriptor}')
         for parent in parent_folders
     ]
 
@@ -57,12 +61,12 @@ def preprocess(
     ]
 
     for filename, blob_path in resources:
-        if staged_resources_loader.file_exists(filename):
+        if loader.file_exists(filename):
             print(f'    {filename} already exists, skipping provisioning')
             continue
 
-        with versioned_resources_extractor.read_file(blob_path) as f:
-            staged_resources_loader.write_text(filename, f.read(), overwrite=False)
+        with extractor.read_file(blob_path) as f:
+            loader.write_text(filename, f.read(), overwrite=False)
 
     return folder_ids
 
@@ -71,8 +75,7 @@ def extract_and_load(
     get_pv_site: Callable[[int], Any],
     get_ts_data_extractor: Callable[[SourceDescriptor], TimeSeriesDataExtractor],
     source_descriptor: SourceDescriptor,
-    resources_extractor: Extractor,
-    time_series_loader: Loader,
+    staging_fs: FileSystem,
     pv_system_id: int,
     date_range: DateRange,
     overwrite: bool,
@@ -85,8 +88,7 @@ def extract_and_load(
         get_pv_site: Retrieves a PVSite by integer system ID, or None if not found.
         get_ts_data_extractor: Returns a data extractor for the given source descriptor.
         source_descriptor: Identifies the data source and its extractor.
-        resources_extractor: Extractor for reading staged resources.
-        time_series_loader: Loader for writing time series CSVs.
+        staging_fs: FileSystem for both reading existing files and writing time series CSVs.
         pv_system_id: PV system identifier.
         date_range: DateRange containing start date and optional end date.
         overwrite: If True, overwrite existing files.
@@ -101,6 +103,9 @@ def extract_and_load(
         print(f'    {task}: Dry run - not writing')
         return Result.skipped_dry_run(task)
 
+    staging_extractor = Extractor(staging_fs)
+    staging_loader = Loader(staging_fs)
+
     def get_csv_path(ts_descriptor: TimeSeriesDescriptor) -> str:
         return build_csv_file_path(
             TIMESERIES_FOLDER,
@@ -111,7 +116,7 @@ def extract_and_load(
 
     def is_processable(ts_descriptor: TimeSeriesDescriptor) -> bool:
         file_path = get_csv_path(ts_descriptor)
-        return overwrite or not resources_extractor.file_exists(file_path)
+        return overwrite or not staging_extractor.file_exists(file_path)
 
     try:
         extractor = get_ts_data_extractor(source_descriptor)
@@ -136,7 +141,7 @@ def extract_and_load(
 
         for ts in timeseries:
             ts_file_path = get_csv_path(ts.descriptor)
-            time_series_loader.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
+            staging_loader.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
 
         print(f'    {task}: Success')
         return Result.success(task)
