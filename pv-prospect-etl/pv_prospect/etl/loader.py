@@ -2,7 +2,7 @@ import csv
 import io
 from typing import Iterable
 
-from pv_prospect.etl.storage.base import FileSystem
+from pv_prospect.etl.storage import FileSystem
 
 
 class Loader:

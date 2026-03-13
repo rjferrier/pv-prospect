@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from pv_prospect.common import DateRange
-from pv_prospect.data_extraction.extractors import SourceDescriptor
+from pv_prospect.data_extraction import SourceDescriptor
 
 
 @dataclass(frozen=True)

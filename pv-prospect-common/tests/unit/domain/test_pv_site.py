@@ -3,8 +3,7 @@
 from decimal import Decimal
 from math import isclose, pi
 
-from pv_prospect.common.domain.location import Location
-from pv_prospect.common.domain.pv_site import PanelGeometry, PVSite, Shading, System
+from pv_prospect.common.domain import Location, PanelGeometry, PVSite, Shading, System
 
 
 def test_panel_geometry_azimuth_radians_zero():

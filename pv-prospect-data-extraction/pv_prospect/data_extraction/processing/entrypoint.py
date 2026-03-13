@@ -30,19 +30,19 @@ from pv_prospect.common import (
     Period,
     build_location_mapping_repo,
     build_pv_site_repo,
+    get_config,
     get_pv_site_by_system_id,
 )
-from pv_prospect.common.config_parser import get_config
-from pv_prospect.data_extraction.config import DataExtractionConfig
-from pv_prospect.data_extraction.extractors import (
+from pv_prospect.data_extraction import (
     SourceDescriptor,
     get_extractor,
     supports_multi_date,
 )
+from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.etl import Extractor
-from pv_prospect.etl.storage.factory import get_filesystem
-from pv_prospect.etl.storage.resolve import dvc
+from pv_prospect.etl.storage import get_filesystem
+from pv_prospect.etl.storage.resolve import resolve_dvc_path
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -64,7 +64,7 @@ def main() -> None:
 
         print(f'[entrypoint] preprocess: {source_descriptor}')
         core.preprocess(
-            dvc.resolve_path,
+            resolve_dvc_path,
             versioned_resources_fs,
             staging_fs,
             dvc_prefix,

@@ -8,19 +8,18 @@ from pv_prospect.common import (
     DateRange,
     build_location_mapping_repo,
     build_pv_site_repo,
+    get_config,
     get_pv_site_by_system_id,
 )
-from pv_prospect.common.config_parser import get_config
+from pv_prospect.data_extraction import SourceDescriptor, get_extractor
 from pv_prospect.data_extraction.config import DataExtractionConfig
-from pv_prospect.data_extraction.extractors import SourceDescriptor, get_extractor
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.value_objects import Result
 from pv_prospect.data_extraction.processing.worker import app
 from pv_prospect.etl import Extractor
-from pv_prospect.etl.storage.backends.local import LocalStorageConfig
-from pv_prospect.etl.storage.base import FileSystem
-from pv_prospect.etl.storage.factory import get_filesystem
-from pv_prospect.etl.storage.resolve import dvc
+from pv_prospect.etl.storage import FileSystem, get_filesystem
+from pv_prospect.etl.storage.backends import LocalStorageConfig
+from pv_prospect.etl.storage.resolve import resolve_dvc_path
 
 # Re-export constants so existing imports (e.g. task_producer) keep working.
 PV_SITES_CSV_FILE = core.PV_SITES_CSV_FILE
@@ -52,7 +51,7 @@ def preprocess(
         else ''
     )
     return core.preprocess(
-        dvc.resolve_path,
+        resolve_dvc_path,
         versioned_resources_fs,
         staging_fs,
         dvc_prefix,

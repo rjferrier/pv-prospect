@@ -8,7 +8,7 @@ packages = [{include = "pv_prospect"}]
 
 [project]
 name = "pv-prospect-etl"
-version = "0.1.0"
+version = "0.2.0"
 description = "ETL components for PV Prospect projects"
 authors = [{name = "RJ Ferrier", email = "rjferrier@outlook.com"}]
 readme = "README.md"

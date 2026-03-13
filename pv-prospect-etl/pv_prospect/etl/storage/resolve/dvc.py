@@ -1,7 +1,7 @@
 import yaml  # type: ignore[import-untyped]
 
 
-def resolve_path(source_or_tracking_path: str) -> str:
+def resolve_dvc_path(source_or_tracking_path: str) -> str:
     """
     Parse a local .dvc file and resolve the GCS cache blob path.
     """

@@ -2,16 +2,20 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 from datetime import date, timedelta
 from typing import Any
 
-from pv_prospect.common import DateRange, Period
-from pv_prospect.common.config_parser import get_config
-from pv_prospect.common.pv_site_repo import build_pv_site_repo, get_all_pv_system_ids
+from pv_prospect.common import (
+    DateRange,
+    Period,
+    build_pv_site_repo,
+    get_all_pv_system_ids,
+    get_config,
+)
+from pv_prospect.data_extraction import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.config import DataExtractionConfig
-from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.processing.task_queuer import TaskQueuer
 from pv_prospect.data_extraction.processing.tasks import PV_SITES_CSV_FILE
 from pv_prospect.etl import Extractor
-from pv_prospect.etl.storage.backends.local import LocalStorageConfig
-from pv_prospect.etl.storage.factory import get_filesystem
+from pv_prospect.etl.storage import get_filesystem
+from pv_prospect.etl.storage.backends import LocalStorageConfig
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,

@@ -1,8 +1,12 @@
 from enum import Enum
 from typing import Any, Dict, Union
 
-from pv_prospect.etl.storage.backends.gcs import GcsFileSystem, GcsStorageConfig
-from pv_prospect.etl.storage.backends.local import LocalFileSystem, LocalStorageConfig
+from pv_prospect.etl.storage.backends import (
+    GcsFileSystem,
+    GcsStorageConfig,
+    LocalFileSystem,
+    LocalStorageConfig,
+)
 from pv_prospect.etl.storage.base import FileSystem
 
 

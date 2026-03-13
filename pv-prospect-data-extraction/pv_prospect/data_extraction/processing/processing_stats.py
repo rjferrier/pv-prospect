@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Union, overload
 
-from pv_prospect.common.pv_site_repo import get_pv_site_by_system_id
+from pv_prospect.common import get_pv_site_by_system_id
 from pv_prospect.data_extraction.processing.value_objects import (
     FailureDetails,
     Result,

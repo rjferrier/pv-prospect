@@ -3,12 +3,12 @@
 import io
 
 import pytest
-from pv_prospect.common.pv_site_repo import (
+from pv_prospect.common import (
     build_pv_site_repo,
     get_all_pv_system_ids,
     get_pv_site_by_system_id,
-    pv_sites_by_system_id,
 )
+from pv_prospect.common.pv_site_repo import pv_sites_by_system_id
 
 from .helpers import CSV_HEADER, SAMPLE_ROW_STR, TWO_PANEL_ROW_STR
 

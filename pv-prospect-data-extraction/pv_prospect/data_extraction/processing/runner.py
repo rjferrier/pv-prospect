@@ -21,24 +21,21 @@ from pv_prospect.common import (
     Period,
     build_location_mapping_repo,
     build_pv_site_repo,
+    get_all_pv_system_ids,
+    get_config,
     get_pv_site_by_system_id,
 )
-from pv_prospect.common.config_parser import get_config
-from pv_prospect.common.pv_site_repo import get_all_pv_system_ids
-from pv_prospect.data_extraction.config import DataExtractionConfig
-from pv_prospect.data_extraction.extractors import (
+from pv_prospect.data_extraction import (
     SourceDescriptor,
     get_extractor,
     supports_multi_date,
 )
-from pv_prospect.data_extraction.processing import core
-from pv_prospect.data_extraction.processing.processing_stats import ProcessingStats
-from pv_prospect.data_extraction.processing.value_objects import Result
+from pv_prospect.data_extraction.config import DataExtractionConfig
+from pv_prospect.data_extraction.processing import ProcessingStats, Result, core
 from pv_prospect.etl import Extractor
-from pv_prospect.etl.storage.backends.local import LocalStorageConfig
-from pv_prospect.etl.storage.base import FileSystem
-from pv_prospect.etl.storage.factory import get_filesystem
-from pv_prospect.etl.storage.resolve import dvc
+from pv_prospect.etl.storage import FileSystem, get_filesystem
+from pv_prospect.etl.storage.backends import LocalStorageConfig
+from pv_prospect.etl.storage.resolve import resolve_dvc_path
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -214,7 +211,7 @@ def _main() -> None:
     # --- preprocess (sequential, one per source) ----------------------------
     for sd in source_descriptors:
         core.preprocess(
-            dvc.resolve_path, versioned_resources_fs, staging_fs, dvc_prefix, sd
+            resolve_dvc_path, versioned_resources_fs, staging_fs, dvc_prefix, sd
         )
 
     # --- initialise in-memory repos ----------------------------------------
