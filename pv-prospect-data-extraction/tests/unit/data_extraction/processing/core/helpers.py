@@ -1,8 +1,8 @@
 """Shared test helpers."""
 
+import csv
 import io
 from decimal import Decimal
-from typing import Iterable
 
 from pv_prospect.common.domain.location import Location
 from pv_prospect.common.domain.pv_site import (
@@ -11,6 +11,7 @@ from pv_prospect.common.domain.pv_site import (
     Shading,
     System,
 )
+from pv_prospect.etl.storage.base import FileEntry
 
 
 class FakeTimeSeriesDescriptor:
@@ -33,41 +34,36 @@ def make_pv_site(pvo_sys_id: int = 42248) -> PVSite:
     )
 
 
-class FakeExtractor:
-    """Minimal Extractor that returns canned file contents."""
+class FakeFileSystem:
+    """Minimal FileSystem that returns canned file contents and records writes."""
 
     def __init__(self, files: dict[str, str] | None = None) -> None:
         self._files = files or {}
-
-    def read_file(self, file_path: str) -> io.TextIOWrapper:  # type: ignore[override]
-        if file_path not in self._files:
-            raise FileNotFoundError(file_path)
-        return io.StringIO(self._files[file_path])  # type: ignore[return-value]
-
-    def file_exists(self, file_path: str) -> bool:
-        return file_path in self._files
-
-
-class FakeLoader:
-    """Minimal Loader that records calls."""
-
-    def __init__(self, existing_files: set[str] | None = None) -> None:
         self.created_folders: list[str] = []
         self.written_texts: dict[str, str] = {}
-        self.written_csvs: dict[str, list[list[str]]] = {}
-        self._existing = existing_files or set()
 
-    def create_folder(self, folder_path: str) -> str | None:
-        self.created_folders.append(folder_path)
-        return folder_path
+    def exists(self, path: str) -> bool:
+        return path in self._files
 
-    def file_exists(self, file_path: str) -> bool:
-        return file_path in self._existing
+    def read_text(self, path: str) -> str:
+        if path not in self._files:
+            raise FileNotFoundError(path)
+        return self._files[path]
 
-    def write_text(self, file_path: str, text: str, overwrite: bool = False) -> None:
-        self.written_texts[file_path] = text
+    def write_text(self, path: str, content: str) -> None:
+        self.written_texts[path] = content
 
-    def write_csv(
-        self, file_path: str, rows: Iterable[Iterable[str]], overwrite: bool = False
-    ) -> None:
-        self.written_csvs[file_path] = [list(row) for row in rows]
+    def mkdir(self, path: str) -> None:
+        self.created_folders.append(path)
+
+    def list_files(
+        self, prefix: str, pattern: str = '*', recursive: bool = False
+    ) -> list[FileEntry]:
+        return []
+
+    @property
+    def written_csv_rows(self) -> dict[str, list[list[str]]]:
+        return {
+            path: list(csv.reader(io.StringIO(text)))
+            for path, text in self.written_texts.items()
+        }

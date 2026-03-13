@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 
 from pv_prospect.etl import Extractor, Loader
-from pv_prospect.etl.storage.factory import get_filesystem
+from pv_prospect.etl.storage.factory import AnyStorageConfig, get_filesystem
 
 
 def upload_file(
@@ -28,6 +28,7 @@ def upload_file(
     if not source_path.is_file():
         raise ValueError(f'Source path is not a file: {source_file}')
 
+    storage_config: AnyStorageConfig
     if local_dir:
         from pv_prospect.etl.storage.backends.local import LocalStorageConfig
 

@@ -126,8 +126,8 @@ def test_custom_keep_columns(
 
 
 def test_poa_irradiance_has_no_meaningfully_negative_values(
-    pv_site: PVSite, weather_df, pvoutput_df
-):
+    pv_site: PVSite, weather_df: pd.DataFrame, pvoutput_df: pd.DataFrame
+) -> None:
     """POA irradiance should not have meaningfully negative values.
 
     Note: pvlib's isotropic model can produce negligible negative values at

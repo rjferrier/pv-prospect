@@ -12,7 +12,7 @@ from pv_prospect.data_extraction.processing.core import (
 )
 from pv_prospect.data_extraction.processing.value_objects import ResultType
 
-from .helpers import FakeExtractor, FakeLoader, FakeTimeSeriesDescriptor, make_pv_site
+from .helpers import FakeFileSystem, FakeTimeSeriesDescriptor, make_pv_site
 
 _DATE_RANGE = DateRange(date(2025, 6, 1), date(2025, 6, 2))
 
@@ -22,8 +22,7 @@ def test_dry_run_returns_skipped() -> None:
         lambda _: make_pv_site(),
         lambda _: MagicMock(),
         SourceDescriptor.PVOUTPUT,
-        FakeExtractor(),
-        FakeLoader(),
+        FakeFileSystem(),
         42248,
         _DATE_RANGE,
         overwrite=False,
@@ -34,21 +33,20 @@ def test_dry_run_returns_skipped() -> None:
 
 
 def test_dry_run_does_not_write() -> None:
-    loader = FakeLoader()
+    staging_fs = FakeFileSystem()
 
     extract_and_load(
         lambda _: make_pv_site(),
         lambda _: MagicMock(),
         SourceDescriptor.PVOUTPUT,
-        FakeExtractor(),
-        loader,
+        staging_fs,
         42248,
         _DATE_RANGE,
         overwrite=False,
         dry_run=True,
     )
 
-    assert loader.written_csvs == {}
+    assert staging_fs.written_texts == {}
 
 
 def test_skips_when_all_files_exist() -> None:
@@ -64,8 +62,7 @@ def test_skips_when_all_files_exist() -> None:
         lambda _: make_pv_site(),
         lambda _: mock_data_extractor,
         SourceDescriptor.PVOUTPUT,
-        FakeExtractor({expected_path: ''}),
-        FakeLoader(),
+        FakeFileSystem({expected_path: ''}),
         42248,
         _DATE_RANGE,
         overwrite=False,
@@ -84,13 +81,12 @@ def test_extracts_and_writes_csv() -> None:
         TimeSeries(descriptor=ts_desc, rows=rows)
     ]
 
-    loader = FakeLoader()
+    staging_fs = FakeFileSystem()
     result = extract_and_load(
         lambda _: make_pv_site(),
         lambda _: mock_data_extractor,
         SourceDescriptor.PVOUTPUT,
-        FakeExtractor(),
-        loader,
+        staging_fs,
         42248,
         _DATE_RANGE,
         overwrite=False,
@@ -98,8 +94,8 @@ def test_extracts_and_writes_csv() -> None:
     )
 
     assert result.type == ResultType.SUCCESS
-    assert len(loader.written_csvs) == 1
-    assert list(loader.written_csvs.values())[0] == rows
+    assert len(staging_fs.written_texts) == 1
+    assert list(staging_fs.written_csv_rows.values())[0] == rows
 
 
 def test_overwrites_existing_when_flag_set() -> None:
@@ -114,13 +110,12 @@ def test_overwrites_existing_when_flag_set() -> None:
         'timeseries', SourceDescriptor.PVOUTPUT, ts_desc, date(2025, 6, 1)
     )
 
-    loader = FakeLoader()
+    staging_fs = FakeFileSystem({expected_path: ''})
     result = extract_and_load(
         lambda _: make_pv_site(),
         lambda _: mock_data_extractor,
         SourceDescriptor.PVOUTPUT,
-        FakeExtractor({expected_path: ''}),
-        loader,
+        staging_fs,
         42248,
         _DATE_RANGE,
         overwrite=True,
@@ -128,7 +123,7 @@ def test_overwrites_existing_when_flag_set() -> None:
     )
 
     assert result.type == ResultType.SUCCESS
-    assert len(loader.written_csvs) == 1
+    assert len(staging_fs.written_texts) == 1
 
 
 def test_failure_when_site_not_found() -> None:
@@ -136,8 +131,7 @@ def test_failure_when_site_not_found() -> None:
         lambda _: None,
         lambda _: MagicMock(),
         SourceDescriptor.PVOUTPUT,
-        FakeExtractor(),
-        FakeLoader(),
+        FakeFileSystem(),
         99999,
         _DATE_RANGE,
         overwrite=False,
@@ -159,8 +153,7 @@ def test_failure_on_extraction_error() -> None:
         lambda _: make_pv_site(),
         lambda _: mock_data_extractor,
         SourceDescriptor.PVOUTPUT,
-        FakeExtractor(),
-        FakeLoader(),
+        FakeFileSystem(),
         42248,
         _DATE_RANGE,
         overwrite=False,

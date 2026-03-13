@@ -16,8 +16,9 @@ from pv_prospect.data_extraction.extractors import SourceDescriptor, get_extract
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.value_objects import Result
 from pv_prospect.data_extraction.processing.worker import app
-from pv_prospect.etl import Extractor, Loader
+from pv_prospect.etl import Extractor
 from pv_prospect.etl.storage.backends.local import LocalStorageConfig
+from pv_prospect.etl.storage.base import FileSystem
 from pv_prospect.etl.storage.factory import get_filesystem
 from pv_prospect.etl.storage.resolve import dvc
 
@@ -27,7 +28,7 @@ LOCATION_MAPPING_CSV_FILE = core.LOCATION_MAPPING_CSV_FILE
 SUPPORTING_RESOURCES = core.SUPPORTING_RESOURCES
 
 
-def _resolve_storage(local_dir: str | None) -> tuple:
+def _resolve_storage(local_dir: str | None) -> tuple[DataExtractionConfig, FileSystem]:
     """Resolve storage backends from config and optional local override."""
     config = get_config(DataExtractionConfig)
     staging_config = (
@@ -35,12 +36,7 @@ def _resolve_storage(local_dir: str | None) -> tuple:
         if local_dir
         else config.staged_raw_data_storage
     )
-    staging_fs = get_filesystem(staging_config)
-    return (
-        config,
-        Extractor(staging_fs),
-        Loader(staging_fs),
-    )
+    return config, get_filesystem(staging_config)
 
 
 @app.task
@@ -48,8 +44,8 @@ def preprocess(
     source_descriptor: SourceDescriptor,
     local_dir: str | None,
 ) -> list[str | None]:
-    config, _extractor, staging_loader = _resolve_storage(local_dir)
-    versioned_extractor = Extractor(get_filesystem(config.versioned_resources_storage))
+    config, staging_fs = _resolve_storage(local_dir)
+    versioned_resources_fs = get_filesystem(config.versioned_resources_storage)
     dvc_prefix = (
         config.versioned_resources_storage.tracking.prefix
         if config.versioned_resources_storage.tracking
@@ -57,8 +53,8 @@ def preprocess(
     )
     return core.preprocess(
         dvc.resolve_path,
-        versioned_extractor,
-        staging_loader,
+        versioned_resources_fs,
+        staging_fs,
         dvc_prefix,
         source_descriptor,
     )
@@ -73,8 +69,9 @@ def extract_and_load(
     overwrite: bool,
     dry_run: bool,
 ) -> Result:
-    _config, staging_extractor, staging_loader = _resolve_storage(local_dir)
+    _config, staging_fs = _resolve_storage(local_dir)
 
+    staging_extractor = Extractor(staging_fs)
     build_pv_site_repo(staging_extractor.read_file(core.PV_SITES_CSV_FILE))
     build_location_mapping_repo(
         staging_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
@@ -84,8 +81,7 @@ def extract_and_load(
         get_pv_site_by_system_id,
         get_extractor,
         source_descriptor,
-        staging_extractor,
-        staging_loader,
+        staging_fs,
         pv_system_id,
         date_range,
         overwrite,

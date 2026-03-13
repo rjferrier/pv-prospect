@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
-from pytz import timezone
+from pytz import timezone  # type: ignore[import-untyped]
 
 UTC = timezone('UTC')
 

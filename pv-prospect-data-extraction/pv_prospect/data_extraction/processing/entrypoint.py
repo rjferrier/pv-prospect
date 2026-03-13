@@ -40,7 +40,7 @@ from pv_prospect.data_extraction.extractors import (
     supports_multi_date,
 )
 from pv_prospect.data_extraction.processing import core
-from pv_prospect.etl import Extractor, Loader
+from pv_prospect.etl import Extractor
 from pv_prospect.etl.storage.factory import get_filesystem
 from pv_prospect.etl.storage.resolve import dvc
 
@@ -55,12 +55,9 @@ def main() -> None:
 
     # Cloud Run always uses GCS — resolve storage backends once.
     staging_fs = get_filesystem(config.staged_raw_data_storage)
-    staging_extractor = Extractor(staging_fs)
-    staging_loader = Loader(staging_fs)
-
     versioned_resources_fs = get_filesystem(config.versioned_resources_storage)
-    versioned_extractor = Extractor(versioned_resources_fs)
-    dvc_prefix = config.versioned_resources_storage.tracking.prefix
+    tracking = config.versioned_resources_storage.tracking
+    dvc_prefix = tracking.prefix if tracking else ''
 
     if job_type == 'preprocess':
         source_descriptor = SourceDescriptor(os.environ['SOURCE_DESCRIPTOR'])
@@ -68,8 +65,8 @@ def main() -> None:
         print(f'[entrypoint] preprocess: {source_descriptor}')
         core.preprocess(
             dvc.resolve_path,
-            versioned_extractor,
-            staging_loader,
+            versioned_resources_fs,
+            staging_fs,
             dvc_prefix,
             source_descriptor,
         )
@@ -90,6 +87,7 @@ def main() -> None:
         )
 
         # Initialise in-memory repos once
+        staging_extractor = Extractor(staging_fs)
         build_pv_site_repo(staging_extractor.read_file(core.PV_SITES_CSV_FILE))
         build_location_mapping_repo(
             staging_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
@@ -111,8 +109,7 @@ def main() -> None:
                 get_pv_site_by_system_id,
                 get_extractor,
                 source_descriptor,
-                staging_extractor,
-                staging_loader,
+                staging_fs,
                 pv_system_id,
                 dr,
                 overwrite,
