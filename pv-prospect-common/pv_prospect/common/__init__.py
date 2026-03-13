@@ -21,5 +21,5 @@ __all__ = [
     'build_location_mapping_repo',
     'get_location_by_pv_system_id',
     'map_from_env',
-    'VarMapping'
+    'VarMapping',
 ]
