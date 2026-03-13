@@ -9,8 +9,9 @@ from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.extractors import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.processing.task_queuer import TaskQueuer
 from pv_prospect.data_extraction.processing.tasks import PV_SITES_CSV_FILE
-from pv_prospect.etl.extract import Extractor
-from pv_prospect.etl.factory import get_extractor as get_storage_extractor
+from pv_prospect.etl import Extractor
+from pv_prospect.etl.storage.backends.local import LocalStorageConfig
+from pv_prospect.etl.storage.factory import get_filesystem
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -189,7 +190,9 @@ def _main(config: DataExtractionConfig, args: 'Any') -> None:
     pv_system_ids = (
         _parse_pv_system_ids(args.system_ids)
         if args.system_ids
-        else _get_all_pv_system_ids(get_storage_extractor(args.local_dir))
+        else _get_all_pv_system_ids(
+            Extractor(get_filesystem(LocalStorageConfig(prefix=args.local_dir or '')))
+        )
     )
 
     print(f'Processing {len(pv_system_ids)} PV site(s).\n')

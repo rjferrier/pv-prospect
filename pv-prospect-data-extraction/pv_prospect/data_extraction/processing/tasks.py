@@ -16,10 +16,10 @@ from pv_prospect.data_extraction.extractors import SourceDescriptor, get_extract
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.value_objects import Result
 from pv_prospect.data_extraction.processing.worker import app
-from pv_prospect.etl.extract.resolve import dvc
-from pv_prospect.etl.factory import get_extractor as get_storage_extractor
-from pv_prospect.etl.factory import get_loader as get_storage_loader
-from pv_prospect.etl.storage_config import LocalStorageConfig
+from pv_prospect.etl import Extractor, Loader
+from pv_prospect.etl.storage.backends.local import LocalStorageConfig
+from pv_prospect.etl.storage.factory import get_filesystem
+from pv_prospect.etl.storage.resolve import dvc
 
 # Re-export constants so existing imports (e.g. task_producer) keep working.
 PV_SITES_CSV_FILE = core.PV_SITES_CSV_FILE
@@ -35,10 +35,11 @@ def _resolve_storage(local_dir: str | None) -> tuple:
         if local_dir
         else config.staged_raw_data_storage
     )
+    staging_fs = get_filesystem(staging_config)
     return (
         config,
-        get_storage_extractor(staging_config),
-        get_storage_loader(staging_config),
+        Extractor(staging_fs),
+        Loader(staging_fs),
     )
 
 
@@ -48,7 +49,7 @@ def preprocess(
     local_dir: str | None,
 ) -> list[str | None]:
     config, _extractor, staging_loader = _resolve_storage(local_dir)
-    versioned_extractor = get_storage_extractor(config.versioned_resources_storage)
+    versioned_extractor = Extractor(get_filesystem(config.versioned_resources_storage))
     dvc_prefix = (
         config.versioned_resources_storage.tracking.prefix
         if config.versioned_resources_storage.tracking

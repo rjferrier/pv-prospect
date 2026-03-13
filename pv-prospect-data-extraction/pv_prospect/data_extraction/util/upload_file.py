@@ -1,7 +1,8 @@
 import argparse
 from pathlib import Path
 
-from pv_prospect.etl.factory import get_extractor, get_loader
+from pv_prospect.etl import Extractor, Loader
+from pv_prospect.etl.storage.factory import get_filesystem
 
 
 def upload_file(
@@ -28,7 +29,7 @@ def upload_file(
         raise ValueError(f'Source path is not a file: {source_file}')
 
     if local_dir:
-        from pv_prospect.etl.storage_config import LocalStorageConfig
+        from pv_prospect.etl.storage.backends.local import LocalStorageConfig
 
         storage_config = LocalStorageConfig(prefix=local_dir)
     else:
@@ -37,8 +38,9 @@ def upload_file(
 
         storage_config = get_config(DataExtractionConfig).staged_raw_data_storage
 
-    extractor = get_extractor(storage_config)
-    loader = get_loader(storage_config)
+    fs = get_filesystem(storage_config)
+    extractor = Extractor(fs)
+    loader = Loader(fs)
 
     # Check if file already exists
     if extractor.file_exists(destination_path) and not overwrite:

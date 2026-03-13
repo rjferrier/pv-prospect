@@ -40,9 +40,9 @@ from pv_prospect.data_extraction.extractors import (
     supports_multi_date,
 )
 from pv_prospect.data_extraction.processing import core
-from pv_prospect.etl.extract.resolve import dvc
-from pv_prospect.etl.factory import get_extractor as get_storage_extractor
-from pv_prospect.etl.factory import get_loader as get_storage_loader
+from pv_prospect.etl import Extractor, Loader
+from pv_prospect.etl.storage.factory import get_filesystem
+from pv_prospect.etl.storage.resolve import dvc
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -54,9 +54,12 @@ def main() -> None:
     config = get_config(DataExtractionConfig)
 
     # Cloud Run always uses GCS — resolve storage backends once.
-    staging_extractor = get_storage_extractor(config.staged_raw_data_storage)
-    staging_loader = get_storage_loader(config.staged_raw_data_storage)
-    versioned_extractor = get_storage_extractor(config.versioned_resources_storage)
+    staging_fs = get_filesystem(config.staged_raw_data_storage)
+    staging_extractor = Extractor(staging_fs)
+    staging_loader = Loader(staging_fs)
+
+    versioned_resources_fs = get_filesystem(config.versioned_resources_storage)
+    versioned_extractor = Extractor(versioned_resources_fs)
     dvc_prefix = config.versioned_resources_storage.tracking.prefix
 
     if job_type == 'preprocess':
