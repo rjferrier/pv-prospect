@@ -6,7 +6,7 @@ from pv_prospect.data_transformation.clean_pvoutput import clean_pvoutput
 
 
 @pytest.fixture
-def raw_pvoutput_df() -> 'pd.DataFrame':
+def raw_pvoutput_df():
     """Raw PVOutput DataFrame with date, time, power, and extra columns."""
     return pd.DataFrame(
         {
@@ -18,14 +18,14 @@ def raw_pvoutput_df() -> 'pd.DataFrame':
     )
 
 
-def test_output_has_only_time_and_power(raw_pvoutput_df: pd.DataFrame) -> None:
+def test_output_has_only_time_and_power(raw_pvoutput_df):
     """Result should contain only 'time' and 'power' columns."""
     result = clean_pvoutput(raw_pvoutput_df)
 
     assert list(result.columns) == ['time', 'power']
 
 
-def test_drops_nan_power_rows(raw_pvoutput_df: pd.DataFrame) -> None:
+def test_drops_nan_power_rows(raw_pvoutput_df):
     """Rows where power is NaN should be dropped."""
     result = clean_pvoutput(raw_pvoutput_df)
 
@@ -33,14 +33,14 @@ def test_drops_nan_power_rows(raw_pvoutput_df: pd.DataFrame) -> None:
     assert not result['power'].isna().any()
 
 
-def test_time_column_is_datetime(raw_pvoutput_df: pd.DataFrame) -> None:
+def test_time_column_is_datetime(raw_pvoutput_df):
     """The 'time' column should be of datetime type."""
     result = clean_pvoutput(raw_pvoutput_df)
 
     assert pd.api.types.is_datetime64_any_dtype(result['time'])
 
 
-def test_winter_time_is_unchanged() -> None:
+def test_winter_time_is_unchanged():
     """In winter (no DST), UK time equals UTC so values should be unchanged."""
     df = pd.DataFrame(
         {
@@ -56,7 +56,7 @@ def test_winter_time_is_unchanged() -> None:
     assert result['time'].iloc[0] == expected
 
 
-def test_summer_time_shifts_back_one_hour() -> None:
+def test_summer_time_shifts_back_one_hour():
     """During BST (summer), UK local time should be shifted back by 1 hour to UTC."""
     df = pd.DataFrame(
         {
@@ -73,7 +73,7 @@ def test_summer_time_shifts_back_one_hour() -> None:
     assert result['time'].iloc[0] == expected
 
 
-def test_does_not_mutate_input() -> None:
+def test_does_not_mutate_input():
     """The original DataFrame should not be modified."""
     df = pd.DataFrame(
         {
@@ -89,7 +89,7 @@ def test_does_not_mutate_input() -> None:
     assert list(df.columns) == original_columns
 
 
-def test_preserves_power_values(raw_pvoutput_df: pd.DataFrame) -> None:
+def test_preserves_power_values(raw_pvoutput_df):
     """Power values should be passed through unchanged."""
     result = clean_pvoutput(raw_pvoutput_df)
 

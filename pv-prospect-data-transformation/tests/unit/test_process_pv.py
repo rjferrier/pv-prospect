@@ -10,11 +10,11 @@ from pv_prospect.data_transformation.process_pv import process_pv
 
 
 def _make_pv_site(
-    latitude: float = 52.0,
-    longitude: float = 0.5,
-    tilt: int = 35,
-    azimuth: int = 180,
-) -> PVSite:
+    latitude=52.0,
+    longitude=0.5,
+    tilt=35,
+    azimuth=180,
+):
     """Create a minimal PVSite for testing."""
     return PVSite(
         pvo_sys_id=12345,
@@ -32,7 +32,7 @@ def _make_pv_site(
     )
 
 
-def _make_hourly_weather_df(n_hours: int = 24) -> pd.DataFrame:
+def _make_hourly_weather_df(n_hours=24):
     """Create an hourly cleaned weather DataFrame spanning n_hours from noon on a summer day."""
     times = pd.date_range('2026-06-21 00:00:00', periods=n_hours, freq='h')
     rng = np.random.default_rng(42)
@@ -55,7 +55,7 @@ def _make_hourly_weather_df(n_hours: int = 24) -> pd.DataFrame:
     )
 
 
-def _make_matching_pvoutput_df(weather_df: pd.DataFrame) -> pd.DataFrame:
+def _make_matching_pvoutput_df(weather_df):
     """Create a PV output DataFrame with the same timestamps as the weather data."""
     rng = np.random.default_rng(99)
     n = len(weather_df)
@@ -68,26 +68,24 @@ def _make_matching_pvoutput_df(weather_df: pd.DataFrame) -> pd.DataFrame:
 
 
 @pytest.fixture
-def pv_site() -> PVSite:
+def pv_site():
     return _make_pv_site()
 
 
 @pytest.fixture
-def weather_df() -> 'pd.DataFrame':
+def weather_df():
     return _make_hourly_weather_df()
 
 
 @pytest.fixture
-def pvoutput_df(weather_df: pd.DataFrame) -> 'pd.DataFrame':
+def pvoutput_df(weather_df):
     return _make_matching_pvoutput_df(weather_df)
 
 
 # --- Column selection ---
 
 
-def test_output_contains_default_columns(
-    pv_site: PVSite, weather_df: pd.DataFrame, pvoutput_df: pd.DataFrame
-) -> None:
+def test_output_contains_default_columns(pv_site, weather_df, pvoutput_df):
     """Result should contain time + default keep columns."""
     result = process_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
 
@@ -97,9 +95,7 @@ def test_output_contains_default_columns(
     assert 'power' in result.columns
 
 
-def test_drops_non_selected_columns(
-    pv_site: PVSite, weather_df: pd.DataFrame, pvoutput_df: pd.DataFrame
-) -> None:
+def test_drops_non_selected_columns(pv_site, weather_df, pvoutput_df):
     """Columns not in keep_columns should be absent."""
     result = process_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
 
@@ -107,9 +103,7 @@ def test_drops_non_selected_columns(
     assert 'diffuse_radiation' not in result.columns
 
 
-def test_custom_keep_columns(
-    pv_site: PVSite, weather_df: pd.DataFrame, pvoutput_df: pd.DataFrame
-) -> None:
+def test_custom_keep_columns(pv_site, weather_df, pvoutput_df):
     """Should honour custom keep_columns."""
     result = process_pv(
         weather_df,
@@ -126,8 +120,8 @@ def test_custom_keep_columns(
 
 
 def test_poa_irradiance_has_no_meaningfully_negative_values(
-    pv_site: PVSite, weather_df: pd.DataFrame, pvoutput_df: pd.DataFrame
-) -> None:
+    pv_site, weather_df, pvoutput_df
+):
     """POA irradiance should not have meaningfully negative values.
 
     Note: pvlib's isotropic model can produce negligible negative values at
@@ -147,9 +141,7 @@ def test_poa_irradiance_has_no_meaningfully_negative_values(
 # --- Join behaviour ---
 
 
-def test_inner_join_drops_unmatched_weather_rows(
-    pv_site: PVSite, weather_df: pd.DataFrame
-) -> None:
+def test_inner_join_drops_unmatched_weather_rows(pv_site, weather_df):
     """If PV output has fewer timestamps, weather-only rows should be dropped."""
     # Only provide PV output for the first 12 hours
     pvoutput_df = _make_matching_pvoutput_df(weather_df.iloc[:12])
@@ -159,7 +151,7 @@ def test_inner_join_drops_unmatched_weather_rows(
     assert len(result) <= 12
 
 
-def test_drops_nan_rows(pv_site: PVSite, weather_df: pd.DataFrame) -> None:
+def test_drops_nan_rows(pv_site, weather_df):
     """Rows where any kept column is NaN should be dropped."""
     pvoutput_df = _make_matching_pvoutput_df(weather_df)
     pvoutput_df.loc[0, 'power'] = float('nan')
@@ -172,9 +164,7 @@ def test_drops_nan_rows(pv_site: PVSite, weather_df: pd.DataFrame) -> None:
 # --- Non-mutation ---
 
 
-def test_does_not_mutate_inputs(
-    pv_site: PVSite, weather_df: pd.DataFrame, pvoutput_df: pd.DataFrame
-) -> None:
+def test_does_not_mutate_inputs(pv_site, weather_df, pvoutput_df):
     """The original DataFrames should not be modified."""
     weather_cols = list(weather_df.columns)
     pvo_cols = list(pvoutput_df.columns)
@@ -192,9 +182,7 @@ def test_does_not_mutate_inputs(
 # --- Multi-panel weighting ---
 
 
-def test_multi_panel_poa_differs_from_single_panel(
-    weather_df: pd.DataFrame, pvoutput_df: pd.DataFrame
-) -> None:
+def test_multi_panel_poa_differs_from_single_panel(weather_df, pvoutput_df):
     """A site with two differently-oriented panels should produce different POA
     from a site with a single panel."""
     single = _make_pv_site(tilt=35, azimuth=180)

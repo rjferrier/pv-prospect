@@ -9,7 +9,7 @@ UTC = timezone('UTC')
 
 
 @pytest.fixture
-def sample_dataframe() -> pd.DataFrame:
+def sample_dataframe():
     """Create a sample dataframe with time, energy, and power columns."""
     data = {
         'time': pd.to_datetime(
@@ -31,7 +31,7 @@ def sample_dataframe() -> pd.DataFrame:
 
 
 @pytest.fixture
-def reference_times() -> pd.Series:
+def reference_times():
     """Create reference times for aggregation."""
     return pd.Series(
         pd.to_datetime(
@@ -44,9 +44,7 @@ def reference_times() -> pd.Series:
     )
 
 
-def test_reduce_rows_time_weighted_average(
-    sample_dataframe: pd.DataFrame, reference_times: pd.Series
-) -> None:
+def test_reduce_rows_time_weighted_average(sample_dataframe, reference_times):
     """Test that reduce_rows correctly performs time-weighted averaging."""
     result = reduce_rows(sample_dataframe, reference_times)
 
@@ -57,9 +55,7 @@ def test_reduce_rows_time_weighted_average(
     assert list(result.columns) == ['time', 'energy', 'power']
 
 
-def test_reduce_rows_first_interval_calculation(
-    sample_dataframe: pd.DataFrame, reference_times: pd.Series
-) -> None:
+def test_reduce_rows_first_interval_calculation(sample_dataframe, reference_times):
     """Test the calculation for the first result interval (23:15:00)."""
     # Intervals: 23:00->23:05 (energy=11, power=108),
     #            23:05->23:10 (energy=21, power=120),
@@ -75,9 +71,7 @@ def test_reduce_rows_first_interval_calculation(
     assert first_row['power'] == pytest.approx(116.0)
 
 
-def test_reduce_rows_second_interval_calculation(
-    sample_dataframe: pd.DataFrame, reference_times: pd.Series
-) -> None:
+def test_reduce_rows_second_interval_calculation(sample_dataframe, reference_times):
     """Test the calculation for the second result interval (23:30:00)."""
     # Intervals: 23:15->23:20 (energy=46, power=180),
     #            23:20->23:25 (energy=62, power=NaN),
@@ -93,9 +87,7 @@ def test_reduce_rows_second_interval_calculation(
     assert pd.isna(second_row['power'])
 
 
-def test_reduce_rows_handles_nan_values(
-    sample_dataframe: pd.DataFrame, reference_times: pd.Series
-) -> None:
+def test_reduce_rows_handles_nan_values(sample_dataframe, reference_times):
     """Test that NaN values in any interval result in NaN output."""
     result = reduce_rows(sample_dataframe, reference_times)
 
@@ -105,9 +97,7 @@ def test_reduce_rows_handles_nan_values(
     assert not pd.isna(result.iloc[1]['energy'])
 
 
-def test_reduce_rows_omits_insufficient_data_rows(
-    sample_dataframe: pd.DataFrame, reference_times: pd.Series
-) -> None:
+def test_reduce_rows_omits_insufficient_data_rows(sample_dataframe, reference_times):
     """Test that rows without sufficient data are omitted."""
     result = reduce_rows(sample_dataframe, reference_times)
 
@@ -116,7 +106,7 @@ def test_reduce_rows_omits_insufficient_data_rows(
     assert len(result) == 2  # Only 2 out of 3 reference times
 
 
-def test_reduce_rows_empty_dataframe() -> None:
+def test_reduce_rows_empty_dataframe():
     """Test that empty dataframe returns empty result."""
     empty_df = pd.DataFrame(columns=['time', 'energy', 'power'])
     ref_times = pd.Series(pd.to_datetime(['2023-09-15 23:15:00']).tz_localize(UTC))
@@ -127,7 +117,7 @@ def test_reduce_rows_empty_dataframe() -> None:
     assert list(result.columns) == ['time', 'energy', 'power']
 
 
-def test_reduce_rows_empty_reference_times(sample_dataframe: pd.DataFrame) -> None:
+def test_reduce_rows_empty_reference_times(sample_dataframe):
     """Test that empty reference times returns empty result."""
     empty_ref_times = pd.Series([], dtype='datetime64[ns, UTC]')
 
@@ -136,7 +126,7 @@ def test_reduce_rows_empty_reference_times(sample_dataframe: pd.DataFrame) -> No
     assert result.empty
 
 
-def test_reduce_rows_missing_time_column() -> None:
+def test_reduce_rows_missing_time_column():
     """Test that missing time column raises ValueError."""
     df_no_time = pd.DataFrame({'energy': [1, 2, 3], 'power': [10, 20, 30]})
     ref_times = pd.Series(pd.to_datetime(['2023-09-15 23:15:00']).tz_localize(UTC))
