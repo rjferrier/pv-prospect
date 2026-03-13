@@ -1,4 +1,8 @@
-from pv_prospect.data_extraction.extractors.base import TimeSeries, TimeSeriesDescriptor
+from pv_prospect.data_extraction.extractors.base import (
+    TimeSeries,
+    TimeSeriesDataExtractor,
+    TimeSeriesDescriptor,
+)
 from pv_prospect.data_extraction.extractors.data_sources import (
     SourceDescriptor,
     get_extractor,
@@ -7,6 +11,7 @@ from pv_prospect.data_extraction.extractors.data_sources import (
 
 __all__ = [
     'TimeSeriesDescriptor',
+    'TimeSeriesDataExtractor',
     'TimeSeries',
     'SourceDescriptor',
     'get_extractor',

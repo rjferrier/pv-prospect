@@ -8,13 +8,15 @@ from pv_prospect.common import (
     DateRange,
     build_location_mapping_repo,
     build_pv_site_repo,
+    get_pv_site_by_system_id,
 )
 from pv_prospect.common.config_parser import get_config
 from pv_prospect.data_extraction.config import DataExtractionConfig
-from pv_prospect.data_extraction.extractors import SourceDescriptor
+from pv_prospect.data_extraction.extractors import SourceDescriptor, get_extractor
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.value_objects import Result
 from pv_prospect.data_extraction.processing.worker import app
+from pv_prospect.etl.extract.resolve import dvc
 from pv_prospect.etl.factory import get_extractor as get_storage_extractor
 from pv_prospect.etl.factory import get_loader as get_storage_loader
 from pv_prospect.etl.storage_config import LocalStorageConfig
@@ -53,7 +55,11 @@ def preprocess(
         else ''
     )
     return core.preprocess(
-        source_descriptor, versioned_extractor, staging_loader, dvc_prefix
+        dvc.resolve_path,
+        versioned_extractor,
+        staging_loader,
+        dvc_prefix,
+        source_descriptor,
     )
 
 
@@ -74,11 +80,13 @@ def extract_and_load(
     )
 
     return core.extract_and_load(
+        get_pv_site_by_system_id,
+        get_extractor,
         source_descriptor,
-        pv_system_id,
-        date_range,
         staging_extractor,
         staging_loader,
+        pv_system_id,
+        date_range,
         overwrite,
         dry_run,
     )
