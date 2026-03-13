@@ -6,7 +6,7 @@ from pv_prospect.data_transformation.clean_weather import clean_weather
 
 
 @pytest.fixture
-def raw_weather_df() -> 'pd.DataFrame':
+def raw_weather_df():
     """Raw OpenMeteo weather DataFrame with model-suffixed columns."""
     return pd.DataFrame(
         {
@@ -30,7 +30,7 @@ def raw_weather_df() -> 'pd.DataFrame':
     )
 
 
-def test_selects_columns_for_given_weather_model(raw_weather_df: pd.DataFrame) -> None:
+def test_selects_columns_for_given_weather_model(raw_weather_df):
     """Should select only columns matching the weather model suffix."""
     result = clean_weather(raw_weather_df, weather_model='best_match')
 
@@ -45,7 +45,7 @@ def test_selects_columns_for_given_weather_model(raw_weather_df: pd.DataFrame) -
     assert 'direct_normal_irradiance_ukmo_seamless' not in result.columns
 
 
-def test_strips_model_suffix_from_column_names(raw_weather_df: pd.DataFrame) -> None:
+def test_strips_model_suffix_from_column_names(raw_weather_df):
     """Column names should have the model suffix removed."""
     result = clean_weather(raw_weather_df, weather_model='best_match')
 
@@ -54,7 +54,7 @@ def test_strips_model_suffix_from_column_names(raw_weather_df: pd.DataFrame) -> 
         assert not col.endswith('_best_match')
 
 
-def test_drops_default_excluded_columns(raw_weather_df: pd.DataFrame) -> None:
+def test_drops_default_excluded_columns(raw_weather_df):
     """Should drop pressure_msl, wind_direction_80m, wind_direction_180m by default."""
     result = clean_weather(raw_weather_df, weather_model='best_match')
 
@@ -63,7 +63,7 @@ def test_drops_default_excluded_columns(raw_weather_df: pd.DataFrame) -> None:
     assert 'wind_direction_180m' not in result.columns
 
 
-def test_custom_excluded_columns(raw_weather_df: pd.DataFrame) -> None:
+def test_custom_excluded_columns(raw_weather_df):
     """Should drop only the specified excluded columns."""
     result = clean_weather(
         raw_weather_df,
@@ -76,7 +76,7 @@ def test_custom_excluded_columns(raw_weather_df: pd.DataFrame) -> None:
     assert 'pressure_msl' in result.columns
 
 
-def test_preserves_values(raw_weather_df: pd.DataFrame) -> None:
+def test_preserves_values(raw_weather_df):
     """Column values should match the original suffixed columns."""
     result = clean_weather(raw_weather_df, weather_model='best_match')
 
@@ -84,7 +84,7 @@ def test_preserves_values(raw_weather_df: pd.DataFrame) -> None:
     assert list(result['direct_normal_irradiance']) == [100.0, 200.0, 300.0]
 
 
-def test_selects_alternative_weather_model(raw_weather_df: pd.DataFrame) -> None:
+def test_selects_alternative_weather_model(raw_weather_df):
     """Should work with a non-default weather model."""
     result = clean_weather(raw_weather_df, weather_model='ukmo_seamless')
 
@@ -95,7 +95,7 @@ def test_selects_alternative_weather_model(raw_weather_df: pd.DataFrame) -> None
     assert 'cloud_cover' not in result.columns
 
 
-def test_no_downsampling_by_default(raw_weather_df: pd.DataFrame) -> None:
+def test_no_downsampling_by_default(raw_weather_df):
     """With timescale_days=None, row count should be unchanged."""
     result = clean_weather(
         raw_weather_df, weather_model='best_match', timescale_days=None
@@ -104,7 +104,7 @@ def test_no_downsampling_by_default(raw_weather_df: pd.DataFrame) -> None:
     assert len(result) == 3
 
 
-def test_always_includes_time_column(raw_weather_df: pd.DataFrame) -> None:
+def test_always_includes_time_column(raw_weather_df):
     """Result should always contain 'time' as the first column."""
     result = clean_weather(raw_weather_df, weather_model='best_match')
 

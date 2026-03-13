@@ -22,7 +22,7 @@ repos:
     rev: v1.19.1
     hooks:
     -   id: mypy
-        exclude: ^(data-exploration/.*|.*/__init__\.py)$
+        exclude: ^(data-exploration/.*|.*/__init__\.py|.*/tests/.*)$
         args: [
           "--ignore-missing-imports",
           "--disallow-untyped-defs",

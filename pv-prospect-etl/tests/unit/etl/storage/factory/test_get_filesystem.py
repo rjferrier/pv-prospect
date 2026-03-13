@@ -1,13 +1,11 @@
 """Tests for get_filesystem."""
 
-from pathlib import Path
-
 import pytest
 from pv_prospect.etl.storage.backends.local import LocalFileSystem, LocalStorageConfig
 from pv_prospect.etl.storage.factory import get_filesystem
 
 
-def test_returns_local_file_system_for_local_config(tmp_path: Path) -> None:
+def test_returns_local_file_system_for_local_config(tmp_path):
     config = LocalStorageConfig(prefix=str(tmp_path))
 
     fs = get_filesystem(config)
@@ -15,7 +13,7 @@ def test_returns_local_file_system_for_local_config(tmp_path: Path) -> None:
     assert isinstance(fs, LocalFileSystem)
 
 
-def test_raises_for_unknown_config_type() -> None:
+def test_raises_for_unknown_config_type():
     class UnknownConfig:
         pass
 
