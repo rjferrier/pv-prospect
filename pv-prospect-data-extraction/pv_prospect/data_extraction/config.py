@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from pv_prospect.etl.storage_config import AnyStorageConfig, parse_storage_config
+from pv_prospect.etl.storage.factory import AnyStorageConfig, parse_storage_config
 
 
 @dataclass

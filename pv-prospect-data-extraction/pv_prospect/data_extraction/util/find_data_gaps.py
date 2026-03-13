@@ -105,7 +105,7 @@ def analyze_dataset(
         entity_files = defaultdict(list)
 
         for file_info in files:
-            filename = file_info['name']
+            filename = file_info.name
 
             date = parse_date_from_filename(filename)
             if date is None:

@@ -1,7 +1,9 @@
 import argparse
 from typing import Optional
 
-from pv_prospect.etl.factory import get_loader
+from pv_prospect.etl import Loader
+from pv_prospect.etl.storage.backends.local import LocalStorageConfig
+from pv_prospect.etl.storage.factory import get_filesystem
 
 
 def create_dir(
@@ -12,7 +14,8 @@ def create_dir(
     """Create a directory in storage, using destination_path or falling back to source_file."""
     dest = _derive_dest_for_create(destination_path, source_file)
 
-    loader = get_loader(local_dir)
+    config = LocalStorageConfig(prefix=local_dir or '')
+    loader = Loader(get_filesystem(config))
     created = loader.create_folder(dest)
     if created:
         print(f'✓ Created directory: {dest}')

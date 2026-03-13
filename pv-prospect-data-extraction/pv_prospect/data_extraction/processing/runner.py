@@ -34,11 +34,10 @@ from pv_prospect.data_extraction.extractors import (
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.processing_stats import ProcessingStats
 from pv_prospect.data_extraction.processing.value_objects import Result
-from pv_prospect.etl.extract import Extractor
-from pv_prospect.etl.extract.resolve import dvc
-from pv_prospect.etl.factory import get_extractor as get_storage_extractor
-from pv_prospect.etl.factory import get_loader as get_storage_loader
-from pv_prospect.etl.storage_config import LocalStorageConfig
+from pv_prospect.etl import Extractor, Loader
+from pv_prospect.etl.storage.backends.local import LocalStorageConfig
+from pv_prospect.etl.storage.factory import get_filesystem
+from pv_prospect.etl.storage.resolve import dvc
 
 SOURCE_DESCRIPTORS = {
     'pv': SourceDescriptor.PVOUTPUT,
@@ -207,10 +206,11 @@ def _main() -> None:
         if args.local_dir
         else config.staged_raw_data_storage
     )
-    staging_extractor = get_storage_extractor(staging_location_config)
-    staging_loader = get_storage_loader(staging_location_config)
+    staging_fs = get_filesystem(staging_location_config)
+    staging_extractor = Extractor(staging_fs)
+    staging_loader = Loader(staging_fs)
 
-    versioned_extractor = get_storage_extractor(config.versioned_resources_storage)
+    versioned_extractor = Extractor(get_filesystem(config.versioned_resources_storage))
     dvc_prefix = config.versioned_resources_storage.tracking.prefix
 
     # --- preprocess (sequential, one per source) ----------------------------

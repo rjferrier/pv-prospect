@@ -17,8 +17,7 @@ from pv_prospect.data_extraction.extractors.base import (
     TimeSeriesDescriptor,
 )
 from pv_prospect.data_extraction.processing.value_objects import Result, Task
-from pv_prospect.etl.extract import Extractor
-from pv_prospect.etl.load import Loader
+from pv_prospect.etl import Extractor, Loader
 
 TIMESERIES_FOLDER = 'timeseries'
 PV_SITES_CSV_FILE = 'pv_sites.csv'
@@ -47,7 +46,7 @@ def preprocess(
         source_descriptor: The source descriptor identifying the data source folder.
     """
     parent_folders = [TIMESERIES_FOLDER]
-    folder_ids = [
+    folder_ids: list[str | None] = [
         staged_resources_loader.create_folder(f'{parent}/{source_descriptor}')
         for parent in parent_folders
     ]
