@@ -21,6 +21,7 @@ dependencies = [
 [tool.poetry.dependencies]
 python = "^3.12"
 google-cloud-storage = "^2.14.0"
+pyyaml = "^6.0.3"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }
