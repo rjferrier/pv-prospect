@@ -1234,6 +1234,7 @@ develop = true
 
 [package.dependencies]
 numpy = ">=2.3.5,<3"
+pyyaml = ">=6.0,<7"
 spherical-coordinates = ">=0.1.8,<0.2"
 
 [package.source]
@@ -1242,7 +1243,7 @@ url = "../pv-prospect-common"
 
 [[package]]
 name = "pv-prospect-etl"
-version = "0.1.0"
+version = "0.2.0"
 description = "ETL components for PV Prospect projects"
 optional = false
 python-versions = "^3.12"
@@ -1690,4 +1691,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "0b38c800f28322d659fdd76d81a4b2af1642e0d190b82ccad1d2e980fa674968"
+content-hash = "da243138054cc6070678df19dc0fca1a46c49461d6b815932150ad947085563c"

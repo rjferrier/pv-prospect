@@ -31,6 +31,7 @@ dependencies = [
 python = "^3.12"
 pv-prospect-common = {path = "../pv-prospect-common", develop = true}
 pv-prospect-etl = {path = "../pv-prospect-etl", develop = true}
+pyyaml = "^6.0.3"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }
