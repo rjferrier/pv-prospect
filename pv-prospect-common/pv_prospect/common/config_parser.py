@@ -1,4 +1,5 @@
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Dict, Protocol, Type, TypeVar
 
@@ -23,37 +24,65 @@ def _merge_dicts(d1: Dict[str, Any], d2: Dict[str, Any]) -> Dict[str, Any]:
     return d1
 
 
-def load_config_tree(config_dir: Path, runtime_env: str = 'default') -> Dict[str, Any]:
-    """
-    Load default configuration from config_dir and merge environment-specific
-    configuration if runtime_env is not 'default'.
+def _load_from_dir(config_dir: Path, runtime_env: str) -> Dict[str, Any]:
+    """Load and merge default + env-specific config from a single directory."""
+    data: Dict[str, Any] = {}
 
-    Returns an arbitrary tree of objects (dict).
-    """
-    default_config_path = config_dir / 'config-default.yaml'
-    if not default_config_path.exists():
-        raise FileNotFoundError(
-            f'Default ETL configuration file not found at {default_config_path}.'
-        )
-
-    with open(default_config_path, 'r') as f:
-        data = yaml.safe_load(f) or {}
+    default_path = config_dir / 'config-default.yaml'
+    if default_path.exists():
+        with open(default_path, 'r') as f:
+            _merge_dicts(data, yaml.safe_load(f) or {})
 
     if runtime_env != 'default':
-        local_config_path = config_dir / f'config-{runtime_env}.yaml'
-        if local_config_path.exists():
-            with open(local_config_path, 'r') as f:
-                local_data = yaml.safe_load(f) or {}
-            _merge_dicts(data, local_data)
+        env_path = config_dir / f'config-{runtime_env}.yaml'
+        if env_path.exists():
+            with open(env_path, 'r') as f:
+                _merge_dicts(data, yaml.safe_load(f) or {})
+
     return data
 
 
-def map_from_yaml(cls: Type[T], runtime_env: str, config_dir: str) -> T:
+def load_config_tree(
+    config_dirs: Sequence[Path] | Path,
+    runtime_env: str = 'default',
+) -> Dict[str, Any]:
+    """
+    Load configuration from one or more directories, merging in order.
+
+    Each directory may contain ``config-default.yaml`` and optionally
+    ``config-{runtime_env}.yaml``.  Later directories override earlier ones.
+
+    Returns an arbitrary tree of objects (dict).
+    """
+    if isinstance(config_dirs, Path):
+        config_dirs = [config_dirs]
+
+    data: Dict[str, Any] = {}
+    for config_dir in config_dirs:
+        if not config_dir.is_dir():
+            raise FileNotFoundError(f'Config directory not found: {config_dir}')
+        dir_data = _load_from_dir(config_dir, runtime_env)
+        if dir_data:
+            _merge_dicts(data, dir_data)
+
+    return data
+
+
+def map_from_yaml(
+    cls: Type[T],
+    runtime_env: str,
+    config_dirs: Sequence[Path] | str,
+) -> T:
     """
     Load configuration from YAML files using the provided factory.
     Loads default config and merges local config if RUNTIME_ENV is 'local'.
     """
-    data = load_config_tree(Path(config_dir), runtime_env)
+    if isinstance(config_dirs, str):
+        dirs: Sequence[Path] = [Path(config_dirs)]
+    else:
+        dirs = config_dirs
+
+    data = load_config_tree(dirs, runtime_env)
 
     if not data:
         raise ValueError('Configuration is empty after loading YAML files')
@@ -92,12 +121,16 @@ def resolve_env_config(
     return runtime_env, config_dir
 
 
-def get_config(cls: Type[T]) -> T:
+def get_config(
+    cls: Type[T],
+    base_config_dirs: Sequence[Path] | None = None,
+) -> T:
     """
     Load configuration from YAML files using the provided factory.
     Reads 'RUNTIME_ENV' and 'CONFIG_DIR' from the environment.
-    If not explicitly provided, defaults to Production ('default', '/app/resources')
-    if running in a container, or Local ('local', 'resources') if running natively.
+
+    If *base_config_dirs* is provided, those directories are loaded first
+    (in order) and the package's own config directory is merged on top.
     """
     runtime_env, config_dir = resolve_env_config(
         os.getenv('RUNTIME_ENV'),
@@ -105,4 +138,5 @@ def get_config(cls: Type[T]) -> T:
         os.path.exists('/app/resources'),
     )
 
-    return map_from_yaml(cls, runtime_env, config_dir)
+    config_dirs = list(base_config_dirs or []) + [Path(config_dir)]
+    return map_from_yaml(cls, runtime_env, config_dirs)

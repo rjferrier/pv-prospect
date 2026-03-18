@@ -4,8 +4,10 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
-# Copy the pv-prospect-common package
+# Copy dependency packages
 COPY ./pv-prospect-common /build/pv-prospect-common
+COPY ./pv-prospect-etl /build/pv-prospect-etl
+COPY ./pv-prospect-data-sources /build/pv-prospect-data-sources
 
 # Copy the data-extraction project
 COPY ./pv-prospect-data-extraction /build/pv-prospect-data-extraction
@@ -23,6 +25,8 @@ RUN poetry export --without=dev --without-hashes -f requirements.txt -o /tmp/req
     pip install --no-cache-dir -r /tmp/requirements.txt && \
     pip install --no-cache-dir --no-deps \
     /build/pv-prospect-common \
+    /build/pv-prospect-etl \
+    /build/pv-prospect-data-sources \
     /build/pv-prospect-data-extraction
 
 

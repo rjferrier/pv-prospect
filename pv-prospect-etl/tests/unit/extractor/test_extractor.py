@@ -55,3 +55,18 @@ def test_list_files_with_none_folder_lists_all() -> None:
     results = extractor.list_files(None)
 
     assert len(results) == 2
+
+
+def test_read_bytes_returns_binary_content() -> None:
+    fs = FakeFileSystem(binary_files={'data.parquet': b'\x00\x01\x02'})
+    extractor = Extractor(fs)
+
+    assert extractor.read_bytes('data.parquet') == b'\x00\x01\x02'
+
+
+def test_read_bytes_raises_on_missing() -> None:
+    fs = FakeFileSystem()
+    extractor = Extractor(fs)
+
+    with pytest.raises(FileNotFoundError):
+        extractor.read_bytes('missing.parquet')

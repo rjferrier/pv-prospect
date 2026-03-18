@@ -4,8 +4,10 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
-# Copy the pv-prospect-common package
+# Copy dependency packages
 COPY ./pv-prospect-common /build/pv-prospect-common
+COPY ./pv-prospect-etl /build/pv-prospect-etl
+COPY ./pv-prospect-data-sources /build/pv-prospect-data-sources
 
 # Copy the data-transformation project
 COPY ./pv-prospect-data-transformation /build/pv-prospect-data-transformation
@@ -22,6 +24,8 @@ RUN poetry export --without=dev --without-hashes -f requirements.txt -o /tmp/req
     pip install --no-cache-dir -r /tmp/requirements.txt && \
     pip install --no-cache-dir --no-deps \
     /build/pv-prospect-common \
+    /build/pv-prospect-etl \
+    /build/pv-prospect-data-sources \
     /build/pv-prospect-data-transformation
 
 
@@ -37,5 +41,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # ---- Cloud Run Job entrypoint (primary cloud target) ----
 FROM runtime-common AS entrypoint
+# Copy package-specific resources for config overlay
+COPY ./pv-prospect-data-transformation/resources /app/resources
 # The entrypoint coordinates the cleaning and processing steps
 CMD ["python", "-m", "pv_prospect.data_transformation.entrypoint"]

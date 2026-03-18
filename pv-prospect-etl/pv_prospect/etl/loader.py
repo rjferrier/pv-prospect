@@ -31,5 +31,12 @@ class Loader:
             raise FileExistsError(f'File already exists: {file_path}')
         self._fs.write_text(file_path, text)
 
+    def write_bytes(
+        self, file_path: str, content: bytes, overwrite: bool = False
+    ) -> None:
+        if not overwrite and self._fs.exists(file_path):
+            raise FileExistsError(f'File already exists: {file_path}')
+        self._fs.write_bytes(file_path, content)
+
     def file_exists(self, file_path: str) -> bool:
         return self._fs.exists(file_path)

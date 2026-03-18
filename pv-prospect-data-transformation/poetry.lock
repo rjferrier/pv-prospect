@@ -247,17 +247,6 @@ files = [
 ]
 
 [[package]]
-name = "common"
-version = "0.1.2"
-description = "Common tools and data structures implemented in pure python."
-optional = false
-python-versions = "*"
-groups = ["main"]
-files = [
-    {file = "common-0.1.2.tar.gz", hash = "sha256:3dfa982670abefc870043b239eaa0ecd860be7aa952b1931c1356b426ff8c76a"},
-]
-
-[[package]]
 name = "contourpy"
 version = "1.3.3"
 description = "Python library for calculating contours of 2D quadrilateral grids"
@@ -1510,6 +1499,38 @@ type = "directory"
 url = "../pv-prospect-common"
 
 [[package]]
+name = "pv-prospect-data-sources"
+version = "0.1.0"
+description = "Shared data-source identity and path conventions"
+optional = false
+python-versions = "^3.12"
+groups = ["main"]
+files = []
+develop = true
+
+[package.source]
+type = "directory"
+url = "../pv-prospect-data-sources"
+
+[[package]]
+name = "pv-prospect-etl"
+version = "0.2.0"
+description = "ETL components for PV Prospect projects"
+optional = false
+python-versions = "^3.12"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+google-cloud-storage = ">=2.14.0"
+pyyaml = ">=6.0.3,<7.0.0"
+
+[package.source]
+type = "directory"
+url = "../pv-prospect-etl"
+
+[[package]]
 name = "pvlib"
 version = "0.11.2"
 description = "A set of functions and classes for simulating the performance of photovoltaic energy systems."
@@ -2027,4 +2048,4 @@ zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "0cff7aa630533370e0c42870e91151c92902d6335b9b9cdde69ed4b91c461531"
+content-hash = "ac89932d192dc1a76b2ed3a68f07a0366885e877c9c760902d13d33785b2f851"

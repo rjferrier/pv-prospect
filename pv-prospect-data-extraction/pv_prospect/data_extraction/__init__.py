@@ -1,10 +1,11 @@
+from pv_prospect.data_sources import SourceDescriptor
+
 from .base import (
     TimeSeries,
     TimeSeriesDataExtractor,
     TimeSeriesDescriptor,
 )
 from .data_sources import (
-    SourceDescriptor,
     get_extractor,
     supports_multi_date,
 )

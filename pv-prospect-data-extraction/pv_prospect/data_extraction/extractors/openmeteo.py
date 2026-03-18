@@ -133,6 +133,10 @@ class Fields(Enum):
 
 class Models(Enum):
     BEST = ('best_match',)
+    BEST_SUBSET = (
+        'best_match',
+        'ukmo_seamless',
+    )
     ALL_FORECAST = (
         'best_match',
         'dmi_seamless',

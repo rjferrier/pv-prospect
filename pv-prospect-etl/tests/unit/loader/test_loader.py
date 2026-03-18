@@ -90,3 +90,29 @@ def test_file_exists_false_when_absent() -> None:
     loader = Loader(fs)
 
     assert loader.file_exists('absent.txt') is False
+
+
+def test_write_bytes_writes_content() -> None:
+    fs = FakeFileSystem()
+    loader = Loader(fs)
+
+    loader.write_bytes('data.parquet', b'\x00\x01\x02')
+
+    assert fs._binary_files['data.parquet'] == b'\x00\x01\x02'
+
+
+def test_write_bytes_raises_on_existing_file() -> None:
+    fs = FakeFileSystem(binary_files={'data.parquet': b'\x00'})
+    loader = Loader(fs)
+
+    with pytest.raises(FileExistsError):
+        loader.write_bytes('data.parquet', b'\x01')
+
+
+def test_write_bytes_overwrites_when_flag_set() -> None:
+    fs = FakeFileSystem(binary_files={'data.parquet': b'\x00'})
+    loader = Loader(fs)
+
+    loader.write_bytes('data.parquet', b'\x01', overwrite=True)
+
+    assert fs._binary_files['data.parquet'] == b'\x01'

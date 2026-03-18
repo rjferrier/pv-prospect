@@ -25,12 +25,14 @@ dependencies = [
     "pyyaml>=6.0.3,<7",
     "pv-prospect-common",
     "pv-prospect-etl",
+    "pv-prospect-data-sources",
 ]
 
 [tool.poetry.dependencies]
 python = "^3.12"
 pv-prospect-common = {path = "../pv-prospect-common", develop = true}
 pv-prospect-etl = {path = "../pv-prospect-etl", develop = true}
+pv-prospect-data-sources = {path = "../pv-prospect-data-sources", develop = true}
 pyyaml = "^6.0.3"
 
 [tool.poetry.group.dev.dependencies]

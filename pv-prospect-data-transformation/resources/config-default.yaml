@@ -1,0 +1,2 @@
+# Package-specific config is empty — all storage backends come from the
+# etl base config.  Add transformation-specific settings here if needed.

@@ -14,6 +14,9 @@ class Extractor:
         text = self._fs.read_text(file_path)
         return io.StringIO(text)
 
+    def read_bytes(self, file_path: str) -> bytes:
+        return self._fs.read_bytes(file_path)
+
     def file_exists(self, file_path: str) -> bool:
         return self._fs.exists(file_path)
 

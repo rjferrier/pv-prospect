@@ -6,12 +6,17 @@ from pv_prospect.etl.storage.base import FileEntry
 class FakeFileSystem:
     """In-memory FileSystem for unit testing."""
 
-    def __init__(self, files: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        files: dict[str, str] | None = None,
+        binary_files: dict[str, bytes] | None = None,
+    ) -> None:
         self._files = dict(files or {})
+        self._binary_files = dict(binary_files or {})
         self.created_dirs: list[str] = []
 
     def exists(self, path: str) -> bool:
-        return path in self._files
+        return path in self._files or path in self._binary_files
 
     def read_text(self, path: str) -> str:
         if path not in self._files:
@@ -20,6 +25,14 @@ class FakeFileSystem:
 
     def write_text(self, path: str, content: str) -> None:
         self._files[path] = content
+
+    def read_bytes(self, path: str) -> bytes:
+        if path not in self._binary_files:
+            raise FileNotFoundError(path)
+        return self._binary_files[path]
+
+    def write_bytes(self, path: str, content: bytes) -> None:
+        self._binary_files[path] = content
 
     def mkdir(self, path: str) -> None:
         self.created_dirs.append(path)

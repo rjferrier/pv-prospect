@@ -32,7 +32,7 @@ from pv_prospect.data_extraction import (
 )
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import ProcessingStats, Result, core
-from pv_prospect.etl import Extractor
+from pv_prospect.etl import Extractor, get_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.backends import LocalStorageConfig
 from pv_prospect.etl.storage.resolve import resolve_dvc_path
@@ -185,7 +185,7 @@ def _init_repos(staging_fs: FileSystem) -> None:
 
 def _main() -> None:
     args = _parse_args()
-    config = get_config(DataExtractionConfig)
+    config = get_config(DataExtractionConfig, base_config_dirs=[get_config_dir()])
 
     # --- validate sources ---------------------------------------------------
     sources = [s.strip() for s in args.source.split(',')]

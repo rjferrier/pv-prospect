@@ -1,4 +1,3 @@
-from enum import Enum
 from functools import lru_cache
 from typing import Callable
 
@@ -15,23 +14,11 @@ from pv_prospect.data_extraction.extractors.openmeteo import (
     TimeResolution,
 )
 from pv_prospect.data_extraction.extractors.openmeteo import Mode as OMMode
+from pv_prospect.data_sources import SourceDescriptor
 
 
 def _location_getter(pv_site: PVSite) -> list[Location]:
     return [get_location_by_pv_system_id(pv_site.pvo_sys_id)]
-
-
-class SourceDescriptor(str, Enum):
-    PVOUTPUT = 'pvoutput'
-    OPENMETEO_QUARTERHOURLY = 'openmeteo/quarterhourly'
-    OPENMETEO_HOURLY = 'openmeteo/hourly'
-    OPENMETEO_SATELLITE = 'openmeteo/satellite'
-    OPENMETEO_HISTORICAL = 'openmeteo/historical'
-    OPENMETEO_V0_QUARTERHOURLY = 'openmeteo/v0/quarterhourly'
-    OPENMETEO_V0_HOURLY = 'openmeteo/v0/hourly'
-
-    def __str__(self) -> str:
-        return self.value
 
 
 @lru_cache(maxsize=None)

@@ -1242,6 +1242,20 @@ type = "directory"
 url = "../pv-prospect-common"
 
 [[package]]
+name = "pv-prospect-data-sources"
+version = "0.1.0"
+description = "Shared data-source identity and path conventions"
+optional = false
+python-versions = "^3.12"
+groups = ["main"]
+files = []
+develop = true
+
+[package.source]
+type = "directory"
+url = "../pv-prospect-data-sources"
+
+[[package]]
 name = "pv-prospect-etl"
 version = "0.2.0"
 description = "ETL components for PV Prospect projects"
@@ -1691,4 +1705,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "da243138054cc6070678df19dc0fca1a46c49461d6b815932150ad947085563c"
+content-hash = "67d0aeda50efdc3b249f8d48ba94e958416c519ce6b388c3d9aa591a594f19c6"

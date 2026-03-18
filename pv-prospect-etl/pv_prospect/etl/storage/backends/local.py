@@ -37,6 +37,17 @@ class LocalFileSystem:
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding='utf-8')
 
+    def read_bytes(self, path: str) -> bytes:
+        full_path = self._base_dir / path
+        if not full_path.exists():
+            raise FileNotFoundError(f'File not found: {full_path}')
+        return full_path.read_bytes()
+
+    def write_bytes(self, path: str, content: bytes) -> None:
+        full_path = self._base_dir / path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(content)
+
     def mkdir(self, path: str) -> None:
         (self._base_dir / path).mkdir(parents=True, exist_ok=True)
 

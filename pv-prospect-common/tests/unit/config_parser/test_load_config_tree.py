@@ -25,9 +25,15 @@ def test_default_env_skips_merge(tmp_path):
     assert result == {'key': 'value'}
 
 
-def test_missing_default_raises_file_not_found(tmp_path):
+def test_nonexistent_dir_raises_file_not_found(tmp_path):
     with pytest.raises(FileNotFoundError):
-        load_config_tree(tmp_path)
+        load_config_tree(tmp_path / 'nonexistent')
+
+
+def test_one_nonexistent_dir_in_list_raises_file_not_found(tmp_path):
+    (tmp_path / 'config-default.yaml').write_text('key: value\n')
+    with pytest.raises(FileNotFoundError):
+        load_config_tree([tmp_path, tmp_path / 'nonexistent'])
 
 
 def test_missing_env_config_uses_default_only(tmp_path):

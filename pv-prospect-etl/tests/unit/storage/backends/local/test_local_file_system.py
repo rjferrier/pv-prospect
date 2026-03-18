@@ -122,6 +122,36 @@ def test_list_files_includes_parent_path(tmp_path):
     assert results[0].parent_path == 'sub'
 
 
+def test_read_bytes_returns_file_content(tmp_path):
+    (tmp_path / 'data.bin').write_bytes(b'\x00\x01\x02')
+    fs = LocalFileSystem(str(tmp_path))
+
+    assert fs.read_bytes('data.bin') == b'\x00\x01\x02'
+
+
+def test_read_bytes_raises_on_missing_file(tmp_path):
+    fs = LocalFileSystem(str(tmp_path))
+
+    with pytest.raises(FileNotFoundError):
+        fs.read_bytes('missing.bin')
+
+
+def test_write_bytes_creates_file(tmp_path):
+    fs = LocalFileSystem(str(tmp_path))
+
+    fs.write_bytes('output.bin', b'\xfe\xff')
+
+    assert (tmp_path / 'output.bin').read_bytes() == b'\xfe\xff'
+
+
+def test_write_bytes_creates_parent_directories(tmp_path):
+    fs = LocalFileSystem(str(tmp_path))
+
+    fs.write_bytes('sub/dir/output.bin', b'\x01')
+
+    assert (tmp_path / 'sub' / 'dir' / 'output.bin').read_bytes() == b'\x01'
+
+
 def test_constructor_creates_base_dir(tmp_path):
     base = tmp_path / 'new' / 'base'
 

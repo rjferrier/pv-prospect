@@ -6,8 +6,6 @@ These are called by:
 - ``tasks.py``      for legacy Celery execution (optional)
 """
 
-import os
-from datetime import date
 from typing import Any, Callable
 
 from pv_prospect.common import DateRange
@@ -17,15 +15,22 @@ from pv_prospect.data_extraction import (
     TimeSeriesDescriptor,
 )
 from pv_prospect.data_extraction.processing.value_objects import Result, Task
-from pv_prospect.etl import Extractor, Loader
+from pv_prospect.data_sources import (
+    LOCATION_MAPPING_CSV_FILE,
+    PV_SITES_CSV_FILE,
+    SUPPORTING_RESOURCES,
+    build_csv_file_path,
+)
+from pv_prospect.etl import TIMESERIES_FOLDER, Extractor, Loader
 from pv_prospect.etl.storage import FileSystem
 
-TIMESERIES_FOLDER = 'timeseries'
-PV_SITES_CSV_FILE = 'pv_sites.csv'
-LOCATION_MAPPING_CSV_FILE = 'location_mapping.csv'
-
-
-SUPPORTING_RESOURCES = [PV_SITES_CSV_FILE, LOCATION_MAPPING_CSV_FILE]
+# Re-export for callers that access these via core.PV_SITES_CSV_FILE etc.
+__all__ = [
+    'PV_SITES_CSV_FILE',
+    'LOCATION_MAPPING_CSV_FILE',
+    'SUPPORTING_RESOURCES',
+    'TIMESERIES_FOLDER',
+]
 
 
 def preprocess(
@@ -49,10 +54,8 @@ def preprocess(
     extractor = Extractor(versioned_resources_fs)
     loader = Loader(staged_resources_fs)
 
-    parent_folders = [TIMESERIES_FOLDER]
     folder_ids: list[str | None] = [
-        loader.create_folder(f'{parent}/{source_descriptor}')
-        for parent in parent_folders
+        loader.create_folder(f'{TIMESERIES_FOLDER}/{source_descriptor}')
     ]
 
     resources = [
@@ -61,12 +64,13 @@ def preprocess(
     ]
 
     for filename, blob_path in resources:
-        if loader.file_exists(filename):
+        staged_path = filename
+        if loader.file_exists(staged_path):
             print(f'    {filename} already exists, skipping provisioning')
             continue
 
         with extractor.read_file(blob_path) as f:
-            loader.write_text(filename, f.read(), overwrite=False)
+            loader.write_text(staged_path, f.read(), overwrite=False)
 
     return folder_ids
 
@@ -109,8 +113,8 @@ def extract_and_load(
     def get_csv_path(ts_descriptor: TimeSeriesDescriptor) -> str:
         return build_csv_file_path(
             TIMESERIES_FOLDER,
-            source_descriptor,
-            ts_descriptor,
+            str(source_descriptor),
+            str(ts_descriptor),
             date_range.start,
         )
 
@@ -149,22 +153,3 @@ def extract_and_load(
     except Exception as e:
         print(f'    {task}: ERROR: {e}')
         return Result.failure(task, e)
-
-
-def build_csv_file_path(
-    time_series_folder: str,
-    source_descriptor: 'SourceDescriptor',
-    time_series_descriptor: 'TimeSeriesDescriptor',
-    date_: date,
-) -> str:
-    filename_parts = [
-        str(source_descriptor).replace('/', '-'),
-        str(time_series_descriptor),
-        _format_date(date_),
-    ]
-    filename = '_'.join(filename_parts) + '.csv'
-    return os.path.join(time_series_folder, source_descriptor, filename)
-
-
-def _format_date(date_: date) -> str:
-    return '%04d%02d%02d' % (date_.year, date_.month, date_.day)

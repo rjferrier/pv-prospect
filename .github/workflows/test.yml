@@ -12,6 +12,7 @@ jobs:
         package:
           - pv-prospect-common
           - pv-prospect-etl
+          - pv-prospect-data-sources
           - pv-prospect-data-extraction
           - pv-prospect-data-transformation
 
