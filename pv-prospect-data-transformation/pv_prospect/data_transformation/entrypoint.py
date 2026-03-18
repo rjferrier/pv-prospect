@@ -36,9 +36,6 @@ from pv_prospect.data_transformation.transformations import (
 from pv_prospect.etl import TIMESERIES_FOLDER, Extractor, get_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 
-CLEANED_PREFIX = 'cleaned'
-PROCESSED_PREFIX = 'processed'
-
 
 def _load_resources(raw_fs: FileSystem) -> None:
     """Load the PV site and location mapping repos from the raw data bucket."""
@@ -75,10 +72,12 @@ def _write_parquet(fs: FileSystem, df: pd.DataFrame, path: str) -> None:
 
 def _staging_to_cleaned(path: str) -> str:
     """Convert a raw timeseries path to the corresponding cleaned path."""
-    return f'{CLEANED_PREFIX}/{path}'.replace('.csv', '.parquet')
+    return path.replace('.csv', '.parquet')
 
 
-def _clean_weather(raw_fs: FileSystem, date_str: str) -> None:
+def _clean_weather(
+    raw_fs: FileSystem, intermediate_fs: FileSystem, date_str: str
+) -> None:
     _load_resources(raw_fs)
     raw_extractor = Extractor(raw_fs)
     weather_prefix = f'{TIMESERIES_FOLDER}/{SourceDescriptor.OPENMETEO_HISTORICAL}'
@@ -92,10 +91,12 @@ def _clean_weather(raw_fs: FileSystem, date_str: str) -> None:
         if df is not None and not df.empty:
             cleaned_df = clean_weather(df)
             out_path = _staging_to_cleaned(blob_path)
-            _write_parquet(raw_fs, cleaned_df, out_path)
+            _write_parquet(intermediate_fs, cleaned_df, out_path)
 
 
-def _clean_pvoutput(raw_fs: FileSystem, date_str: str) -> None:
+def _clean_pvoutput(
+    raw_fs: FileSystem, intermediate_fs: FileSystem, date_str: str
+) -> None:
     pv_system_id = os.environ['PV_SYSTEM_ID']
     pv_prefix = f'{TIMESERIES_FOLDER}/{SourceDescriptor.PVOUTPUT}/{pv_system_id}'
     in_path = f'{pv_prefix}/pvoutput_{pv_system_id}_{date_str}.csv'
@@ -104,51 +105,53 @@ def _clean_pvoutput(raw_fs: FileSystem, date_str: str) -> None:
     if df is not None and not df.empty:
         cleaned_df = clean_pvoutput(df)
         out_path = _staging_to_cleaned(in_path)
-        _write_parquet(raw_fs, cleaned_df, out_path)
+        _write_parquet(intermediate_fs, cleaned_df, out_path)
 
 
-def _process_weather(raw_fs: FileSystem, model_fs: FileSystem, date_str: str) -> None:
-    raw_extractor = Extractor(raw_fs)
+def _process_weather(
+    intermediate_fs: FileSystem, model_fs: FileSystem, date_str: str
+) -> None:
+    intermediate_extractor = Extractor(intermediate_fs)
     cleaned_weather_prefix = (
-        f'{CLEANED_PREFIX}/{TIMESERIES_FOLDER}/'
-        f'{SourceDescriptor.OPENMETEO_QUARTERHOURLY}'
+        f'{TIMESERIES_FOLDER}/{SourceDescriptor.OPENMETEO_QUARTERHOURLY}'
     )
-    entries = raw_extractor.list_files(cleaned_weather_prefix, pattern='*.parquet')
+    entries = intermediate_extractor.list_files(
+        cleaned_weather_prefix, pattern='*.parquet'
+    )
     for entry in entries:
         if date_str not in entry.name:
             continue
         blob_path = entry.path
         print(f'[process_weather] Processing {blob_path}')
-        cleaned_df = _read_parquet(raw_fs, blob_path)
+        cleaned_df = _read_parquet(intermediate_fs, blob_path)
         processed_df = process_weather(cleaned_df)
         out_path = (
-            f'{PROCESSED_PREFIX}/{TIMESERIES_FOLDER}/'
+            f'{TIMESERIES_FOLDER}/'
             f'{SourceDescriptor.OPENMETEO_QUARTERHOURLY}/{entry.name}'
         )
         _write_parquet(model_fs, processed_df, out_path)
 
 
-def _process_pv(raw_fs: FileSystem, model_fs: FileSystem, date_str: str) -> None:
+def _process_pv(
+    raw_fs: FileSystem, intermediate_fs: FileSystem, model_fs: FileSystem, date_str: str
+) -> None:
     pv_sys_id = int(os.environ['PV_SYSTEM_ID'])
     _load_resources(raw_fs)
     pv_site = get_pv_site_by_system_id(pv_sys_id)
 
-    cleaned_pv_prefix = (
-        f'{CLEANED_PREFIX}/{TIMESERIES_FOLDER}/{SourceDescriptor.PVOUTPUT}/{pv_sys_id}'
-    )
+    cleaned_pv_prefix = f'{TIMESERIES_FOLDER}/{SourceDescriptor.PVOUTPUT}/{pv_sys_id}'
     in_pv_path = f'{cleaned_pv_prefix}/pvoutput_{pv_sys_id}_{date_str}.parquet'
-    if not raw_fs.exists(in_pv_path):
+    if not intermediate_fs.exists(in_pv_path):
         print(f'[process_pv] Cleaned PV data not found: {in_pv_path}')
         return
 
-    cleaned_pv_df = _read_parquet(raw_fs, in_pv_path)
+    cleaned_pv_df = _read_parquet(intermediate_fs, in_pv_path)
 
     cleaned_weather_prefix = (
-        f'{CLEANED_PREFIX}/{TIMESERIES_FOLDER}/'
-        f'{SourceDescriptor.OPENMETEO_QUARTERHOURLY}'
+        f'{TIMESERIES_FOLDER}/{SourceDescriptor.OPENMETEO_QUARTERHOURLY}'
     )
-    raw_extractor = Extractor(raw_fs)
-    weather_entries = raw_extractor.list_files(
+    intermediate_extractor = Extractor(intermediate_fs)
+    weather_entries = intermediate_extractor.list_files(
         cleaned_weather_prefix, pattern='*.parquet'
     )
     weather_entry = None
@@ -161,7 +164,7 @@ def _process_pv(raw_fs: FileSystem, model_fs: FileSystem, date_str: str) -> None
         print(f'[process_pv] Cleaned weather data not found for date {date_str}')
         return
 
-    cleaned_weather_df = _read_parquet(raw_fs, weather_entry.path)
+    cleaned_weather_df = _read_parquet(intermediate_fs, weather_entry.path)
     print(f'[process_pv] Joining weather={weather_entry.path} with pv={in_pv_path}')
     processed_df = process_pv(
         weather_df=cleaned_weather_df,
@@ -169,7 +172,7 @@ def _process_pv(raw_fs: FileSystem, model_fs: FileSystem, date_str: str) -> None
         pv_site=pv_site,
     )
     out_path = (
-        f'{PROCESSED_PREFIX}/{TIMESERIES_FOLDER}/'
+        f'{TIMESERIES_FOLDER}/'
         f'{SourceDescriptor.PVOUTPUT}/{pv_sys_id}/'
         f'processed_pv_{pv_sys_id}_{date_str}.parquet'
     )
@@ -183,18 +186,19 @@ def main() -> None:
 
     config = get_config(DataTransformationConfig, base_config_dirs=[get_config_dir()])
     raw_fs = get_filesystem(config.staged_raw_data_storage)
+    intermediate_fs = get_filesystem(config.intermediate_data_storage)
     model_fs = get_filesystem(config.staged_model_data_storage)
 
     print(f'[entrypoint] Starting {step} for date {target_date}')
 
     if step == 'clean_weather':
-        _clean_weather(raw_fs, date_str)
+        _clean_weather(raw_fs, intermediate_fs, date_str)
     elif step == 'clean_pvoutput':
-        _clean_pvoutput(raw_fs, date_str)
+        _clean_pvoutput(raw_fs, intermediate_fs, date_str)
     elif step == 'process_weather':
-        _process_weather(raw_fs, model_fs, date_str)
+        _process_weather(intermediate_fs, model_fs, date_str)
     elif step == 'process_pv':
-        _process_pv(raw_fs, model_fs, date_str)
+        _process_pv(raw_fs, intermediate_fs, model_fs, date_str)
     else:
         print(
             f'[entrypoint] ERROR: unknown TRANSFORM_STEP={step}',

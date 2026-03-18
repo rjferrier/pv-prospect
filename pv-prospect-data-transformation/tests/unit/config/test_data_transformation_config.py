@@ -13,6 +13,10 @@ def test_from_dict_parses_gcs_config():
             'backend': 'gcs',
             'bucket_name': 'my-model-bucket',
         },
+        'intermediate_data_storage': {
+            'backend': 'local',
+            'prefix': '/tmp',
+        },
     }
 
     config = DataTransformationConfig.from_dict(data)
@@ -21,6 +25,8 @@ def test_from_dict_parses_gcs_config():
     assert config.staged_raw_data_storage.bucket_name == 'my-raw-bucket'
     assert isinstance(config.staged_model_data_storage, GcsStorageConfig)
     assert config.staged_model_data_storage.bucket_name == 'my-model-bucket'
+    assert isinstance(config.intermediate_data_storage, LocalStorageConfig)
+    assert config.intermediate_data_storage.prefix == '/tmp'
 
 
 def test_from_dict_parses_local_config():
@@ -33,6 +39,10 @@ def test_from_dict_parses_local_config():
             'backend': 'local',
             'prefix': '/tmp/model',
         },
+        'intermediate_data_storage': {
+            'backend': 'local',
+            'prefix': '/tmp/intermediate',
+        },
     }
 
     config = DataTransformationConfig.from_dict(data)
@@ -41,6 +51,8 @@ def test_from_dict_parses_local_config():
     assert config.staged_raw_data_storage.prefix == '/tmp/raw'
     assert isinstance(config.staged_model_data_storage, LocalStorageConfig)
     assert config.staged_model_data_storage.prefix == '/tmp/model'
+    assert isinstance(config.intermediate_data_storage, LocalStorageConfig)
+    assert config.intermediate_data_storage.prefix == '/tmp/intermediate'
 
 
 def test_from_dict_raises_on_missing_key():

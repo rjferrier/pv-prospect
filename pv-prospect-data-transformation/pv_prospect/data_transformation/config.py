@@ -12,6 +12,7 @@ class DataTransformationConfig:
 
     staged_raw_data_storage: AnyStorageConfig
     staged_model_data_storage: AnyStorageConfig
+    intermediate_data_storage: AnyStorageConfig
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DataTransformationConfig':
@@ -21,5 +22,8 @@ class DataTransformationConfig:
             ),
             staged_model_data_storage=parse_storage_config(
                 data['staged_model_data_storage']
+            ),
+            intermediate_data_storage=parse_storage_config(
+                data['intermediate_data_storage']
             ),
         )
