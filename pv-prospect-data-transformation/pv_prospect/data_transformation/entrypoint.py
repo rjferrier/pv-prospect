@@ -1,12 +1,12 @@
 """Cloud Run Job entrypoint for Data Transformation.
 
 Reads task parameters from environment variables set by the Cloud Workflow
-and calls the corresponding clean or process function.
+and calls the corresponding clean or prepare function.
 
 Environment variables
 ---------------------
 TRANSFORM_STEP
-    ``clean_weather``, ``clean_pvoutput``, ``process_weather``, or ``process_pv``
+    ``clean_weather``, ``clean_pvoutput``, ``prepare_weather``, or ``prepare_pv``
 DATE
     ISO date ``YYYY-MM-DD`` to process
 PV_SYSTEM_ID
@@ -30,8 +30,8 @@ from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.transformations import (
     clean_pvoutput,
     clean_weather,
-    process_pv,
-    process_weather,
+    prepare_pv,
+    prepare_weather,
 )
 from pv_prospect.etl import TIMESERIES_FOLDER, Extractor, get_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
@@ -108,7 +108,7 @@ def _clean_pvoutput(
         _write_parquet(intermediate_fs, cleaned_df, out_path)
 
 
-def _process_weather(
+def _prepare_weather(
     intermediate_fs: FileSystem, model_fs: FileSystem, date_str: str
 ) -> None:
     intermediate_extractor = Extractor(intermediate_fs)
@@ -122,17 +122,17 @@ def _process_weather(
         if date_str not in entry.name:
             continue
         blob_path = entry.path
-        print(f'[process_weather] Processing {blob_path}')
+        print(f'[prepare_weather] Processing {blob_path}')
         cleaned_df = _read_parquet(intermediate_fs, blob_path)
-        processed_df = process_weather(cleaned_df)
+        prepared_df = prepare_weather(cleaned_df)
         out_path = (
             f'{TIMESERIES_FOLDER}/'
             f'{SourceDescriptor.OPENMETEO_QUARTERHOURLY}/{entry.name}'
         )
-        _write_parquet(model_fs, processed_df, out_path)
+        _write_parquet(model_fs, prepared_df, out_path)
 
 
-def _process_pv(
+def _prepare_pv(
     raw_fs: FileSystem, intermediate_fs: FileSystem, model_fs: FileSystem, date_str: str
 ) -> None:
     pv_sys_id = int(os.environ['PV_SYSTEM_ID'])
@@ -142,7 +142,7 @@ def _process_pv(
     cleaned_pv_prefix = f'{TIMESERIES_FOLDER}/{SourceDescriptor.PVOUTPUT}/{pv_sys_id}'
     in_pv_path = f'{cleaned_pv_prefix}/pvoutput_{pv_sys_id}_{date_str}.parquet'
     if not intermediate_fs.exists(in_pv_path):
-        print(f'[process_pv] Cleaned PV data not found: {in_pv_path}')
+        print(f'[prepare_pv] Cleaned PV data not found: {in_pv_path}')
         return
 
     cleaned_pv_df = _read_parquet(intermediate_fs, in_pv_path)
@@ -161,12 +161,12 @@ def _process_pv(
             break
 
     if not weather_entry:
-        print(f'[process_pv] Cleaned weather data not found for date {date_str}')
+        print(f'[prepare_pv] Cleaned weather data not found for date {date_str}')
         return
 
     cleaned_weather_df = _read_parquet(intermediate_fs, weather_entry.path)
-    print(f'[process_pv] Joining weather={weather_entry.path} with pv={in_pv_path}')
-    processed_df = process_pv(
+    print(f'[prepare_pv] Joining weather={weather_entry.path} with pv={in_pv_path}')
+    prepared_df = prepare_pv(
         weather_df=cleaned_weather_df,
         pvoutput_df=cleaned_pv_df,
         pv_site=pv_site,
@@ -176,7 +176,7 @@ def _process_pv(
         f'{SourceDescriptor.PVOUTPUT}/{pv_sys_id}/'
         f'processed_pv_{pv_sys_id}_{date_str}.parquet'
     )
-    _write_parquet(model_fs, processed_df, out_path)
+    _write_parquet(model_fs, prepared_df, out_path)
 
 
 def main() -> None:
@@ -195,10 +195,10 @@ def main() -> None:
         _clean_weather(raw_fs, intermediate_fs, date_str)
     elif step == 'clean_pvoutput':
         _clean_pvoutput(raw_fs, intermediate_fs, date_str)
-    elif step == 'process_weather':
-        _process_weather(intermediate_fs, model_fs, date_str)
-    elif step == 'process_pv':
-        _process_pv(raw_fs, intermediate_fs, model_fs, date_str)
+    elif step == 'prepare_weather':
+        _prepare_weather(intermediate_fs, model_fs, date_str)
+    elif step == 'prepare_pv':
+        _prepare_pv(raw_fs, intermediate_fs, model_fs, date_str)
     else:
         print(
             f'[entrypoint] ERROR: unknown TRANSFORM_STEP={step}',

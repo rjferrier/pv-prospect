@@ -6,7 +6,7 @@ instead of Cloud Run Jobs.
 Usage::
 
     python -m pv_prospect.data_transformation.runner \
-        clean_weather,process_weather \
+        clean_weather,prepare_weather \
         --start-date 2025-06-01 --end-date 2025-06-30 \
         --local-dir ./out --workers 4
 """
@@ -37,15 +37,15 @@ from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.transformations import (
     clean_pvoutput,
     clean_weather,
-    process_pv,
-    process_weather,
+    prepare_pv,
+    prepare_weather,
 )
 from pv_prospect.etl import TIMESERIES_FOLDER, Extractor, get_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.backends import LocalStorageConfig
 
-STEPS = ['clean_weather', 'clean_pvoutput', 'process_weather', 'process_pv']
-STEPS_NEEDING_PV_ID: frozenset[str] = frozenset({'clean_pvoutput', 'process_pv'})
+STEPS = ['clean_weather', 'clean_pvoutput', 'prepare_weather', 'prepare_pv']
+STEPS_NEEDING_PV_ID: frozenset[str] = frozenset({'clean_pvoutput', 'prepare_pv'})
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ def _run_clean_pvoutput(
         )
 
 
-def _run_process_weather(
+def _run_prepare_weather(
     intermediate_fs: FileSystem, model_fs: FileSystem, date_str: str
 ) -> None:
     intermediate_extractor = Extractor(intermediate_fs)
@@ -242,16 +242,16 @@ def _run_process_weather(
     ):
         if date_str not in entry.name:
             continue
-        print(f'    [process_weather] Processing {entry.path}')
+        print(f'    [prepare_weather] Processing {entry.path}')
         cleaned_df = _read_parquet(intermediate_fs, entry.path)
         out_path = (
             f'{TIMESERIES_FOLDER}/'
             f'{SourceDescriptor.OPENMETEO_QUARTERHOURLY}/{entry.name}'
         )
-        _write_parquet(model_fs, process_weather(cleaned_df), out_path)
+        _write_parquet(model_fs, prepare_weather(cleaned_df), out_path)
 
 
-def _run_process_pv(
+def _run_prepare_pv(
     intermediate_fs: FileSystem, model_fs: FileSystem, pv_system_id: int, date_str: str
 ) -> None:
     pv_site = get_pv_site_by_system_id(pv_system_id)
@@ -261,7 +261,7 @@ def _run_process_pv(
     )
     in_pv_path = f'{cleaned_pv_prefix}/pvoutput_{pv_system_id}_{date_str}.parquet'
     if not intermediate_fs.exists(in_pv_path):
-        print(f'    [process_pv] Cleaned PV data not found: {in_pv_path}')
+        print(f'    [prepare_pv] Cleaned PV data not found: {in_pv_path}')
         return
 
     cleaned_weather_prefix = (
@@ -279,20 +279,20 @@ def _run_process_pv(
         None,
     )
     if not weather_entry:
-        print(f'    [process_pv] Cleaned weather data not found for date {date_str}')
+        print(f'    [prepare_pv] Cleaned weather data not found for date {date_str}')
         return
 
-    print(f'    [process_pv] Joining weather={weather_entry.path} with pv={in_pv_path}')
-    processed_df = process_pv(
+    print(f'    [prepare_pv] Joining weather={weather_entry.path} with pv={in_pv_path}')
+    prepared_df = prepare_pv(
         weather_df=_read_parquet(intermediate_fs, weather_entry.path),
         pvoutput_df=_read_parquet(intermediate_fs, in_pv_path),
         pv_site=pv_site,
     )
     out_path = (
         f'{TIMESERIES_FOLDER}/{SourceDescriptor.PVOUTPUT}/'
-        f'{pv_system_id}/processed_pv_{pv_system_id}_{date_str}.parquet'
+        f'{pv_system_id}/prepareed_pv_{pv_system_id}_{date_str}.parquet'
     )
-    _write_parquet(model_fs, processed_df, out_path)
+    _write_parquet(model_fs, prepared_df, out_path)
 
 
 # ---------------------------------------------------------------------------
@@ -372,15 +372,15 @@ def _main() -> None:
                 future = pool.submit(
                     _run_clean_pvoutput, raw_fs, intermediate_fs, pv_id, date_str
                 )
-            elif step == 'process_weather':
+            elif step == 'prepare_weather':
                 future = pool.submit(
-                    _run_process_weather, intermediate_fs, model_fs, date_str
+                    _run_prepare_weather, intermediate_fs, model_fs, date_str
                 )
             else:
                 if pv_id is None:
                     raise ValueError(f'pv_id required for step {step}')
                 future = pool.submit(
-                    _run_process_pv, intermediate_fs, model_fs, pv_id, date_str
+                    _run_prepare_pv, intermediate_fs, model_fs, pv_id, date_str
                 )
             futures[future] = (step, date_str, pv_id)
 

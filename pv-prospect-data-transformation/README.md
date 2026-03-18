@@ -20,12 +20,12 @@ The transformation process consists of four scripts, organised into two layers:
 
 ### Processing (intermediate → versioned)
 
-#### `process_weather`
+#### `prepare_weather`
 - **Input**: Cleaned weather data.
 - **Role**: Selects a subset of weather features (e.g. `temperature`, `direct_normal_irradiance`, `diffuse_radiation`) and downsamples time resolution. Output is associated with a location (latitude/longitude), not a PV site, to support a large sample space for weather-model training.
-- **Output**: Processed weather data (Parquet, versioned).
+- **Output**: Prepared weather data (Parquet, versioned).
 
-#### `process_pv`
+#### `prepare_pv`
 - **Input**: Cleaned weather data + cleaned PV output data.
 - **Role**: Inner-joins the two cleaned datasets on `time`, calculates Plane of Array (POA) irradiance using `pvlib` (accounting for panel tilt, azimuth, and area fraction), selects the final feature set (e.g. `temperature`, `plane_of_array_irradiance`, `power`), and downsamples time resolution.
-- **Output**: Processed PV model training data (Parquet, versioned).
+- **Output**: Prepared PV model training data (Parquet, versioned).

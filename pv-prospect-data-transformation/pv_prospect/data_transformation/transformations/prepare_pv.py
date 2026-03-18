@@ -10,7 +10,7 @@ ALTITUDE = 0
 DEFAULT_KEEP_COLUMNS = ('temperature', 'plane_of_array_irradiance', 'power')
 
 
-def process_pv(
+def prepare_pv(
     weather_df: pd.DataFrame,
     pvoutput_df: pd.DataFrame,
     pv_site: PVSite,
@@ -30,7 +30,7 @@ def process_pv(
             time-weighted averaging. None keeps original resolution.
 
     Returns:
-        Processed DataFrame with 'time' and the specified columns.
+        Prepared DataFrame with 'time' and the specified columns.
     """
     weather_df = weather_df.copy()
     weather_df['time'] = pd.to_datetime(weather_df['time'])

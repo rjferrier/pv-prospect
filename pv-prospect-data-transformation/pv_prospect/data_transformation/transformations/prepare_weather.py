@@ -5,13 +5,13 @@ from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
 DEFAULT_KEEP_COLUMNS = ('temperature', 'direct_normal_irradiance', 'diffuse_radiation')
 
 
-def process_weather(
+def prepare_weather(
     df: pd.DataFrame,
     keep_columns: tuple[str, ...] = DEFAULT_KEEP_COLUMNS,
     timescale_days: int | None = 1,
 ) -> pd.DataFrame:
     """
-    Process cleaned weather data for weather-model training.
+    Prepare cleaned weather data for weather-model training.
 
     Selects a subset of columns and optionally downsamples time resolution.
 
@@ -22,7 +22,7 @@ def process_weather(
             time-weighted averaging. None keeps original resolution.
 
     Returns:
-        Processed DataFrame with 'time' and the specified columns.
+        Prepared DataFrame with 'time' and the specified columns.
     """
     df['time'] = pd.to_datetime(df['time'])
 

@@ -82,8 +82,8 @@ See the PlantUML diagram in `doc/architecture.puml` for the overarching vision f
 2. **Transformation** (`pv-prospect-data-transformation`): Four-step pipeline:
    - `clean_weather`: raw CSV → cleaned Parquet (column selection, renaming)
    - `clean_pvoutput`: raw CSV → cleaned Parquet (UTC time synthesis from UK local time)
-   - `process_weather`: cleaned → versioned Parquet (feature selection, downsampling, keyed by lat/lon)
-   - `process_pv`: cleaned weather + cleaned PV → versioned Parquet (inner join on time, POA irradiance calculation via `pvlib`)
+   - `prepare_weather`: cleaned → versioned Parquet (feature selection, downsampling, keyed by lat/lon)
+   - `prepare_pv`: cleaned weather + cleaned PV → versioned Parquet (inner join on time, POA irradiance calculation via `pvlib`)
 3. **Model training** (`pv-prospect-model`): Consumes versioned Parquet data.
 
 Production runs on GCP: Cloud Scheduler triggers daily, Cloud Workflows orchestrates the fan-out, Cloud Run Jobs execute individual extraction/transformation tasks.

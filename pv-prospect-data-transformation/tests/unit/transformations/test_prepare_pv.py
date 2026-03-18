@@ -1,4 +1,4 @@
-"""Tests for process_pv."""
+"""Tests for prepare_pv."""
 
 from decimal import Decimal
 
@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from pv_prospect.common import Location, PanelGeometry, PVSite, Shading, System
-from pv_prospect.data_transformation.transformations import process_pv
+from pv_prospect.data_transformation.transformations import prepare_pv
 
 
 def _make_pv_site(
@@ -87,7 +87,7 @@ def pvoutput_df(weather_df):
 
 def test_output_contains_default_columns(pv_site, weather_df, pvoutput_df):
     """Result should contain time + default keep columns."""
-    result = process_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
+    result = prepare_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
 
     assert 'time' in result.columns
     assert 'temperature' in result.columns
@@ -97,7 +97,7 @@ def test_output_contains_default_columns(pv_site, weather_df, pvoutput_df):
 
 def test_drops_non_selected_columns(pv_site, weather_df, pvoutput_df):
     """Columns not in keep_columns should be absent."""
-    result = process_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
+    result = prepare_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
 
     assert 'direct_normal_irradiance' not in result.columns
     assert 'diffuse_radiation' not in result.columns
@@ -105,7 +105,7 @@ def test_drops_non_selected_columns(pv_site, weather_df, pvoutput_df):
 
 def test_custom_keep_columns(pv_site, weather_df, pvoutput_df):
     """Should honour custom keep_columns."""
-    result = process_pv(
+    result = prepare_pv(
         weather_df,
         pvoutput_df,
         pv_site,
@@ -127,7 +127,7 @@ def test_poa_irradiance_has_no_meaningfully_negative_values(
     Note: pvlib's isotropic model can produce negligible negative values at
     night due to floating-point arithmetic; we tolerate noise < 0.1 W/m².
     """
-    result = process_pv(
+    result = prepare_pv(
         weather_df,
         pvoutput_df,
         pv_site,
@@ -146,7 +146,7 @@ def test_inner_join_drops_unmatched_weather_rows(pv_site, weather_df):
     # Only provide PV output for the first 12 hours
     pvoutput_df = _make_matching_pvoutput_df(weather_df.iloc[:12])
 
-    result = process_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
+    result = prepare_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
 
     assert len(result) <= 12
 
@@ -156,7 +156,7 @@ def test_drops_nan_rows(pv_site, weather_df):
     pvoutput_df = _make_matching_pvoutput_df(weather_df)
     pvoutput_df.loc[0, 'power'] = float('nan')
 
-    result = process_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
+    result = prepare_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
 
     assert not result.isna().any().any()
 
@@ -171,7 +171,7 @@ def test_does_not_mutate_inputs(pv_site, weather_df, pvoutput_df):
     weather_len = len(weather_df)
     pvo_len = len(pvoutput_df)
 
-    process_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
+    prepare_pv(weather_df, pvoutput_df, pv_site, timescale_days=None)
 
     assert list(weather_df.columns) == weather_cols
     assert list(pvoutput_df.columns) == pvo_cols
@@ -199,14 +199,14 @@ def test_multi_panel_poa_differs_from_single_panel(weather_df, pvoutput_df):
         inverter_system=System(brand='Test', capacity=3600),
     )
 
-    result_single = process_pv(
+    result_single = prepare_pv(
         weather_df,
         pvoutput_df,
         single,
         keep_columns=('plane_of_array_irradiance',),
         timescale_days=None,
     )
-    result_multi = process_pv(
+    result_multi = prepare_pv(
         weather_df,
         pvoutput_df,
         multi,
