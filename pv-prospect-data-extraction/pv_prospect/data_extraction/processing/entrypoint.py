@@ -9,10 +9,10 @@ JOB_TYPE
     ``preprocess`` or ``extract_and_load``
 
 For **preprocess**:
-    SOURCE_DESCRIPTOR — e.g. ``openmeteo/quarterhourly``
+    DATA_SOURCE — ``pv`` or ``weather`` (optional; defaults to weather)
 
 For **extract_and_load**:
-    SOURCE_DESCRIPTOR — e.g. ``openmeteo/quarterhourly``
+    DATA_SOURCE — ``pv`` or ``weather`` (optional; defaults to weather)
     PV_SYSTEM_ID      — integer system id
     START_DATE        — ISO date ``YYYY-MM-DD``
     END_DATE          — ISO date ``YYYY-MM-DD``
@@ -40,7 +40,10 @@ from pv_prospect.data_extraction import (
 )
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import core
-from pv_prospect.etl import Extractor, get_config_dir
+from pv_prospect.data_sources import DataSource
+from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
+from pv_prospect.etl import Extractor
+from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.resolve import resolve_dvc_path
 
@@ -53,8 +56,8 @@ def _run_preprocess(
     versioned_resources_fs: FileSystem,
     staging_fs: FileSystem,
     dvc_prefix: str,
+    source_descriptor: SourceDescriptor,
 ) -> None:
-    source_descriptor = SourceDescriptor(os.environ['SOURCE_DESCRIPTOR'])
     print(f'[entrypoint] preprocess: {source_descriptor}')
     core.preprocess(
         resolve_dvc_path,
@@ -65,8 +68,10 @@ def _run_preprocess(
     )
 
 
-def _run_extract_and_load(staging_fs: FileSystem) -> None:
-    source_descriptor = SourceDescriptor(os.environ['SOURCE_DESCRIPTOR'])
+def _run_extract_and_load(
+    staging_fs: FileSystem,
+    source_descriptor: SourceDescriptor,
+) -> None:
     pv_system_id = int(os.environ['PV_SYSTEM_ID'])
     start_date = date.fromisoformat(os.environ['START_DATE'])
     end_date = date.fromisoformat(os.environ['END_DATE'])
@@ -113,7 +118,16 @@ def _run_extract_and_load(staging_fs: FileSystem) -> None:
 
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
-    config = get_config(DataExtractionConfig, base_config_dirs=[get_config_dir()])
+    config = get_config(
+        DataExtractionConfig,
+        base_config_dirs=[get_etl_config_dir(), get_ds_config_dir()],
+    )
+
+    source_env = os.environ.get('DATA_SOURCE')
+    if source_env:
+        source_descriptor = config.data_sources.get_descriptor(DataSource(source_env))
+    else:
+        source_descriptor = config.data_sources.get_descriptor(DataSource.WEATHER)
 
     # Cloud Run always uses GCS — resolve storage backends once.
     staging_fs = get_filesystem(config.staged_raw_data_storage)
@@ -122,9 +136,11 @@ def main() -> None:
     dvc_prefix = tracking.prefix if tracking else ''
 
     if job_type == 'preprocess':
-        _run_preprocess(versioned_resources_fs, staging_fs, dvc_prefix)
+        _run_preprocess(
+            versioned_resources_fs, staging_fs, dvc_prefix, source_descriptor
+        )
     elif job_type == 'extract_and_load':
-        _run_extract_and_load(staging_fs)
+        _run_extract_and_load(staging_fs, source_descriptor)
     else:
         print(f'[entrypoint] ERROR: unknown JOB_TYPE={job_type!r}', file=sys.stderr)
         sys.exit(1)

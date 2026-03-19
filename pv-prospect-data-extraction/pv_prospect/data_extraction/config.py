@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict
 
+from pv_prospect.data_sources import DataSourcesConfig
 from pv_prospect.etl.storage.factory import AnyStorageConfig, parse_storage_config
 
 
@@ -30,6 +31,7 @@ class DataExtractionConfig:
     versioned_resources_storage: AnyStorageConfig
     staged_raw_data_storage: AnyStorageConfig
     task_queue: TaskQueueConfig
+    data_sources: DataSourcesConfig
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DataExtractionConfig':
@@ -42,4 +44,5 @@ class DataExtractionConfig:
             staged_raw_data_storage=parse_storage_config(
                 data['staged_raw_data_storage']
             ),
+            data_sources=DataSourcesConfig.from_dict(data),
         )

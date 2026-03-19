@@ -1,0 +1,3 @@
+data_sources:
+  pv: 'pvoutput'
+  weather: 'openmeteo/historical'

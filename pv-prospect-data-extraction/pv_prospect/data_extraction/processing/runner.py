@@ -32,21 +32,13 @@ from pv_prospect.data_extraction import (
 )
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import ProcessingStats, Result, core
-from pv_prospect.etl import Extractor, get_config_dir
+from pv_prospect.data_sources import DataSource
+from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
+from pv_prospect.etl import Extractor
+from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.backends import LocalStorageConfig
 from pv_prospect.etl.storage.resolve import resolve_dvc_path
-
-SOURCE_DESCRIPTORS = {
-    'pv': SourceDescriptor.PVOUTPUT,
-    'weather-om-15': SourceDescriptor.OPENMETEO_QUARTERHOURLY,
-    'weather-om-60': SourceDescriptor.OPENMETEO_HOURLY,
-    'weather-om-satellite': SourceDescriptor.OPENMETEO_SATELLITE,
-    'weather-om-historical': SourceDescriptor.OPENMETEO_HISTORICAL,
-    'weather-om-15-v0': SourceDescriptor.OPENMETEO_V0_QUARTERHOURLY,
-    'weather-om-60-v0': SourceDescriptor.OPENMETEO_V0_HOURLY,
-}
-
 
 # ---------------------------------------------------------------------------
 # Argument parsing (mirrors task_producer.py)
@@ -60,9 +52,10 @@ def _parse_args() -> 'Any':
     )
     parser.add_argument(
         'source',
-        help='data source (comma-separated from: {} )'.format(
-            ', '.join(SOURCE_DESCRIPTORS.keys())
-        ),
+        nargs='?',
+        default=None,
+        help='data source (comma-separated from: {} ). '
+        'Defaults to all data sources.'.format(', '.join(s.value for s in DataSource)),
     )
     parser.add_argument(
         'system_ids',
@@ -185,17 +178,17 @@ def _init_repos(staging_fs: FileSystem) -> None:
 
 def _main() -> None:
     args = _parse_args()
-    config = get_config(DataExtractionConfig, base_config_dirs=[get_config_dir()])
+    config = get_config(
+        DataExtractionConfig,
+        base_config_dirs=[get_etl_config_dir(), get_ds_config_dir()],
+    )
 
-    # --- validate sources ---------------------------------------------------
-    sources = [s.strip() for s in args.source.split(',')]
-    invalid = [s for s in sources if s not in SOURCE_DESCRIPTORS]
-    if invalid:
-        raise ValueError(
-            f'Invalid source(s): {", ".join(invalid)}. '
-            f'Valid: {", ".join(SOURCE_DESCRIPTORS.keys())}'
-        )
-    source_descriptors = [SOURCE_DESCRIPTORS[s] for s in sources]
+    # --- resolve sources ----------------------------------------------------
+    if args.source:
+        sources = [DataSource(s.strip()) for s in args.source.split(',')]
+        source_descriptors = [config.data_sources.get_descriptor(s) for s in sources]
+    else:
+        source_descriptors = [config.data_sources.get_descriptor(s) for s in DataSource]
 
     # --- resolve storage backends -------------------------------------------
     staging_location_config = (
@@ -235,8 +228,7 @@ def _main() -> None:
 
     work_items: list[tuple[SourceDescriptor, int, DateRange]] = []
     for dr in sub_date_ranges:
-        for source in sources:
-            sd = SOURCE_DESCRIPTORS[source]
+        for sd in source_descriptors:
             if args.by_week and not supports_multi_date(sd):
                 day_ranges = dr.split_by(Period.DAY)
             else:

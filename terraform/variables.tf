@@ -33,10 +33,10 @@ variable "scheduler_cron" {
   description = "Cron schedule for daily extraction (default: 03:00 UTC)"
 }
 
-variable "default_source_descriptors" {
+variable "default_data_sources" {
   type        = list(string)
-  default     = ["pvoutput", "openmeteo/historical"]
-  description = "Source descriptors for the daily scheduled run"
+  default     = ["pv", "weather"]
+  description = "Data sources for the daily scheduled run"
 }
 
 variable "default_pv_system_ids" {

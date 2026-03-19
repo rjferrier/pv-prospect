@@ -7,7 +7,7 @@ UKTZ = timezone('Europe/London')
 UTC = timezone('UTC')
 
 
-def clean_pvoutput(df: pd.DataFrame) -> pd.DataFrame:
+def clean_pv(df: pd.DataFrame) -> pd.DataFrame:
     """
     Clean raw PVOutput data.
 

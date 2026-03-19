@@ -36,8 +36,13 @@ def upload_file(
     else:
         from pv_prospect.common.config_parser import get_config
         from pv_prospect.data_extraction.config import DataExtractionConfig
+        from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
+        from pv_prospect.etl import get_config_dir as get_etl_config_dir
 
-        storage_config = get_config(DataExtractionConfig).staged_raw_data_storage
+        storage_config = get_config(
+            DataExtractionConfig,
+            base_config_dirs=[get_etl_config_dir(), get_ds_config_dir()],
+        ).staged_raw_data_storage
 
     fs = get_filesystem(storage_config)
     extractor = Extractor(fs)

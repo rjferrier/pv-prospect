@@ -131,7 +131,7 @@ module "workflows" {
 
   service_account_email      = google_service_account.pipeline.email
   cloud_run_job_name         = module.cloud_run.job_name
-  default_source_descriptors = var.default_source_descriptors
+  default_data_sources       = var.default_data_sources
   default_pv_system_ids      = var.default_pv_system_ids
   default_by_week            = var.default_by_week
 

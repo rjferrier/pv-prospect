@@ -12,7 +12,7 @@ DEFAULT_KEEP_COLUMNS = ('temperature', 'plane_of_array_irradiance', 'power')
 
 def prepare_pv(
     weather_df: pd.DataFrame,
-    pvoutput_df: pd.DataFrame,
+    pv_df: pd.DataFrame,
     pv_site: PVSite,
     keep_columns: tuple[str, ...] = DEFAULT_KEEP_COLUMNS,
     timescale_days: int | None = 1,
@@ -23,7 +23,7 @@ def prepare_pv(
 
     Args:
         weather_df: Cleaned weather DataFrame (output of clean_weather).
-        pvoutput_df: Cleaned PV-output DataFrame (output of clean_pvoutput).
+        pv_df: Cleaned PV-output DataFrame (output of clean_pv).
         pv_site: PVSite containing location and panel geometries.
         keep_columns: Column names to retain alongside 'time'.
         timescale_days: If set, downsample to this many days using
@@ -35,11 +35,11 @@ def prepare_pv(
     weather_df = weather_df.copy()
     weather_df['time'] = pd.to_datetime(weather_df['time'])
 
-    pvoutput_df = pvoutput_df.copy()
-    pvoutput_df['time'] = pd.to_datetime(pvoutput_df['time'])
+    pv_df = pv_df.copy()
+    pv_df['time'] = pd.to_datetime(pv_df['time'])
 
     # Align PV-output times to weather times and inner-join
-    pvo_reduced = reduce_rows(pvoutput_df[['time', 'power']], weather_df['time'])
+    pvo_reduced = reduce_rows(pv_df[['time', 'power']], weather_df['time'])
     joined = weather_df.join(pvo_reduced.set_index('time'), on='time', how='inner')
 
     # Calculate POA irradiance

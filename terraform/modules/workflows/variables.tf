@@ -13,10 +13,10 @@ variable "cloud_run_job_name" {
   description = "Name of the Cloud Run Job to invoke"
 }
 
-variable "default_source_descriptors" {
+variable "default_data_sources" {
   type        = list(string)
-  description = "Default source descriptors for scheduled runs"
-  default     = ["pvoutput", "openmeteo/historical"]
+  description = "Default data sources for scheduled runs"
+  default     = ["pv", "weather"]
 }
 
 variable "default_pv_system_ids" {

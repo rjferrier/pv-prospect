@@ -39,15 +39,15 @@ resource "google_workflows_workflow" "data_transformation" {
                                       - name: DATE
                                         value: $${date}
                           result: clean_weather_result
-                - clean_pvoutput_branch:
+                - clean_pv_branch:
                     steps:
-                      - run_clean_pvoutput_loop:
+                      - run_clean_pv_loop:
                           parallel:
                             for:
                               value: pv_system_id
                               in: $${pv_system_ids}
                               steps:
-                                - run_clean_pvoutput:
+                                - run_clean_pv:
                                     call: googleapis.run.v2.projects.locations.jobs.run
                                     args:
                                       name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
@@ -56,12 +56,12 @@ resource "google_workflows_workflow" "data_transformation" {
                                           containerOverrides:
                                             - env:
                                                 - name: TRANSFORM_STEP
-                                                  value: clean_pvoutput
+                                                  value: clean_pv
                                                 - name: PV_SYSTEM_ID
                                                   value: $${string(pv_system_id)}
                                                 - name: DATE
                                                   value: $${date}
-                                    result: clean_pvoutput_result
+                                    result: clean_pv_result
 
         - process_parallel:
             parallel:

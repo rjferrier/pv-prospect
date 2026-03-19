@@ -18,7 +18,7 @@ resource "google_workflows_workflow" "data_extraction" {
               - project_id: $${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
               - region: "${var.region}"
               - job_name: "${var.cloud_run_job_name}"
-              - source_descriptors: $${default(map.get(args, "source_descriptors"), ${jsonencode(var.default_source_descriptors)})}
+              - data_sources: $${default(map.get(args, "data_sources"), ${jsonencode(var.default_data_sources)})}
               - start_date: $${default(map.get(args, "start_date"), text.substring(time.format(sys.now()), 0, 10))}
               - end_date: $${default(map.get(args, "end_date"), text.substring(time.format(sys.now()), 0, 10))}
               - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
@@ -29,8 +29,8 @@ resource "google_workflows_workflow" "data_extraction" {
         - preprocess:
             parallel:
               for:
-                value: sd
-                in: $${source_descriptors}
+                value: ds
+                in: $${data_sources}
                 steps:
                   - run_preprocess:
                       call: googleapis.run.v2.projects.locations.jobs.run
@@ -42,8 +42,8 @@ resource "google_workflows_workflow" "data_extraction" {
                               - env:
                                   - name: JOB_TYPE
                                     value: preprocess
-                                  - name: SOURCE_DESCRIPTOR
-                                    value: $${sd}
+                                  - name: DATA_SOURCE
+                                    value: $${ds}
                       result: preprocess_result
 
         - extract:
@@ -54,8 +54,8 @@ resource "google_workflows_workflow" "data_extraction" {
                 steps:
                   - extract_per_source:
                       for:
-                        value: sd
-                        in: $${source_descriptors}
+                        value: ds
+                        in: $${data_sources}
                         steps:
                           - run_extract:
                               call: googleapis.run.v2.projects.locations.jobs.run
@@ -67,8 +67,8 @@ resource "google_workflows_workflow" "data_extraction" {
                                       - env:
                                           - name: JOB_TYPE
                                             value: extract_and_load
-                                          - name: SOURCE_DESCRIPTOR
-                                            value: $${sd}
+                                          - name: DATA_SOURCE
+                                            value: $${ds}
                                           - name: PV_SYSTEM_ID
                                             value: $${string(pv_system_id)}
                                           - name: START_DATE
