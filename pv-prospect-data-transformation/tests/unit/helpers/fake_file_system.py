@@ -1,4 +1,4 @@
-"""Shared test helpers for etl tests."""
+"""In-memory FileSystem for unit testing."""
 
 from pv_prospect.etl.storage.base import FileEntry
 
@@ -13,7 +13,6 @@ class FakeFileSystem:
     ) -> None:
         self._files = dict(files or {})
         self._binary_files = dict(binary_files or {})
-        self.created_dirs: list[str] = []
 
     def exists(self, path: str) -> bool:
         return path in self._files or path in self._binary_files
@@ -39,7 +38,7 @@ class FakeFileSystem:
         self._binary_files.pop(path, None)
 
     def mkdir(self, path: str) -> None:
-        self.created_dirs.append(path)
+        pass
 
     def list_files(
         self, prefix: str, pattern: str = '*', recursive: bool = False

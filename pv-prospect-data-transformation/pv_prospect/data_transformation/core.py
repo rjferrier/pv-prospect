@@ -30,6 +30,24 @@ from pv_prospect.etl import TIMESERIES_FOLDER
 from pv_prospect.etl.storage import FileSystem
 
 # ---------------------------------------------------------------------------
+# Path constants
+# ---------------------------------------------------------------------------
+
+PREPARED_WEATHER_PATH = 'weather.csv'
+WEATHER_BATCH_PREFIX = 'weather'
+PV_BATCH_PREFIX = 'pv'
+
+WEATHER_COLUMNS = [
+    'latitude',
+    'longitude',
+    'time',
+    'temperature',
+    'direct_normal_irradiance',
+    'diffuse_radiation',
+]
+PV_COLUMNS = ['time', 'temperature', 'plane_of_array_irradiance', 'power']
+
+# ---------------------------------------------------------------------------
 # I/O helpers
 # ---------------------------------------------------------------------------
 
@@ -41,16 +59,9 @@ def read_csv(fs: FileSystem, path: str) -> pd.DataFrame | None:
     return pd.read_csv(io.BytesIO(fs.read_bytes(path)), encoding='utf-8')
 
 
-def read_parquet(fs: FileSystem, path: str) -> pd.DataFrame:
-    """Read a Parquet file from a FileSystem."""
-    return pd.read_parquet(io.BytesIO(fs.read_bytes(path)))
-
-
-def write_parquet(fs: FileSystem, df: pd.DataFrame, path: str) -> None:
-    """Write a DataFrame as Parquet to a FileSystem."""
-    buf = io.BytesIO()
-    df.to_parquet(buf, engine='pyarrow', index=False)
-    fs.write_bytes(path, buf.getvalue())
+def write_csv(fs: FileSystem, df: pd.DataFrame, path: str, header: bool = True) -> None:
+    """Write a DataFrame as CSV to a FileSystem."""
+    fs.write_text(path, df.to_csv(index=False, header=header))
     print(f'    Written to: {path}')
 
 
@@ -67,6 +78,18 @@ def _build_path(
     return f'{TIMESERIES_FOLDER}/{source_str}/{ts_str}/{filename}'
 
 
+def _prepared_pv_path(system_id: int) -> str:
+    return f'{PV_BATCH_PREFIX}/{system_id}.csv'
+
+
+def _weather_batch_path(location_id: str, date_str: str) -> str:
+    return f'{WEATHER_BATCH_PREFIX}/{location_id}_{date_str}.csv'
+
+
+def _pv_batch_path(system_id: int, date_str: str) -> str:
+    return f'{PV_BATCH_PREFIX}/{system_id}_{date_str}.csv'
+
+
 # ---------------------------------------------------------------------------
 # Step implementations
 # ---------------------------------------------------------------------------
@@ -79,7 +102,7 @@ def run_clean_weather(
     location: OpenMeteoTimeSeriesDescriptor,
     date_str: str,
 ) -> None:
-    """Clean a raw weather CSV for a given location and date into cleaned Parquet."""
+    """Clean a raw weather CSV for a given location and date into cleaned CSV."""
     in_path = _build_path(weather_descriptor, location, date_str, 'csv')
     print(f'    [clean_weather] Processing {in_path}')
     df = read_csv(raw_fs, in_path)
@@ -87,10 +110,10 @@ def run_clean_weather(
         raise FileNotFoundError(f'CSV not found: {in_path}')
     if df.empty:
         raise ValueError(f'CSV is empty: {in_path}')
-    write_parquet(
+    write_csv(
         cleaned_fs,
         _clean_weather_transform(df),
-        _build_path(weather_descriptor, location, date_str, 'parquet'),
+        _build_path(weather_descriptor, location, date_str, 'csv'),
     )
 
 
@@ -101,7 +124,7 @@ def run_clean_pv(
     pv_ts: PVOutputTimeSeriesDescriptor,
     date_str: str,
 ) -> None:
-    """Clean a raw PV CSV for a given system and date into cleaned Parquet."""
+    """Clean a raw PV CSV for a given system and date into cleaned CSV."""
     in_path = _build_path(pv_descriptor, pv_ts, date_str, 'csv')
     print(f'    [clean_pv] Processing {in_path}')
     df = read_csv(raw_fs, in_path)
@@ -109,56 +132,144 @@ def run_clean_pv(
         raise FileNotFoundError(f'CSV not found: {in_path}')
     if df.empty:
         raise ValueError(f'CSV is empty: {in_path}')
-    write_parquet(
+    write_csv(
         cleaned_fs,
         _clean_pv_transform(df),
-        _build_path(pv_descriptor, pv_ts, date_str, 'parquet'),
+        _build_path(pv_descriptor, pv_ts, date_str, 'csv'),
     )
 
 
 def run_prepare_weather(
     cleaned_fs: FileSystem,
-    prepared_fs: FileSystem,
+    batches_fs: FileSystem,
     weather_descriptor: SourceDescriptor,
     location: OpenMeteoTimeSeriesDescriptor,
     date_str: str,
 ) -> None:
-    """Prepare cleaned weather Parquet for a given location and date."""
-    path = _build_path(weather_descriptor, location, date_str, 'parquet')
+    """Prepare cleaned weather CSV and write a headerless CSV batch."""
+    path = _build_path(weather_descriptor, location, date_str, 'csv')
     print(f'    [prepare_weather] Processing {path}')
-    cleaned_df = read_parquet(cleaned_fs, path)
-    write_parquet(prepared_fs, _prepare_weather_transform(cleaned_df), path)
+    cleaned_df = read_csv(cleaned_fs, path)
+    if cleaned_df is None:
+        raise FileNotFoundError(f'CSV not found: {path}')
+    prepared_df = _prepare_weather_transform(cleaned_df)
+    prepared_df.insert(0, 'latitude', float(location.latitude))
+    prepared_df.insert(1, 'longitude', float(location.longitude))
+    write_csv(
+        batches_fs,
+        prepared_df,
+        _weather_batch_path(location.location_id, date_str),
+        header=False,
+    )
 
 
 def run_prepare_pv(
     cleaned_fs: FileSystem,
-    prepared_fs: FileSystem,
+    batches_fs: FileSystem,
     pv_descriptor: SourceDescriptor,
     weather_descriptor: SourceDescriptor,
     pv_ts: PVOutputTimeSeriesDescriptor,
     weather_location: OpenMeteoTimeSeriesDescriptor,
     date_str: str,
 ) -> None:
-    """Join cleaned PV and weather data for a given system and date."""
+    """Join cleaned PV and weather data and write a headerless CSV batch."""
     pv_site = get_pv_site_by_system_id(pv_ts.pv_system_id)
 
-    in_pv_path = _build_path(pv_descriptor, pv_ts, date_str, 'parquet')
+    in_pv_path = _build_path(pv_descriptor, pv_ts, date_str, 'csv')
     if not cleaned_fs.exists(in_pv_path):
         print(f'    [prepare_pv] Cleaned PV data not found: {in_pv_path}')
         return
 
-    weather_path = _build_path(
-        weather_descriptor, weather_location, date_str, 'parquet'
-    )
+    weather_path = _build_path(weather_descriptor, weather_location, date_str, 'csv')
     if not cleaned_fs.exists(weather_path):
         print(f'    [prepare_pv] Cleaned weather data not found: {weather_path}')
         return
 
     print(f'    [prepare_pv] Joining weather={weather_path} with pv={in_pv_path}')
+    pv_df = read_csv(cleaned_fs, in_pv_path)
+    weather_df = read_csv(cleaned_fs, weather_path)
+    if pv_df is None or weather_df is None:
+        return
     prepared_df = _prepare_pv_transform(
-        weather_df=read_parquet(cleaned_fs, weather_path),
-        pv_df=read_parquet(cleaned_fs, in_pv_path),
+        weather_df=weather_df,
+        pv_df=pv_df,
         pv_site=pv_site,
     )
-    out_path = _build_path(pv_descriptor, pv_ts, date_str, 'parquet')
-    write_parquet(prepared_fs, prepared_df, out_path)
+    write_csv(
+        batches_fs,
+        prepared_df,
+        _pv_batch_path(pv_ts.pv_system_id, date_str),
+        header=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Assembly functions
+# ---------------------------------------------------------------------------
+
+
+def assemble_prepared_weather(
+    batches_fs: FileSystem,
+    prepared_fs: FileSystem,
+) -> None:
+    """Merge weather batch CSVs into a single master CSV."""
+    batch_files = batches_fs.list_files(WEATHER_BATCH_PREFIX, '*.csv')
+    if not batch_files:
+        print('    [assemble_weather] No batches to assemble.')
+        return
+
+    frames: list[pd.DataFrame] = []
+
+    existing = read_csv(prepared_fs, PREPARED_WEATHER_PATH)
+    if existing is not None:
+        frames.append(existing)
+
+    for entry in batch_files:
+        content = batches_fs.read_text(entry.path)
+        df = pd.read_csv(io.StringIO(content), names=WEATHER_COLUMNS, header=None)
+        frames.append(df)
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined.drop_duplicates(
+        subset=['latitude', 'longitude', 'time'], keep='last'
+    )
+    combined = combined.sort_values(['latitude', 'longitude', 'time']).reset_index(
+        drop=True
+    )
+    write_csv(prepared_fs, combined, PREPARED_WEATHER_PATH)
+
+    for entry in batch_files:
+        batches_fs.delete(entry.path)
+
+
+def assemble_prepared_pv(
+    batches_fs: FileSystem,
+    prepared_fs: FileSystem,
+    system_id: int,
+) -> None:
+    """Merge PV batch CSVs for a single system into a master CSV."""
+    all_pv_batches = batches_fs.list_files(PV_BATCH_PREFIX, '*.csv')
+    batch_files = [e for e in all_pv_batches if e.name.startswith(f'{system_id}_')]
+    if not batch_files:
+        print(f'    [assemble_pv] No batches for system {system_id}.')
+        return
+
+    frames: list[pd.DataFrame] = []
+
+    master_path = _prepared_pv_path(system_id)
+    existing = read_csv(prepared_fs, master_path)
+    if existing is not None:
+        frames.append(existing)
+
+    for entry in batch_files:
+        content = batches_fs.read_text(entry.path)
+        df = pd.read_csv(io.StringIO(content), names=PV_COLUMNS, header=None)
+        frames.append(df)
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined.drop_duplicates(subset=['time'], keep='last')
+    combined = combined.sort_values('time').reset_index(drop=True)
+    write_csv(prepared_fs, combined, master_path)
+
+    for entry in batch_files:
+        batches_fs.delete(entry.path)

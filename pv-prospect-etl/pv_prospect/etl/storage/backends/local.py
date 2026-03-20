@@ -48,6 +48,9 @@ class LocalFileSystem:
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(content)
 
+    def delete(self, path: str) -> None:
+        (self._base_dir / path).unlink(missing_ok=True)
+
     def mkdir(self, path: str) -> None:
         (self._base_dir / path).mkdir(parents=True, exist_ok=True)
 

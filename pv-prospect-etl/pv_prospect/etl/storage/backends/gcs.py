@@ -54,6 +54,10 @@ class GcsFileSystem:
         blob = self._bucket.blob(self._blob_path(path))
         blob.upload_from_string(content, content_type='application/octet-stream')
 
+    def delete(self, path: str) -> None:
+        blob = self._bucket.blob(self._blob_path(path))
+        blob.delete()
+
     def mkdir(self, path: str) -> None:
         pass  # GCS has a flat namespace
 

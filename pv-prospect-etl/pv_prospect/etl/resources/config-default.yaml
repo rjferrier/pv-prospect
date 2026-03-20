@@ -15,6 +15,11 @@ staged_cleaned_data_storage:
   bucket_name: 'pv-prospect-staging'
   prefix: 'cleaned'
 
+staged_prepared_batches_data_storage:
+  backend: 'gcs'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'prepared-batches'
+
 staged_prepared_data_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-staging'

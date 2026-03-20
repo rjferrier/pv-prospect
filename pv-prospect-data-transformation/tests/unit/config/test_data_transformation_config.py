@@ -23,6 +23,11 @@ def test_from_dict_parses_gcs_config():
             'bucket_name': 'my-bucket',
             'prefix': 'cleaned',
         },
+        'staged_prepared_batches_data_storage': {
+            'backend': 'gcs',
+            'bucket_name': 'my-bucket',
+            'prefix': 'prepared-batches',
+        },
         'staged_prepared_data_storage': {
             'backend': 'gcs',
             'bucket_name': 'my-bucket',
@@ -53,6 +58,10 @@ def test_from_dict_parses_local_config():
         'staged_cleaned_data_storage': {
             'backend': 'local',
             'prefix': '/tmp/cleaned',
+        },
+        'staged_prepared_batches_data_storage': {
+            'backend': 'local',
+            'prefix': '/tmp/prepared-batches',
         },
         'staged_prepared_data_storage': {
             'backend': 'local',
@@ -87,6 +96,7 @@ def test_from_dict_parses_data_sources():
     data = {
         'staged_raw_data_storage': {'backend': 'local', 'prefix': '/tmp'},
         'staged_cleaned_data_storage': {'backend': 'local', 'prefix': '/tmp'},
+        'staged_prepared_batches_data_storage': {'backend': 'local', 'prefix': '/tmp'},
         'staged_prepared_data_storage': {'backend': 'local', 'prefix': '/tmp'},
         **_DATA_SOURCES,
     }

@@ -42,6 +42,8 @@ from pv_prospect.data_sources import (
 )
 from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.core import (
+    assemble_prepared_pv,
+    assemble_prepared_weather,
     run_clean_pv,
     run_clean_weather,
     run_prepare_pv,
@@ -198,7 +200,7 @@ _PV_STEP_DISPATCH = {
     ),
     'prepare_pv': lambda ctx, date_str, pv_ts: run_prepare_pv(
         ctx['cleaned_fs'],
-        ctx['prepared_fs'],
+        ctx['batches_fs'],
         ctx['pv'],
         ctx['weather'],
         pv_ts,
@@ -212,7 +214,7 @@ _WEATHER_STEP_DISPATCH = {
         ctx['raw_fs'], ctx['cleaned_fs'], ctx['weather'], loc, date_str
     ),
     'prepare_weather': lambda ctx, date_str, loc: run_prepare_weather(
-        ctx['cleaned_fs'], ctx['prepared_fs'], ctx['weather'], loc, date_str
+        ctx['cleaned_fs'], ctx['batches_fs'], ctx['weather'], loc, date_str
     ),
 }
 
@@ -236,9 +238,11 @@ def _main() -> None:
     if args.local_dir:
         local_config = LocalStorageConfig(prefix=args.local_dir)
         raw_fs = get_filesystem(local_config)
+        batches_fs = get_filesystem(local_config)
         prepared_fs = get_filesystem(local_config)
     else:
         raw_fs = get_filesystem(config.staged_raw_data_storage)
+        batches_fs = get_filesystem(config.staged_prepared_batches_data_storage)
         prepared_fs = get_filesystem(config.staged_prepared_data_storage)
 
     cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
@@ -246,6 +250,7 @@ def _main() -> None:
     ctx = {
         'raw_fs': raw_fs,
         'cleaned_fs': cleaned_fs,
+        'batches_fs': batches_fs,
         'prepared_fs': prepared_fs,
         'pv': config.data_sources.pv,
         'weather': config.data_sources.weather,
@@ -328,6 +333,15 @@ def _main() -> None:
                 label = f'{step}/{desc}/{date_str}'
                 print(f'    UNHANDLED ERROR for {label}: {exc}')
                 errors += 1
+
+    if 'prepare_weather' in steps:
+        print('\nAssembling prepared weather data...')
+        assemble_prepared_weather(batches_fs, prepared_fs)
+
+    if 'prepare_pv' in steps:
+        print('\nAssembling prepared PV data...')
+        for pv_id in pv_system_ids:
+            assemble_prepared_pv(batches_fs, prepared_fs, pv_id)
 
     print(f'\nDone. {len(work_items) - errors} succeeded, {errors} failed.')
 

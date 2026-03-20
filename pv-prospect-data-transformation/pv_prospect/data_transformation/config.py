@@ -13,6 +13,7 @@ class DataTransformationConfig:
 
     staged_raw_data_storage: AnyStorageConfig
     staged_cleaned_data_storage: AnyStorageConfig
+    staged_prepared_batches_data_storage: AnyStorageConfig
     staged_prepared_data_storage: AnyStorageConfig
     data_sources: DataSourcesConfig
 
@@ -24,6 +25,9 @@ class DataTransformationConfig:
             ),
             staged_cleaned_data_storage=parse_storage_config(
                 data['staged_cleaned_data_storage']
+            ),
+            staged_prepared_batches_data_storage=parse_storage_config(
+                data['staged_prepared_batches_data_storage']
             ),
             staged_prepared_data_storage=parse_storage_config(
                 data['staged_prepared_data_storage']

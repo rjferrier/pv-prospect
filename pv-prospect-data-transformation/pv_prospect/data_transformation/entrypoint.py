@@ -31,6 +31,8 @@ from pv_prospect.data_sources import (
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.core import (
+    assemble_prepared_pv,
+    assemble_prepared_weather,
     run_clean_pv,
     run_clean_weather,
     run_prepare_pv,
@@ -69,6 +71,7 @@ def main() -> None:
     )
     raw_fs = get_filesystem(config.staged_raw_data_storage)
     cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
+    batches_fs = get_filesystem(config.staged_prepared_batches_data_storage)
     prepared_fs = get_filesystem(config.staged_prepared_data_storage)
     pv_descriptor = config.data_sources.pv
     weather_descriptor = config.data_sources.weather
@@ -91,7 +94,7 @@ def main() -> None:
             os.environ['OPENMETEO_LOCATION']
         )
         run_prepare_weather(
-            cleaned_fs, prepared_fs, weather_descriptor, location, date_str
+            cleaned_fs, batches_fs, weather_descriptor, location, date_str
         )
     elif step == 'prepare_pv':
         pv_system_id = int(os.environ['PV_SYSTEM_ID'])
@@ -99,13 +102,18 @@ def main() -> None:
         weather_location = _get_weather_location(pv_system_id)
         run_prepare_pv(
             cleaned_fs,
-            prepared_fs,
+            batches_fs,
             pv_descriptor,
             weather_descriptor,
             pv_ts,
             weather_location,
             date_str,
         )
+    elif step == 'assemble_weather':
+        assemble_prepared_weather(batches_fs, prepared_fs)
+    elif step == 'assemble_pv':
+        pv_system_id = int(os.environ['PV_SYSTEM_ID'])
+        assemble_prepared_pv(batches_fs, prepared_fs, pv_system_id)
     else:
         print(
             f'[entrypoint] ERROR: unknown TRANSFORM_STEP={step}',

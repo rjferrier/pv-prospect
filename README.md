@@ -60,27 +60,29 @@ and executed as Cloud Run Jobs. Locally it can be driven by the Docker Compose `
 
 ### C — Data Cleaning
 
-Cleans raw CSVs into Parquet (column selection, renaming, UTC time synthesis) and writes them
-to the staging bucket (`cleaned/` prefix). All data sources must be cleaned before preparation
+Cleans raw CSVs (column selection, renaming, UTC time synthesis) and writes them as CSV to
+the staging bucket (`cleaned/` prefix). All data sources must be cleaned before preparation
 can begin. Implemented in `pv-prospect-data-transformation`.
 
 ### P — Data Preparation
 
-Reads cleaned Parquet, performs feature selection, downsampling, joins weather with PV data,
-and computes plane-of-array (POA) irradiance via `pvlib`. Writes prepared Parquet to the
-staging bucket (`prepared/` prefix). Implemented in `pv-prospect-data-transformation`.
+Reads cleaned CSVs, performs feature selection, downsampling, joins weather with PV data, and
+computes plane-of-array (POA) irradiance via `pvlib`. Uses a scatter-gather pattern: worker
+jobs write headerless micro-batch CSVs to `prepared-batches/`, then a single assembly step
+merges them into cumulative master CSVs in `prepared/` (one file per system/location rather
+than one per date). Implemented in `pv-prospect-data-transformation`.
 
 ### A — App Data Loading
 
-Loads versioned Parquet data and trained model weights into the application at startup.
+Loads versioned model data and trained model weights into the application at startup.
 
 ### V — Data/Model Versioning
 
-Snapshots prepared Parquet data and trained model artefacts on a weekly cadence,
+Snapshots prepared CSV data and trained model artefacts on a weekly cadence,
 producing a versioned dataset for the next training run.
 
 ### M — Model Training
 
-Trains two neural networks from versioned Parquet data: one to predict weather variables
+Trains two neural networks from versioned CSV data: one to predict weather variables
 (temperature, DNI, DHI) from location and time, and another to predict PV power output from
 POA irradiance and other features. Implemented in `pv-prospect-model`.
