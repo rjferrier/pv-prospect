@@ -31,12 +31,8 @@ resource "google_cloud_run_v2_job" "data_transformation" {
           value = "clean_weather"
         }
         env {
-          name  = "RAW_DATA_BUCKET"
-          value = var.raw_data_bucket
-        }
-        env {
-          name  = "MODEL_DATA_BUCKET"
-          value = var.model_data_bucket
+          name  = "STAGING_BUCKET"
+          value = var.staging_bucket
         }
         env {
           name  = "GOOGLE_CLOUD_PROJECT"

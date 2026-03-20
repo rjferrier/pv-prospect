@@ -31,8 +31,8 @@ resource "google_cloud_run_v2_job" "data_extraction" {
           value = "extract_and_load"
         }
         env {
-          name  = "GCS_BUCKET"
-          value = var.gcs_bucket
+          name  = "STAGING_BUCKET"
+          value = var.staging_bucket
         }
         env {
           name  = "GOOGLE_CLOUD_PROJECT"

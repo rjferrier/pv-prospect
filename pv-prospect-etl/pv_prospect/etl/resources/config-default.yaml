@@ -7,11 +7,18 @@ versioned_resources_storage:
 
 staged_raw_data_storage:
   backend: 'gcs'
-  bucket_name: 'pv-prospect-staged-raw-data'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'raw'
 
-staged_model_data_storage:
+staged_cleaned_data_storage:
   backend: 'gcs'
-  bucket_name: 'pv-prospect-staged-model-data'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'cleaned'
+
+staged_prepared_data_storage:
+  backend: 'gcs'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'prepared'
 
 versioned_raw_data_storage:
   backend: 'gcs'

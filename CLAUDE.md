@@ -78,13 +78,12 @@ docker compose run --rm runner openmeteo/hourly 89665 -d 2025-06-24 -n
 
 See the PlantUML diagram in `doc/architecture.puml` for the overarching vision for the project.
 
-1. **Extraction** (`pv-prospect-data-extraction`): Pulls raw CSV data (PVOutput power readings, OpenMeteo weather forecasts/historical data) and stages it to GCS (or local `out/` directory).
-2. **Transformation** (`pv-prospect-data-transformation`): Four-step pipeline:
-   - `clean_weather`: raw CSV → cleaned Parquet (column selection, renaming)
-   - `clean_pvoutput`: raw CSV → cleaned Parquet (UTC time synthesis from UK local time)
-   - `prepare_weather`: cleaned → versioned Parquet (feature selection, downsampling, keyed by lat/lon)
-   - `prepare_pv`: cleaned weather + cleaned PV → versioned Parquet (inner join on time, POA irradiance calculation via `pvlib`)
-3. **Model training** (`pv-prospect-model`): Consumes versioned Parquet data.
+1. **Extraction** (`pv-prospect-data-extraction`): Pulls raw CSV data (PVOutput power readings, OpenMeteo weather forecasts/historical data) and stages it to GCS `staging/raw/` (or local `out/` directory).
+2. **Transformation** (`pv-prospect-data-transformation`): Four-step pipeline across two stages in a single GCS bucket (`staging/`):
+   - **Clean** (raw → cleaned): `clean_weather` and `clean_pv` read from `raw/`, write Parquet to `cleaned/`
+   - **Prepare** (cleaned → prepared): `prepare_weather` and `prepare_pv` read from `cleaned/`, write Parquet to `prepared/`
+   - The Clean stage must complete for all data sources before Prepare runs, since `prepare_pv` requires both cleaned weather and cleaned PV data.
+3. **Model training** (`pv-prospect-model`): Consumes prepared Parquet data from `staging/prepared/`.
 
 Production runs on GCP: Cloud Scheduler triggers daily, Cloud Workflows orchestrates the fan-out, Cloud Run Jobs execute individual extraction/transformation tasks.
 

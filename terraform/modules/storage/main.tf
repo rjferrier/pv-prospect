@@ -1,8 +1,6 @@
 # Cloud Storage resources for data management and DVC
 #
-# Replace the single bucket with four purpose-specific buckets:
-# - staged-raw-data: captures daily extractions
-# - staged-model-data: structured parquet data produced by the Transformer
+# - staging: single bucket with raw/, cleaned/, prepared/ prefixes
 # - versioned-raw-data: corpus of raw CSV data tracked by DVC
 # - versioned-model-data: corpus of model-ready Parquet data tracked by DVC
 
@@ -15,18 +13,8 @@ resource "google_storage_bucket" "pv_prospect_data" {
   }
 }
 
-resource "google_storage_bucket" "staged_raw_data" {
-  name                        = "${var.bucket_prefix}-staged-raw-data"
-  location                    = var.region
-  uniform_bucket_level_access = true
-
-  hierarchical_namespace {
-    enabled = true
-  }
-}
-
-resource "google_storage_bucket" "staged_model_data" {
-  name                        = "${var.bucket_prefix}-staged-model-data"
+resource "google_storage_bucket" "staging" {
+  name                        = "${var.bucket_prefix}-staging"
   location                    = var.region
   uniform_bucket_level_access = true
 

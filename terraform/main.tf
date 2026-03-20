@@ -40,15 +40,9 @@ resource "google_service_account" "pipeline" {
   description  = "Used by Cloud Run Jobs, Workflows, and Scheduler"
 }
 
-# The pipeline SA needs to read/write GCS objects in the staging buckets
-resource "google_storage_bucket_iam_member" "pipeline_staged_raw" {
-  bucket = module.storage.staged_raw_data_bucket_name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.pipeline.email}"
-}
-
-resource "google_storage_bucket_iam_member" "pipeline_staged_model" {
-  bucket = module.storage.staged_model_data_bucket_name
+# The pipeline SA needs to read/write GCS objects in the staging bucket
+resource "google_storage_bucket_iam_member" "pipeline_staging" {
+  bucket = module.storage.staging_bucket_name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.pipeline.email}"
 }
@@ -98,7 +92,7 @@ module "cloud_run" {
   project_id            = var.project_id
   image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
   image_tag             = var.image_tag
-  gcs_bucket            = module.storage.staged_raw_data_bucket_name
+  staging_bucket        = module.storage.staging_bucket_name
   service_account_email = google_service_account.pipeline.email
   secret_env_vars       = var.secret_env_vars
 
@@ -118,8 +112,7 @@ module "cloud_run_transformer" {
   # Temporary placeholder since the real image hasn't been built yet
   image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
   image_tag             = var.transformer_image_tag
-  raw_data_bucket       = module.storage.staged_raw_data_bucket_name
-  model_data_bucket     = module.storage.staged_model_data_bucket_name
+  staging_bucket        = module.storage.staging_bucket_name
   service_account_email = google_service_account.pipeline.email
 
   depends_on = [google_project_service.apis, module.artifact_registry_transformer]
@@ -174,14 +167,9 @@ output "pipeline_service_account_email" {
   description = "Pipeline service account email"
 }
 
-output "staged_raw_data_bucket_name" {
-  value       = module.storage.staged_raw_data_bucket_name
-  description = "Name of the staged raw data storage bucket"
-}
-
-output "staged_model_data_bucket_name" {
-  value       = module.storage.staged_model_data_bucket_name
-  description = "Name of the staged model data storage bucket"
+output "staging_bucket_name" {
+  value       = module.storage.staging_bucket_name
+  description = "Name of the staging bucket"
 }
 
 output "artifact_registry_url" {

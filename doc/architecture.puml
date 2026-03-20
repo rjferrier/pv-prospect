@@ -5,17 +5,20 @@
 component "Weather\nAPI" as WeatherApi
 component "PV\nApi" as PvApi
 
-database "Staged Raw Data" as StagedRawData {
-  database "Weather CSVs" as WeatherStagedRawData
-  database "PV CSVs" as PvStagedRawData
+database "Staging" as Staging {
+  database "Raw" as StagingRaw {
+    database "Weather CSVs" as WeatherStagedRawData
+    database "PV CSVs" as PvStagedRawData
+  }
+  database "Cleaned" as StagingCleaned {
+    database "Weather Parquet" as WeatherCleanedData
+    database "PV Parquet" as PvCleanedData
+  }
+  database "Prepared" as StagingPrepared {
+    database "Weather Parquet" as WeatherStagedModelData
+    database "PV Site Parquet" as PvSiteStagedModelData
+  }
 }
-
-database "Staged Model Data" as StagedModelData {
-  database "Weather Model Data" as WeatherStagedModelData
-  database "PV Site Model Data" as PvSiteStagedModelData
-}
-
-StagedRawData -[hidden]> StagedModelData
 
 database "Versioned Raw Data" as VersionedRawData {
   database "Weather CSVs" as WeatherVersionedRawData
@@ -25,8 +28,8 @@ database "Versioned Raw Data" as VersionedRawData {
 database "Versioned Project Data" as VersionedProjectData
 
 database "Versioned Model Data" as VersionedModelData {
-  database "Weather Model Data" as WeatherVersionedModelData
-  database "PV Model Data" as PvVersionedModelData
+  database "Weather Parquet" as WeatherVersionedModelData
+  database "PV Parquet" as PvVersionedModelData
 }
 
 VersionedRawData -[hidden]> VersionedModelData
@@ -86,19 +89,24 @@ VersionedProjectData <-[hidden]- DataTransformer
 DataTransformer --> WeatherStagedRawData : TW.1: gets\nTP.1: gets
 DataTransformer --> PvStagedRawData : TP.2: gets
 
-DataTransformer --> WeatherStagedModelData : TW.2: puts
-DataTransformer --> PvSiteStagedModelData : TP.3: puts
+DataTransformer --> WeatherCleanedData : TW.2: puts\nTP.3: gets
+DataTransformer --> PvCleanedData : TP.4: puts\nTP.5: gets
 
-InMemoryData <-- DataTransformer : TW.3: puts\nTP.4: puts
+DataTransformer --> WeatherStagedModelData : TW.3: puts
+DataTransformer --> PvSiteStagedModelData : TP.6: puts
 
-StagedRawData <-- DataVersioner : V.1: gets
-VersionedRawData <-- DataVersioner : V.2: pushes (using DVC)
+InMemoryData <-- DataTransformer : TW.4: puts\nTP.7: puts
 
-StagedModelData <-- DataVersioner : V.3: gets
+StagingRaw <-- DataVersioner : V.1: gets
+'VersionedRawData <- DataVersioner : V.2: pushes (using DVC)
+DataVersioner -> VersionedRawData : V.2: pushes (using DVC)
+
+StagingPrepared <-- DataVersioner : V.3: gets
 VersionedModelData <-- DataVersioner : V.4: pushes (using DVC)
-DataVersioner -> VCRepo : V.5: pushes (using Git)
+'DataVersioner --> VCRepo : V.5: pushes (using Git)
+DataVersioner --> VCRepo : V.5: pushes (using Git)
 
 InMemoryData ---> VersionedModelData : L.1: pulls
-InMemoryData ---> StagedModelData : L.2: gets
+InMemoryData ---> StagingPrepared : L.2: gets
 
 @enduml

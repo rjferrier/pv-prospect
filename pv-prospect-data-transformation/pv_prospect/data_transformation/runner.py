@@ -164,17 +164,17 @@ def _parse_pv_system_ids(s: str) -> list[int]:
 
 _STEP_DISPATCH = {
     'clean_weather': lambda ctx, date_str, _pv_id: run_clean_weather(
-        ctx['raw_fs'], ctx['intermediate_fs'], ctx['weather'], date_str
+        ctx['raw_fs'], ctx['cleaned_fs'], ctx['weather'], date_str
     ),
     'clean_pv': lambda ctx, date_str, pv_id: run_clean_pv(
-        ctx['raw_fs'], ctx['intermediate_fs'], ctx['pv'], pv_id, date_str
+        ctx['raw_fs'], ctx['cleaned_fs'], ctx['pv'], pv_id, date_str
     ),
     'prepare_weather': lambda ctx, date_str, _pv_id: run_prepare_weather(
-        ctx['intermediate_fs'], ctx['model_fs'], ctx['weather'], date_str
+        ctx['cleaned_fs'], ctx['prepared_fs'], ctx['weather'], date_str
     ),
     'prepare_pv': lambda ctx, date_str, pv_id: run_prepare_pv(
-        ctx['intermediate_fs'],
-        ctx['model_fs'],
+        ctx['cleaned_fs'],
+        ctx['prepared_fs'],
         ctx['pv'],
         ctx['weather'],
         pv_id,
@@ -202,17 +202,17 @@ def _main() -> None:
     if args.local_dir:
         local_config = LocalStorageConfig(prefix=args.local_dir)
         raw_fs = get_filesystem(local_config)
-        model_fs = get_filesystem(local_config)
+        prepared_fs = get_filesystem(local_config)
     else:
         raw_fs = get_filesystem(config.staged_raw_data_storage)
-        model_fs = get_filesystem(config.staged_model_data_storage)
+        prepared_fs = get_filesystem(config.staged_prepared_data_storage)
 
-    intermediate_fs = get_filesystem(config.intermediate_data_storage)
+    cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
 
     ctx = {
         'raw_fs': raw_fs,
-        'intermediate_fs': intermediate_fs,
-        'model_fs': model_fs,
+        'cleaned_fs': cleaned_fs,
+        'prepared_fs': prepared_fs,
         'pv': config.data_sources.pv,
         'weather': config.data_sources.weather,
     }

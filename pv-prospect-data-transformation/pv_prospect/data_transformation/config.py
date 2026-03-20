@@ -12,8 +12,8 @@ class DataTransformationConfig:
     """Configuration for data transformation processing."""
 
     staged_raw_data_storage: AnyStorageConfig
-    staged_model_data_storage: AnyStorageConfig
-    intermediate_data_storage: AnyStorageConfig
+    staged_cleaned_data_storage: AnyStorageConfig
+    staged_prepared_data_storage: AnyStorageConfig
     data_sources: DataSourcesConfig
 
     @classmethod
@@ -22,11 +22,11 @@ class DataTransformationConfig:
             staged_raw_data_storage=parse_storage_config(
                 data['staged_raw_data_storage']
             ),
-            staged_model_data_storage=parse_storage_config(
-                data['staged_model_data_storage']
+            staged_cleaned_data_storage=parse_storage_config(
+                data['staged_cleaned_data_storage']
             ),
-            intermediate_data_storage=parse_storage_config(
-                data['intermediate_data_storage']
+            staged_prepared_data_storage=parse_storage_config(
+                data['staged_prepared_data_storage']
             ),
             data_sources=DataSourcesConfig.from_dict(data),
         )

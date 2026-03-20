@@ -61,11 +61,11 @@ def _csv_to_parquet_path(path: str) -> str:
 
 def run_clean_weather(
     raw_fs: FileSystem,
-    intermediate_fs: FileSystem,
+    cleaned_fs: FileSystem,
     weather_descriptor: SourceDescriptor,
     date_str: str,
 ) -> None:
-    """Clean raw weather CSVs for a given date into intermediate Parquet."""
+    """Clean raw weather CSVs for a given date into cleaned Parquet."""
     raw_extractor = Extractor(raw_fs)
     weather_prefix = f'{TIMESERIES_FOLDER}/{weather_descriptor}'
     for entry in raw_extractor.list_files(weather_prefix, pattern='*.csv'):
@@ -75,7 +75,7 @@ def run_clean_weather(
         df = read_csv(raw_fs, entry.path)
         if df is not None and not df.empty:
             write_parquet(
-                intermediate_fs,
+                cleaned_fs,
                 _clean_weather_transform(df),
                 _csv_to_parquet_path(entry.path),
             )
@@ -83,47 +83,47 @@ def run_clean_weather(
 
 def run_clean_pv(
     raw_fs: FileSystem,
-    intermediate_fs: FileSystem,
+    cleaned_fs: FileSystem,
     pv_descriptor: SourceDescriptor,
     pv_system_id: int,
     date_str: str,
 ) -> None:
-    """Clean a raw PV CSV for a given system and date into intermediate Parquet."""
+    """Clean a raw PV CSV for a given system and date into cleaned Parquet."""
     pv_prefix = f'{TIMESERIES_FOLDER}/{pv_descriptor}/{pv_system_id}'
     in_path = f'{pv_prefix}/pvoutput_{pv_system_id}_{date_str}.csv'
     print(f'    [clean_pv] Processing {in_path}')
     df = read_csv(raw_fs, in_path)
     if df is not None and not df.empty:
         write_parquet(
-            intermediate_fs,
+            cleaned_fs,
             _clean_pv_transform(df),
             _csv_to_parquet_path(in_path),
         )
 
 
 def run_prepare_weather(
-    intermediate_fs: FileSystem,
-    model_fs: FileSystem,
+    cleaned_fs: FileSystem,
+    prepared_fs: FileSystem,
     weather_descriptor: SourceDescriptor,
     date_str: str,
 ) -> None:
-    """Prepare cleaned weather Parquet for a given date into model-ready Parquet."""
-    intermediate_extractor = Extractor(intermediate_fs)
+    """Prepare cleaned weather Parquet for a given date into prepared Parquet."""
+    cleaned_extractor = Extractor(cleaned_fs)
     cleaned_weather_prefix = f'{TIMESERIES_FOLDER}/{weather_descriptor}'
-    for entry in intermediate_extractor.list_files(
+    for entry in cleaned_extractor.list_files(
         cleaned_weather_prefix, pattern='*.parquet'
     ):
         if date_str not in entry.name:
             continue
         print(f'    [prepare_weather] Processing {entry.path}')
-        cleaned_df = read_parquet(intermediate_fs, entry.path)
+        cleaned_df = read_parquet(cleaned_fs, entry.path)
         out_path = f'{TIMESERIES_FOLDER}/{weather_descriptor}/{entry.name}'
-        write_parquet(model_fs, _prepare_weather_transform(cleaned_df), out_path)
+        write_parquet(prepared_fs, _prepare_weather_transform(cleaned_df), out_path)
 
 
 def run_prepare_pv(
-    intermediate_fs: FileSystem,
-    model_fs: FileSystem,
+    cleaned_fs: FileSystem,
+    prepared_fs: FileSystem,
     pv_descriptor: SourceDescriptor,
     weather_descriptor: SourceDescriptor,
     pv_system_id: int,
@@ -134,16 +134,16 @@ def run_prepare_pv(
 
     cleaned_pv_prefix = f'{TIMESERIES_FOLDER}/{pv_descriptor}/{pv_system_id}'
     in_pv_path = f'{cleaned_pv_prefix}/pvoutput_{pv_system_id}_{date_str}.parquet'
-    if not intermediate_fs.exists(in_pv_path):
+    if not cleaned_fs.exists(in_pv_path):
         print(f'    [prepare_pv] Cleaned PV data not found: {in_pv_path}')
         return
 
     cleaned_weather_prefix = f'{TIMESERIES_FOLDER}/{weather_descriptor}'
-    intermediate_extractor = Extractor(intermediate_fs)
+    cleaned_extractor = Extractor(cleaned_fs)
     weather_entry = next(
         (
             e
-            for e in intermediate_extractor.list_files(
+            for e in cleaned_extractor.list_files(
                 cleaned_weather_prefix, pattern='*.parquet'
             )
             if date_str in e.name
@@ -156,12 +156,12 @@ def run_prepare_pv(
 
     print(f'    [prepare_pv] Joining weather={weather_entry.path} with pv={in_pv_path}')
     prepared_df = _prepare_pv_transform(
-        weather_df=read_parquet(intermediate_fs, weather_entry.path),
-        pv_df=read_parquet(intermediate_fs, in_pv_path),
+        weather_df=read_parquet(cleaned_fs, weather_entry.path),
+        pv_df=read_parquet(cleaned_fs, in_pv_path),
         pv_site=pv_site,
     )
     out_path = (
         f'{TIMESERIES_FOLDER}/{pv_descriptor}/'
         f'{pv_system_id}/prepared_pv_{pv_system_id}_{date_str}.parquet'
     )
-    write_parquet(model_fs, prepared_df, out_path)
+    write_parquet(prepared_fs, prepared_df, out_path)

@@ -3,14 +3,9 @@ output "service_account_email" {
   description = "Service account email for DVC authentication"
 }
 
-output "staged_raw_data_bucket_name" {
-  value       = google_storage_bucket.staged_raw_data.name
-  description = "Name of the staged raw data bucket"
-}
-
-output "staged_model_data_bucket_name" {
-  value       = google_storage_bucket.staged_model_data.name
-  description = "Name of the staged model data bucket"
+output "staging_bucket_name" {
+  value       = google_storage_bucket.staging.name
+  description = "Name of the staging bucket (raw/, cleaned/, prepared/ prefixes)"
 }
 
 output "versioned_raw_data_bucket_name" {

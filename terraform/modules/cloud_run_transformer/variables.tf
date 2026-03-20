@@ -19,14 +19,9 @@ variable "image_tag" {
   description = "Docker image tag"
 }
 
-variable "raw_data_bucket" {
+variable "staging_bucket" {
   type        = string
-  description = "GCS bucket name containing staged raw CSV data"
-}
-
-variable "model_data_bucket" {
-  type        = string
-  description = "GCS bucket name for writing output Parquet data"
+  description = "GCS bucket name for staged data (raw/, cleaned/, prepared/ prefixes)"
 }
 
 variable "service_account_email" {

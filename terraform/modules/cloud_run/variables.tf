@@ -19,9 +19,9 @@ variable "image_tag" {
   description = "Docker image tag"
 }
 
-variable "gcs_bucket" {
+variable "staging_bucket" {
   type        = string
-  description = "GCS bucket name for data output"
+  description = "GCS bucket name for staged data (raw/, cleaned/, prepared/ prefixes)"
 }
 
 variable "service_account_email" {

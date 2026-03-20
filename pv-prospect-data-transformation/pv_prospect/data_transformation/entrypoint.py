@@ -55,8 +55,8 @@ def main() -> None:
         base_config_dirs=[get_etl_config_dir(), get_ds_config_dir()],
     )
     raw_fs = get_filesystem(config.staged_raw_data_storage)
-    intermediate_fs = get_filesystem(config.intermediate_data_storage)
-    model_fs = get_filesystem(config.staged_model_data_storage)
+    cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
+    prepared_fs = get_filesystem(config.staged_prepared_data_storage)
     pv_descriptor = config.data_sources.pv
     weather_descriptor = config.data_sources.weather
 
@@ -65,17 +65,17 @@ def main() -> None:
     print(f'[entrypoint] Starting {step} for date {target_date}')
 
     if step == 'clean_weather':
-        run_clean_weather(raw_fs, intermediate_fs, weather_descriptor, date_str)
+        run_clean_weather(raw_fs, cleaned_fs, weather_descriptor, date_str)
     elif step == 'clean_pv':
         pv_system_id = int(os.environ['PV_SYSTEM_ID'])
-        run_clean_pv(raw_fs, intermediate_fs, pv_descriptor, pv_system_id, date_str)
+        run_clean_pv(raw_fs, cleaned_fs, pv_descriptor, pv_system_id, date_str)
     elif step == 'prepare_weather':
-        run_prepare_weather(intermediate_fs, model_fs, weather_descriptor, date_str)
+        run_prepare_weather(cleaned_fs, prepared_fs, weather_descriptor, date_str)
     elif step == 'prepare_pv':
         pv_system_id = int(os.environ['PV_SYSTEM_ID'])
         run_prepare_pv(
-            intermediate_fs,
-            model_fs,
+            cleaned_fs,
+            prepared_fs,
             pv_descriptor,
             weather_descriptor,
             pv_system_id,
