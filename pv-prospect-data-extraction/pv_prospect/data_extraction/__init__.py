@@ -1,17 +1,23 @@
-from pv_prospect.data_sources import SourceDescriptor
+from pv_prospect.data_sources import (
+    OpenMeteoTimeSeriesDescriptor,
+    PVOutputTimeSeriesDescriptor,
+    SourceDescriptor,
+    TimeSeriesDescriptor,
+)
 
 from .base import (
     TimeSeries,
     TimeSeriesDataExtractor,
-    TimeSeriesDescriptor,
 )
-from .data_sources import (
+from .factory import (
     get_extractor,
     supports_multi_date,
 )
 
 __all__ = [
     'TimeSeriesDescriptor',
+    'OpenMeteoTimeSeriesDescriptor',
+    'PVOutputTimeSeriesDescriptor',
     'TimeSeriesDataExtractor',
     'TimeSeries',
     'SourceDescriptor',

@@ -1,6 +1,9 @@
 import os
 from datetime import date
 
+from .source_descriptor import SourceDescriptor
+from .ts_descriptors import TimeSeriesDescriptor
+
 
 def format_date(date_: date) -> str:
     """Format a date as YYYYMMDD."""
@@ -9,8 +12,8 @@ def format_date(date_: date) -> str:
 
 def build_csv_file_path(
     time_series_folder: str,
-    source_descriptor: str,
-    time_series_descriptor: str,
+    source_descriptor: SourceDescriptor,
+    time_series_descriptor: TimeSeriesDescriptor,
     date_: date,
 ) -> str:
     """Build the CSV file path for a time series extraction.

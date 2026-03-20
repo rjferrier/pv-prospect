@@ -17,6 +17,7 @@ from pv_prospect.data_extraction.extractors.openmeteo import Mode as OMMode
 from pv_prospect.data_sources import SourceDescriptor
 
 
+@lru_cache(maxsize=None)
 def _location_getter(pv_site: PVSite) -> list[Location]:
     return [get_location_by_pv_system_id(pv_site.pvo_sys_id)]
 

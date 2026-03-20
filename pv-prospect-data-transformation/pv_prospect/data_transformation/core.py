@@ -9,7 +9,11 @@ import io
 import pandas as pd
 
 from pv_prospect.common import get_pv_site_by_system_id
-from pv_prospect.data_sources import SourceDescriptor
+from pv_prospect.data_sources import (
+    OpenMeteoTimeSeriesDescriptor,
+    PVOutputTimeSeriesDescriptor,
+    SourceDescriptor,
+)
 from pv_prospect.data_transformation.transformations import (
     clean_pv as _clean_pv_transform,
 )
@@ -22,7 +26,7 @@ from pv_prospect.data_transformation.transformations import (
 from pv_prospect.data_transformation.transformations import (
     prepare_weather as _prepare_weather_transform,
 )
-from pv_prospect.etl import TIMESERIES_FOLDER, Extractor
+from pv_prospect.etl import TIMESERIES_FOLDER
 from pv_prospect.etl.storage import FileSystem
 
 # ---------------------------------------------------------------------------
@@ -50,8 +54,17 @@ def write_parquet(fs: FileSystem, df: pd.DataFrame, path: str) -> None:
     print(f'    Written to: {path}')
 
 
-def _csv_to_parquet_path(path: str) -> str:
-    return path.replace('.csv', '.parquet')
+def _build_path(
+    source: SourceDescriptor,
+    ts_desc: OpenMeteoTimeSeriesDescriptor | PVOutputTimeSeriesDescriptor,
+    date_str: str,
+    ext: str,
+) -> str:
+    """Build a file path mirroring build_csv_file_path but taking a date string."""
+    source_str = str(source)
+    ts_str = str(ts_desc)
+    filename = f'{source_str.replace("/", "-")}_{ts_str}_{date_str}.{ext}'
+    return f'{TIMESERIES_FOLDER}/{source_str}/{ts_str}/{filename}'
 
 
 # ---------------------------------------------------------------------------
@@ -63,63 +76,58 @@ def run_clean_weather(
     raw_fs: FileSystem,
     cleaned_fs: FileSystem,
     weather_descriptor: SourceDescriptor,
+    location: OpenMeteoTimeSeriesDescriptor,
     date_str: str,
 ) -> None:
-    """Clean raw weather CSVs for a given date into cleaned Parquet."""
-    raw_extractor = Extractor(raw_fs)
-    weather_prefix = f'{TIMESERIES_FOLDER}/{weather_descriptor}'
-    for entry in raw_extractor.list_files(
-        weather_prefix, pattern='*.csv', recursive=True
-    ):
-        if date_str not in entry.name:
-            continue
-        print(f'    [clean_weather] Processing {entry.path}')
-        df = read_csv(raw_fs, entry.path)
-        if df is not None and not df.empty:
-            write_parquet(
-                cleaned_fs,
-                _clean_weather_transform(df),
-                _csv_to_parquet_path(entry.path),
-            )
+    """Clean a raw weather CSV for a given location and date into cleaned Parquet."""
+    in_path = _build_path(weather_descriptor, location, date_str, 'csv')
+    print(f'    [clean_weather] Processing {in_path}')
+    df = read_csv(raw_fs, in_path)
+    if df is None:
+        raise FileNotFoundError(f'CSV not found: {in_path}')
+    if df.empty:
+        raise ValueError(f'CSV is empty: {in_path}')
+    write_parquet(
+        cleaned_fs,
+        _clean_weather_transform(df),
+        _build_path(weather_descriptor, location, date_str, 'parquet'),
+    )
 
 
 def run_clean_pv(
     raw_fs: FileSystem,
     cleaned_fs: FileSystem,
     pv_descriptor: SourceDescriptor,
-    pv_system_id: int,
+    pv_ts: PVOutputTimeSeriesDescriptor,
     date_str: str,
 ) -> None:
     """Clean a raw PV CSV for a given system and date into cleaned Parquet."""
-    pv_prefix = f'{TIMESERIES_FOLDER}/{pv_descriptor}/{pv_system_id}'
-    in_path = f'{pv_prefix}/pvoutput_{pv_system_id}_{date_str}.csv'
+    in_path = _build_path(pv_descriptor, pv_ts, date_str, 'csv')
     print(f'    [clean_pv] Processing {in_path}')
     df = read_csv(raw_fs, in_path)
-    if df is not None and not df.empty:
-        write_parquet(
-            cleaned_fs,
-            _clean_pv_transform(df),
-            _csv_to_parquet_path(in_path),
-        )
+    if df is None:
+        raise FileNotFoundError(f'CSV not found: {in_path}')
+    if df.empty:
+        raise ValueError(f'CSV is empty: {in_path}')
+    write_parquet(
+        cleaned_fs,
+        _clean_pv_transform(df),
+        _build_path(pv_descriptor, pv_ts, date_str, 'parquet'),
+    )
 
 
 def run_prepare_weather(
     cleaned_fs: FileSystem,
     prepared_fs: FileSystem,
     weather_descriptor: SourceDescriptor,
+    location: OpenMeteoTimeSeriesDescriptor,
     date_str: str,
 ) -> None:
-    """Prepare cleaned weather Parquet for a given date into prepared Parquet."""
-    cleaned_extractor = Extractor(cleaned_fs)
-    cleaned_weather_prefix = f'{TIMESERIES_FOLDER}/{weather_descriptor}'
-    for entry in cleaned_extractor.list_files(
-        cleaned_weather_prefix, pattern='*.parquet', recursive=True
-    ):
-        if date_str not in entry.name:
-            continue
-        print(f'    [prepare_weather] Processing {entry.path}')
-        cleaned_df = read_parquet(cleaned_fs, entry.path)
-        write_parquet(prepared_fs, _prepare_weather_transform(cleaned_df), entry.path)
+    """Prepare cleaned weather Parquet for a given location and date."""
+    path = _build_path(weather_descriptor, location, date_str, 'parquet')
+    print(f'    [prepare_weather] Processing {path}')
+    cleaned_df = read_parquet(cleaned_fs, path)
+    write_parquet(prepared_fs, _prepare_weather_transform(cleaned_df), path)
 
 
 def run_prepare_pv(
@@ -127,42 +135,30 @@ def run_prepare_pv(
     prepared_fs: FileSystem,
     pv_descriptor: SourceDescriptor,
     weather_descriptor: SourceDescriptor,
-    pv_system_id: int,
+    pv_ts: PVOutputTimeSeriesDescriptor,
+    weather_location: OpenMeteoTimeSeriesDescriptor,
     date_str: str,
 ) -> None:
     """Join cleaned PV and weather data for a given system and date."""
-    pv_site = get_pv_site_by_system_id(pv_system_id)
+    pv_site = get_pv_site_by_system_id(pv_ts.pv_system_id)
 
-    cleaned_pv_prefix = f'{TIMESERIES_FOLDER}/{pv_descriptor}/{pv_system_id}'
-    in_pv_path = f'{cleaned_pv_prefix}/pvoutput_{pv_system_id}_{date_str}.parquet'
+    in_pv_path = _build_path(pv_descriptor, pv_ts, date_str, 'parquet')
     if not cleaned_fs.exists(in_pv_path):
         print(f'    [prepare_pv] Cleaned PV data not found: {in_pv_path}')
         return
 
-    cleaned_weather_prefix = f'{TIMESERIES_FOLDER}/{weather_descriptor}'
-    cleaned_extractor = Extractor(cleaned_fs)
-    weather_entry = next(
-        (
-            e
-            for e in cleaned_extractor.list_files(
-                cleaned_weather_prefix, pattern='*.parquet', recursive=True
-            )
-            if date_str in e.name
-        ),
-        None,
+    weather_path = _build_path(
+        weather_descriptor, weather_location, date_str, 'parquet'
     )
-    if not weather_entry:
-        print(f'    [prepare_pv] Cleaned weather data not found for date {date_str}')
+    if not cleaned_fs.exists(weather_path):
+        print(f'    [prepare_pv] Cleaned weather data not found: {weather_path}')
         return
 
-    print(f'    [prepare_pv] Joining weather={weather_entry.path} with pv={in_pv_path}')
+    print(f'    [prepare_pv] Joining weather={weather_path} with pv={in_pv_path}')
     prepared_df = _prepare_pv_transform(
-        weather_df=read_parquet(cleaned_fs, weather_entry.path),
+        weather_df=read_parquet(cleaned_fs, weather_path),
         pv_df=read_parquet(cleaned_fs, in_pv_path),
         pv_site=pv_site,
     )
-    out_path = (
-        f'{TIMESERIES_FOLDER}/{pv_descriptor}/'
-        f'{pv_system_id}/prepared_pv_{pv_system_id}_{date_str}.parquet'
-    )
+    out_path = _build_path(pv_descriptor, pv_ts, date_str, 'parquet')
     write_parquet(prepared_fs, prepared_df, out_path)

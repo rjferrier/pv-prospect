@@ -8,7 +8,11 @@ import requests  # type: ignore[import-untyped]
 from typing_extensions import deprecated
 
 from pv_prospect.common import Location, PVSite
-from pv_prospect.data_extraction import TimeSeries, TimeSeriesDescriptor
+from pv_prospect.data_extraction import (
+    OpenMeteoTimeSeriesDescriptor,
+    TimeSeries,
+    TimeSeriesDescriptor,
+)
 from pv_prospect.data_extraction.util import retry_on_429
 
 MIN_TIME = time(4, 0)
@@ -173,22 +177,6 @@ class Models(Enum):
 
 
 @dataclass(frozen=True)
-class OpenMeteoTimeSeriesDescriptor:
-    location: Location
-
-    def __str__(self) -> str:
-        # Round to 4 decimal places and strip the decimal point
-        lat = round(self.location.latitude, 4)
-        lon = round(self.location.longitude, 4)
-
-        # Format to 4 decimal places and remove the decimal point
-        lat_str = f'{lat:.4f}'.replace('.', '')
-        lon_str = f'{lon:.4f}'.replace('.', '')
-
-        return f'{lat_str}_{lon_str}'
-
-
-@dataclass(frozen=True)
 class APIHelper:
     api_selector: APISelector
     time_resolution: TimeResolution
@@ -287,8 +275,10 @@ class OpenMeteoWeatherDataExtractor:
     def get_time_series_descriptors(
         self, pv_site: PVSite
     ) -> list[TimeSeriesDescriptor]:
-        locations = self.location_getter(pv_site)
-        return [OpenMeteoTimeSeriesDescriptor(location) for location in locations]
+        return [
+            OpenMeteoTimeSeriesDescriptor.from_coordinates(loc.latitude, loc.longitude)
+            for loc in self.location_getter(pv_site)
+        ]
 
     @retry_on_429
     def extract(
@@ -304,7 +294,7 @@ class OpenMeteoWeatherDataExtractor:
         # For multi-date extraction, use end_date if provided; otherwise use same day
         end_datetime = datetime.combine(end_date if end_date else date_, MAX_TIME)
 
-        locations = [tsd.location for tsd in ts_descriptors]
+        locations = [Location(tsd.latitude, tsd.longitude) for tsd in ts_descriptors]
 
         url = self.api_helper.get_url()
         params = self.api_helper.get_query_params(

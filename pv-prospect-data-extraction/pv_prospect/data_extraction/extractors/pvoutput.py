@@ -1,12 +1,15 @@
 import time
-from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Collection, Optional
 
 import requests  # type: ignore[import-untyped]
 
 from pv_prospect.common import PVSite, VarMapping, map_from_env
-from pv_prospect.data_extraction import TimeSeries, TimeSeriesDescriptor
+from pv_prospect.data_extraction import (
+    PVOutputTimeSeriesDescriptor,
+    TimeSeries,
+    TimeSeriesDescriptor,
+)
 from pv_prospect.data_extraction.util import retry_on_429
 
 URL = 'https://pvoutput.org/service/r2/getstatus.jsp'
@@ -39,14 +42,6 @@ HEADER = [
     'temperature',
     'voltage',
 ]
-
-
-@dataclass(frozen=True)
-class PVOutputTimeSeriesDescriptor:
-    pv_system_id: int
-
-    def __str__(self) -> str:
-        return str(self.pv_system_id)
 
 
 class PVOutputRateLimiter:

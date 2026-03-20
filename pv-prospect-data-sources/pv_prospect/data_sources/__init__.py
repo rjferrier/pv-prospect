@@ -7,11 +7,19 @@ from .constants import (
 from .paths import build_csv_file_path, format_date
 from .resources import get_config_dir
 from .source_descriptor import SourceDescriptor
+from .ts_descriptors import (
+    OpenMeteoTimeSeriesDescriptor,
+    PVOutputTimeSeriesDescriptor,
+    TimeSeriesDescriptor,
+)
 
 __all__ = [
     'DataSource',
     'DataSourcesConfig',
     'SourceDescriptor',
+    'TimeSeriesDescriptor',
+    'OpenMeteoTimeSeriesDescriptor',
+    'PVOutputTimeSeriesDescriptor',
     'PV_SITES_CSV_FILE',
     'LOCATION_MAPPING_CSV_FILE',
     'SUPPORTING_RESOURCES',

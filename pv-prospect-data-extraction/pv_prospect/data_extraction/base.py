@@ -3,10 +3,7 @@ from datetime import date
 from typing import Any, Collection, Protocol
 
 from pv_prospect.common import PVSite
-
-
-class TimeSeriesDescriptor(Protocol):
-    def __str__(self) -> str: ...
+from pv_prospect.data_sources import TimeSeriesDescriptor
 
 
 @dataclass(frozen=True)
