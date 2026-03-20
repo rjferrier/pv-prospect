@@ -68,7 +68,9 @@ def run_clean_weather(
     """Clean raw weather CSVs for a given date into cleaned Parquet."""
     raw_extractor = Extractor(raw_fs)
     weather_prefix = f'{TIMESERIES_FOLDER}/{weather_descriptor}'
-    for entry in raw_extractor.list_files(weather_prefix, pattern='*.csv'):
+    for entry in raw_extractor.list_files(
+        weather_prefix, pattern='*.csv', recursive=True
+    ):
         if date_str not in entry.name:
             continue
         print(f'    [clean_weather] Processing {entry.path}')
@@ -111,14 +113,13 @@ def run_prepare_weather(
     cleaned_extractor = Extractor(cleaned_fs)
     cleaned_weather_prefix = f'{TIMESERIES_FOLDER}/{weather_descriptor}'
     for entry in cleaned_extractor.list_files(
-        cleaned_weather_prefix, pattern='*.parquet'
+        cleaned_weather_prefix, pattern='*.parquet', recursive=True
     ):
         if date_str not in entry.name:
             continue
         print(f'    [prepare_weather] Processing {entry.path}')
         cleaned_df = read_parquet(cleaned_fs, entry.path)
-        out_path = f'{TIMESERIES_FOLDER}/{weather_descriptor}/{entry.name}'
-        write_parquet(prepared_fs, _prepare_weather_transform(cleaned_df), out_path)
+        write_parquet(prepared_fs, _prepare_weather_transform(cleaned_df), entry.path)
 
 
 def run_prepare_pv(
@@ -144,7 +145,7 @@ def run_prepare_pv(
         (
             e
             for e in cleaned_extractor.list_files(
-                cleaned_weather_prefix, pattern='*.parquet'
+                cleaned_weather_prefix, pattern='*.parquet', recursive=True
             )
             if date_str in e.name
         ),

@@ -24,4 +24,9 @@ def build_csv_file_path(
         format_date(date_),
     ]
     filename = '_'.join(filename_parts) + '.csv'
-    return os.path.join(time_series_folder, str(source_descriptor), filename)
+    return os.path.join(
+        time_series_folder,
+        str(source_descriptor),
+        str(time_series_descriptor),
+        filename,
+    )

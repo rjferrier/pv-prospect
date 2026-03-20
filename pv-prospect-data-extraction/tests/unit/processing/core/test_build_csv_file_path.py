@@ -9,7 +9,7 @@ from .helpers import FakeTimeSeriesDescriptor
 
 
 def test_builds_expected_path() -> None:
-    descriptor = FakeTimeSeriesDescriptor('temperature')
+    descriptor = FakeTimeSeriesDescriptor('504900_-35400')
     path = build_csv_file_path(
         'timeseries',
         SourceDescriptor.OPENMETEO_QUARTERHOURLY,
@@ -17,6 +17,6 @@ def test_builds_expected_path() -> None:
         date(2025, 6, 1),
     )
     assert (
-        path
-        == 'timeseries/openmeteo/quarterhourly/openmeteo-quarterhourly_temperature_20250601.csv'
+        path == 'timeseries/openmeteo/quarterhourly/504900_-35400/'
+        'openmeteo-quarterhourly_504900_-35400_20250601.csv'
     )
