@@ -2,35 +2,17 @@
 
 !include theme.puml
 
-component "Weather\nAPI" as WeatherApi
-component "PV\nApi" as PvApi
+collections "Third Party APIs" as ThirdPartyAPIs
 
 database "Staging" as Staging {
-  database "Raw" as StagingRaw {
-    database "Weather CSVs" as WeatherStagedRawData
-    database "PV CSVs" as PvStagedRawData
-  }
-  database "Cleaned" as StagingCleaned {
-    database "Weather Parquet" as WeatherCleanedData
-    database "PV Parquet" as PvCleanedData
-  }
-  database "Prepared" as StagingPrepared {
-    database "Weather Parquet" as WeatherStagedModelData
-    database "PV Site Parquet" as PvSiteStagedModelData
-  }
+  database "Raw" as StagingRaw
+  database "Cleaned" as StagingCleaned
+  database "Prepared" as StagingPrepared
 }
 
-database "Versioned Raw Data" as VersionedRawData {
-  database "Weather CSVs" as WeatherVersionedRawData
-  database "PV CSVs" as PvVersionedRawData
-}
-
+database "Versioned Raw Data" as VersionedRawData
 database "Versioned Project Data" as VersionedProjectData
-
-database "Versioned Model Data" as VersionedModelData {
-  database "Weather Parquet" as WeatherVersionedModelData
-  database "PV Parquet" as PvVersionedModelData
-}
+database "Versioned Model Data" as VersionedModelData
 
 VersionedRawData -[hidden]> VersionedModelData
 
@@ -59,54 +41,37 @@ actor User
 User --> ValidationApi
 User --> PredictionApi : lat, lon, period
 
-PredictionApi ----> WeatherModel : calls \n(lat, lon, \nday, year)
-PredictionApi <... WeatherModel : DNI, DHI, \ntemperature
+PredictionApi ---> WeatherModel : DNI, DHI, \ntemperature = \ncall_model(\nlat, lon, \nday, year)
+PredictionApi -> IrradianceCalculator : calculate_POA(DNI, DHI)
+PredictionApi ----> PvModel : predicted\nenergy \nyield = \ncall_model(\nPOA, \ntemperature)
 
-PredictionApi -> IrradianceCalculator : calls (DNI, DHI)
-PredictionApi <. IrradianceCalculator : POA
+ValidationApi --> PvModel : predicted\nenergy\nyield = \ncall_model(\nPOA, \ntemperature, \nsite ID)
+ValidationApi --> InMemoryData : get_actual_energy_yield()
 
-PredictionApi ---> PvModel : calls (POA, temperature)
-PredictionApi <... PvModel : predicted\nenergy yield\nper site
+VersionedModelData <-- ModelTrainer : M1: pulls
+Models <-- ModelTrainer : M2: trains
 
-ValidationApi --> PvModel : calls (POA, \ntemperature, \nsite ID)
-ValidationApi <.. PvModel : predicted\nenergy\nyield
-ValidationApi --> InMemoryData : gets
-ValidationApi <.. InMemoryData : actual\nenergy\nyield
+ThirdPartyAPIs <--- DataExtractor : E2: calls
 
-WeatherVersionedModelData <-- ModelTrainer : MW.1: pulls\nMP.1: pulls
-PvVersionedModelData <-- ModelTrainer : MP.2: pulls
-WeatherModel <-- ModelTrainer : MW.2: trains
-PvModel <-- ModelTrainer : MP.3: trains
-
-WeatherApi <-- DataExtractor : EW.1: calls
-PvApi <-- DataExtractor : EP.1: calls
-
-VersionedProjectData <-- DataExtractor: pulls
-DataExtractor --> WeatherStagedRawData : EW.2: puts
-DataExtractor --> PvStagedRawData : EP.2: puts
+VersionedProjectData <-- DataExtractor: E1: pulls
+DataExtractor --> StagingRaw : E3: puts
 
 VersionedProjectData <-[hidden]- DataTransformer
-DataTransformer --> WeatherStagedRawData : TW.1: gets\nTP.1: gets
-DataTransformer --> PvStagedRawData : TP.2: gets
+DataTransformer --> StagingRaw : C1: gets
+DataTransformer --> StagingCleaned : C2: puts\nP1: gets
+DataTransformer --> StagingPrepared : P2: puts
+StagingCleaned -[hidden]> StagingPrepared
 
-DataTransformer --> WeatherCleanedData : TW.2: puts\nTP.3: gets
-DataTransformer --> PvCleanedData : TP.4: puts\nTP.5: gets
+InMemoryData <--- DataTransformer : P3: puts
 
-DataTransformer --> WeatherStagedModelData : TW.3: puts
-DataTransformer --> PvSiteStagedModelData : TP.6: puts
+StagingRaw <-- DataVersioner : V1: gets
+DataVersioner -> VersionedRawData : V2: pushes (using DVC)
 
-InMemoryData <-- DataTransformer : TW.4: puts\nTP.7: puts
+StagingPrepared <-- DataVersioner : V3: gets
+VersionedModelData <-- DataVersioner : V4: pushes (using DVC)
+DataVersioner -> VCRepo : V5: pushes (using Git)
 
-StagingRaw <-- DataVersioner : V.1: gets
-'VersionedRawData <- DataVersioner : V.2: pushes (using DVC)
-DataVersioner -> VersionedRawData : V.2: pushes (using DVC)
-
-StagingPrepared <-- DataVersioner : V.3: gets
-VersionedModelData <-- DataVersioner : V.4: pushes (using DVC)
-'DataVersioner --> VCRepo : V.5: pushes (using Git)
-DataVersioner --> VCRepo : V.5: pushes (using Git)
-
-InMemoryData ---> VersionedModelData : L.1: pulls
-InMemoryData ---> StagingPrepared : L.2: gets
+InMemoryData ---> VersionedModelData : A1: pulls
+InMemoryData ---> StagingPrepared : A2: gets
 
 @enduml

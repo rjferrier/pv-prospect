@@ -40,60 +40,47 @@ Some caveats:
 
 The pipeline is orchestrated around the following named flows:
 
-| Key | Description | When it happens |
-|-----|-------------|-----------------|
-| EW | Weather data extraction | Daily |
-| EP | PV data extraction | Daily |
-| TW | Weather data transformation | When EW and EP finish |
-| TP | PV data transformation | When EW and EP finish |
-| L | App data loading | When App starts up |
-| V | Data/model versioning | Weekly |
-| MW | Weather model training | When V finishes |
-| MP | PV model training | When V finishes |
+| Key | Description           | When it happens    |
+|-----|-----------------------|--------------------|
+| E   | Data extraction       | Daily              |
+| C   | Data cleaning         | When E finishes    |
+| P   | Data preparation      | When C finishes    |
+| A   | App data loading      | When App starts up |
+| V   | Data/model versioning | Weekly             |
+| M   | Model training        | When V finishes    |
 
-### EW — Weather Data Extraction
+### E — Data Extraction
 
-Pulls hourly and 15-minute weather data from the **Open-Meteo API** and stages it as CSV to Google
-Cloud Storage (GCS). Each run is scoped to a single PV system and date range.
-Implemented in `pv-prospect-data-extraction`.
+Pulls weather data from the **Open-Meteo API** and PV power readings from the **PVOutput API**,
+staging them as CSV to a GCS staging bucket (`raw/` prefix). Each run is scoped to a single
+PV system and date range. Implemented in `pv-prospect-data-extraction`.
 
-### EP — PV Data Extraction
+On GCP, extraction is triggered daily by Cloud Scheduler, orchestrated by Cloud Workflows,
+and executed as Cloud Run Jobs. Locally it can be driven by the Docker Compose `runner` service.
 
-Pulls historical power readings from the **PVOutput API** and stages them as CSV to GCS.
-Each run is scoped to a single PV system and date range.
-Implemented in `pv-prospect-data-extraction`.
+### C — Data Cleaning
 
-On GCP both extraction flows are triggered daily by Cloud Scheduler, orchestrated by
-Cloud Workflows, and executed as Cloud Run Jobs. Locally they can be driven by the Docker Compose
-`runner` service.
+Cleans raw CSVs into Parquet (column selection, renaming, UTC time synthesis) and writes them
+to the staging bucket (`cleaned/` prefix). All data sources must be cleaned before preparation
+can begin. Implemented in `pv-prospect-data-transformation`.
 
-### TW — Weather Data Transformation
+### P — Data Preparation
 
-Cleans and processes staged weather CSVs into versioned Parquet files keyed by lat/lon, ready for
-model training. Implemented in `pv-prospect-data-transformation`.
+Reads cleaned Parquet, performs feature selection, downsampling, joins weather with PV data,
+and computes plane-of-array (POA) irradiance via `pvlib`. Writes prepared Parquet to the
+staging bucket (`prepared/` prefix). Implemented in `pv-prospect-data-transformation`.
 
-### TP — PV Data Transformation
-
-Cleans and processes staged PV CSVs, joins them with cleaned weather data, and computes
-plane-of-array (POA) irradiance via `pvlib`. Outputs versioned Parquet files.
-Implemented in `pv-prospect-data-transformation`.
-
-### L — App Data Loading
+### A — App Data Loading
 
 Loads versioned Parquet data and trained model weights into the application at startup.
 
 ### V — Data/Model Versioning
 
-Snapshots the processed Parquet data and trained model artefacts on a weekly cadence,
+Snapshots prepared Parquet data and trained model artefacts on a weekly cadence,
 producing a versioned dataset for the next training run.
 
-### MW — Weather Model Training
+### M — Model Training
 
-Trains a neural network to predict weather variables (temperature, DNI, DHI, etc.)
-from location and time. Consumes the versioned Parquet data produced by TW.
-Implemented in `pv-prospect-model`.
-
-### MP — PV Model Training
-
-Trains a neural network to predict PV power output from POA irradiance and other features.
-Consumes the versioned Parquet data produced by TP. Implemented in `pv-prospect-model`.
+Trains two neural networks from versioned Parquet data: one to predict weather variables
+(temperature, DNI, DHI) from location and time, and another to predict PV power output from
+POA irradiance and other features. Implemented in `pv-prospect-model`.
