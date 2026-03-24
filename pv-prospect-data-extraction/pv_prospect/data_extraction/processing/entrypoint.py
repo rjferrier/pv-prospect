@@ -40,6 +40,7 @@ from pv_prospect.data_extraction import (
 )
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import core
+from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
 from pv_prospect.data_sources import DataSource
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.etl import Extractor
@@ -120,7 +121,11 @@ def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
     config = get_config(
         DataExtractionConfig,
-        base_config_dirs=[get_etl_config_dir(), get_ds_config_dir()],
+        base_config_dirs=[
+            get_etl_config_dir(),
+            get_ds_config_dir(),
+            get_de_config_dir(),
+        ],
     )
 
     source_env = os.environ.get('DATA_SOURCE')

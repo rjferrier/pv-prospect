@@ -49,6 +49,9 @@ from pv_prospect.data_transformation.core import (
     run_prepare_pv,
     run_prepare_weather,
 )
+from pv_prospect.data_transformation.resources import (
+    get_config_dir as get_dt_config_dir,
+)
 from pv_prospect.etl import Extractor
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import get_filesystem
@@ -223,7 +226,11 @@ def _main() -> None:
     args = _parse_args()
     config = get_config(
         DataTransformationConfig,
-        base_config_dirs=[get_etl_config_dir(), get_ds_config_dir()],
+        base_config_dirs=[
+            get_etl_config_dir(),
+            get_ds_config_dir(),
+            get_dt_config_dir(),
+        ],
     )
 
     # --- validate steps ---------------------------------------------------

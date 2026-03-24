@@ -113,8 +113,8 @@ def extract_and_load(
     def get_csv_path(ts_descriptor: TimeSeriesDescriptor) -> str:
         return build_csv_file_path(
             TIMESERIES_FOLDER,
-            str(source_descriptor),
-            str(ts_descriptor),
+            source_descriptor,
+            ts_descriptor,
             date_range.start,
         )
 

@@ -13,6 +13,7 @@ from pv_prospect.data_extraction import SourceDescriptor, supports_multi_date
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing.task_queuer import TaskQueuer
 from pv_prospect.data_extraction.processing.tasks import PV_SITES_CSV_FILE
+from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.etl import Extractor
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
@@ -257,7 +258,11 @@ def _main(config: DataExtractionConfig, args: 'Any') -> None:
 if __name__ == '__main__':
     config_ = get_config(
         DataExtractionConfig,
-        base_config_dirs=[get_etl_config_dir(), get_ds_config_dir()],
+        base_config_dirs=[
+            get_etl_config_dir(),
+            get_ds_config_dir(),
+            get_de_config_dir(),
+        ],
     )
     args_ = _parse_args()
     _main(config_, args_)

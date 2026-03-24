@@ -41,7 +41,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # ---- Cloud Run Job entrypoint (primary cloud target) ----
 FROM runtime-common AS entrypoint
-# Copy package-specific resources for config overlay
-COPY ./pv-prospect-data-transformation/resources /app/resources
+RUN mkdir -p /app/resources
 # The entrypoint coordinates the cleaning and processing steps
 CMD ["python", "-m", "pv_prospect.data_transformation.entrypoint"]

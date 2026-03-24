@@ -16,6 +16,7 @@ from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.value_objects import Result
 from pv_prospect.data_extraction.processing.worker import app
+from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.etl import Extractor
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
@@ -33,7 +34,11 @@ def _resolve_storage(local_dir: str | None) -> tuple[DataExtractionConfig, FileS
     """Resolve storage backends from config and optional local override."""
     config = get_config(
         DataExtractionConfig,
-        base_config_dirs=[get_etl_config_dir(), get_ds_config_dir()],
+        base_config_dirs=[
+            get_etl_config_dir(),
+            get_ds_config_dir(),
+            get_de_config_dir(),
+        ],
     )
     staging_config = (
         LocalStorageConfig(prefix=local_dir)
