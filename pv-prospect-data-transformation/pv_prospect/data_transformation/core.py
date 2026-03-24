@@ -5,6 +5,7 @@ All parameters are explicit — no environment variable reads.
 """
 
 import io
+import logging
 
 import pandas as pd
 
@@ -28,6 +29,8 @@ from pv_prospect.data_transformation.transformations import (
 )
 from pv_prospect.etl import TIMESERIES_FOLDER
 from pv_prospect.etl.storage import FileSystem
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Path constants
@@ -62,7 +65,7 @@ def read_csv(fs: FileSystem, path: str) -> pd.DataFrame | None:
 def write_csv(fs: FileSystem, df: pd.DataFrame, path: str, header: bool = True) -> None:
     """Write a DataFrame as CSV to a FileSystem."""
     fs.write_text(path, df.to_csv(index=False, header=header))
-    print(f'    Written to: {path}')
+    logger.info('Written to: %s', path)
 
 
 def _build_path(
@@ -104,7 +107,7 @@ def run_clean_weather(
 ) -> None:
     """Clean a raw weather CSV for a given location and date into cleaned CSV."""
     in_path = _build_path(weather_descriptor, location, date_str, 'csv')
-    print(f'    [clean_weather] Processing {in_path}')
+    logger.info('[clean_weather] Processing %s', in_path)
     df = read_csv(raw_fs, in_path)
     if df is None:
         raise FileNotFoundError(f'CSV not found: {in_path}')
@@ -126,7 +129,7 @@ def run_clean_pv(
 ) -> None:
     """Clean a raw PV CSV for a given system and date into cleaned CSV."""
     in_path = _build_path(pv_descriptor, pv_ts, date_str, 'csv')
-    print(f'    [clean_pv] Processing {in_path}')
+    logger.info('[clean_pv] Processing %s', in_path)
     df = read_csv(raw_fs, in_path)
     if df is None:
         raise FileNotFoundError(f'CSV not found: {in_path}')
@@ -148,7 +151,7 @@ def run_prepare_weather(
 ) -> None:
     """Prepare cleaned weather CSV and write a headerless CSV batch."""
     path = _build_path(weather_descriptor, location, date_str, 'csv')
-    print(f'    [prepare_weather] Processing {path}')
+    logger.info('[prepare_weather] Processing %s', path)
     cleaned_df = read_csv(cleaned_fs, path)
     if cleaned_df is None:
         raise FileNotFoundError(f'CSV not found: {path}')
@@ -177,15 +180,15 @@ def run_prepare_pv(
 
     in_pv_path = _build_path(pv_descriptor, pv_ts, date_str, 'csv')
     if not cleaned_fs.exists(in_pv_path):
-        print(f'    [prepare_pv] Cleaned PV data not found: {in_pv_path}')
+        logger.warning('[prepare_pv] Cleaned PV data not found: %s', in_pv_path)
         return
 
     weather_path = _build_path(weather_descriptor, weather_location, date_str, 'csv')
     if not cleaned_fs.exists(weather_path):
-        print(f'    [prepare_pv] Cleaned weather data not found: {weather_path}')
+        logger.warning('[prepare_pv] Cleaned weather data not found: %s', weather_path)
         return
 
-    print(f'    [prepare_pv] Joining weather={weather_path} with pv={in_pv_path}')
+    logger.info('[prepare_pv] Joining weather=%s with pv=%s', weather_path, in_pv_path)
     pv_df = read_csv(cleaned_fs, in_pv_path)
     weather_df = read_csv(cleaned_fs, weather_path)
     if pv_df is None or weather_df is None:
@@ -215,7 +218,7 @@ def assemble_prepared_weather(
     """Merge weather batch CSVs into a single master CSV."""
     batch_files = batches_fs.list_files(WEATHER_BATCH_PREFIX, '*.csv')
     if not batch_files:
-        print('    [assemble_weather] No batches to assemble.')
+        logger.warning('[assemble_weather] No batches to assemble.')
         return
 
     frames: list[pd.DataFrame] = []
@@ -251,7 +254,7 @@ def assemble_prepared_pv(
     all_pv_batches = batches_fs.list_files(PV_BATCH_PREFIX, '*.csv')
     batch_files = [e for e in all_pv_batches if e.name.startswith(f'{system_id}_')]
     if not batch_files:
-        print(f'    [assemble_pv] No batches for system {system_id}.')
+        logger.warning('[assemble_pv] No batches for system %s.', system_id)
         return
 
     frames: list[pd.DataFrame] = []

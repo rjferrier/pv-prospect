@@ -38,6 +38,10 @@ resource "google_cloud_run_v2_job" "data_extraction" {
           name  = "GOOGLE_CLOUD_PROJECT"
           value = var.project_id
         }
+        env {
+          name  = "LOG_LEVEL"
+          value = var.log_level
+        }
 
         # API keys from Secret Manager
         dynamic "env" {

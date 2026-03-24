@@ -6,6 +6,7 @@ These are called by:
 - ``tasks.py``      for legacy Celery execution (optional)
 """
 
+import logging
 from typing import Any, Callable
 
 from pv_prospect.common import DateRange
@@ -23,6 +24,8 @@ from pv_prospect.data_sources import (
 )
 from pv_prospect.etl import TIMESERIES_FOLDER, Extractor, Loader
 from pv_prospect.etl.storage import FileSystem
+
+logger = logging.getLogger(__name__)
 
 # Re-export for callers that access these via core.PV_SITES_CSV_FILE etc.
 __all__ = [
@@ -66,7 +69,7 @@ def preprocess(
     for filename, blob_path in resources:
         staged_path = filename
         if loader.file_exists(staged_path):
-            print(f'    {filename} already exists, skipping provisioning')
+            logger.debug('%s already exists, skipping provisioning', filename)
             continue
 
         with extractor.read_file(blob_path) as f:
@@ -104,7 +107,7 @@ def extract_and_load(
     task = Task(source_descriptor, pv_system_id, date_range)
 
     if dry_run:
-        print(f'    {task}: Dry run - not writing')
+        logger.info('%s: dry run — not writing', task)
         return Result.skipped_dry_run(task)
 
     staging_extractor = Extractor(staging_fs)
@@ -134,7 +137,7 @@ def extract_and_load(
         ]
 
         if not processable_ts_descriptors:
-            print(f'    {task}: All output files already exist')
+            logger.info('%s: all output files already exist', task)
             return Result.skipped_existing(task)
 
         timeseries = extractor.extract(
@@ -147,9 +150,9 @@ def extract_and_load(
             ts_file_path = get_csv_path(ts.descriptor)
             staging_loader.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
 
-        print(f'    {task}: Success')
+        logger.info('%s: success', task)
         return Result.success(task)
 
     except Exception as e:
-        print(f'    {task}: ERROR: {e}')
+        logger.error('%s: %s', task, e)
         return Result.failure(task, e)

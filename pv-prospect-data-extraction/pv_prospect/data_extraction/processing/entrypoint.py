@@ -21,6 +21,7 @@ For **extract_and_load**:
     BY_WEEK           — ``true`` or ``false`` (chunking hint)
 """
 
+import logging
 import os
 import sys
 from datetime import date
@@ -30,6 +31,7 @@ from pv_prospect.common import (
     Period,
     build_location_mapping_repo,
     build_pv_site_repo,
+    configure_logging,
     get_config,
     get_pv_site_by_system_id,
 )
@@ -48,6 +50,8 @@ from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.resolve import resolve_dvc_path
 
+logger = logging.getLogger(__name__)
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     return os.environ.get(name, str(default)).lower() in ('true', '1', 'yes')
@@ -59,7 +63,7 @@ def _run_preprocess(
     dvc_prefix: str,
     source_descriptor: SourceDescriptor,
 ) -> None:
-    print(f'[entrypoint] preprocess: {source_descriptor}')
+    logger.info('preprocess: %s', source_descriptor)
     core.preprocess(
         resolve_dvc_path,
         versioned_resources_fs,
@@ -81,9 +85,12 @@ def _run_extract_and_load(
     by_week = _env_bool('BY_WEEK')
 
     complete_date_range = DateRange(start_date, end_date)
-    print(
-        f'[entrypoint] extract_and_load: {source_descriptor}, '
-        f'site={pv_system_id}, {complete_date_range}, by_week={by_week}'
+    logger.info(
+        'extract_and_load: %s, site=%s, %s, by_week=%s',
+        source_descriptor,
+        pv_system_id,
+        complete_date_range,
+        by_week,
     )
 
     staging_extractor = Extractor(staging_fs)
@@ -114,7 +121,7 @@ def _run_extract_and_load(
             overwrite,
             dry_run,
         )
-        print(f'[entrypoint] {dr}: {result.type.value}')
+        logger.info('%s: %s', dr, result.type.value)
 
 
 def main() -> None:
@@ -147,9 +154,10 @@ def main() -> None:
     elif job_type == 'extract_and_load':
         _run_extract_and_load(staging_fs, source_descriptor)
     else:
-        print(f'[entrypoint] ERROR: unknown JOB_TYPE={job_type!r}', file=sys.stderr)
+        logger.error('unknown JOB_TYPE=%r', job_type)
         sys.exit(1)
 
 
 if __name__ == '__main__':
+    configure_logging()
     main()

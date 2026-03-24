@@ -15,12 +15,14 @@ OPENMETEO_LOCATION
     (Optional) stringified lat_lon, required for weather steps
 """
 
+import logging
 import os
 import sys
 
 from pv_prospect.common import (
     build_location_mapping_repo,
     build_pv_site_repo,
+    configure_logging,
     get_config,
     get_location_by_pv_system_id,
 )
@@ -44,6 +46,8 @@ from pv_prospect.data_transformation.resources import (
 from pv_prospect.etl import Extractor
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
+
+logger = logging.getLogger(__name__)
 
 
 def _load_resources(raw_fs: FileSystem) -> None:
@@ -85,7 +89,7 @@ def main() -> None:
 
     _load_resources(raw_fs)
 
-    print(f'[entrypoint] Starting {step} for date {target_date}')
+    logger.info('Starting %s for date %s', step, target_date)
 
     if step == 'clean_weather':
         location = OpenMeteoTimeSeriesDescriptor.from_str(
@@ -122,12 +126,10 @@ def main() -> None:
         pv_system_id = int(os.environ['PV_SYSTEM_ID'])
         assemble_prepared_pv(batches_fs, prepared_fs, pv_system_id)
     else:
-        print(
-            f'[entrypoint] ERROR: unknown TRANSFORM_STEP={step}',
-            file=sys.stderr,
-        )
+        logger.error('unknown TRANSFORM_STEP=%s', step)
         sys.exit(1)
 
 
 if __name__ == '__main__':
+    configure_logging()
     main()

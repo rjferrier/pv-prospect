@@ -38,6 +38,10 @@ resource "google_cloud_run_v2_job" "data_transformation" {
           name  = "GOOGLE_CLOUD_PROJECT"
           value = var.project_id
         }
+        env {
+          name  = "LOG_LEVEL"
+          value = var.log_level
+        }
 
         # Date and PV_SYSTEM_ID are also expected to be overridden
         # by the workflow execution.

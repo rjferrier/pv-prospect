@@ -29,6 +29,12 @@ variable "service_account_email" {
   description = "Service account email for Cloud Run Job execution"
 }
 
+variable "log_level" {
+  type        = string
+  default     = "INFO"
+  description = "Python log level for the application"
+}
+
 variable "secret_env_vars" {
   type = list(object({
     name      = string
