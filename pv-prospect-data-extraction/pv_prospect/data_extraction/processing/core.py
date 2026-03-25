@@ -37,43 +37,21 @@ __all__ = [
 
 
 def preprocess(
-    resolve_dvc_path: Callable[[str], str],
-    versioned_resources_fs: FileSystem,
     staged_resources_fs: FileSystem,
-    dvc_prefix: str,
     source_descriptor: SourceDescriptor,
 ) -> list[str | None]:
     """
-    Preprocess before extraction: create folder structure and provision
-    supporting resources (pv_sites.csv, location_mapping.csv).
+    Preprocess before extraction: create folder structure for time series data.
 
     Args:
-        resolve_dvc_path: Resolves a .dvc tracking file path to its storage location.
-        versioned_resources_fs: FileSystem for reading versioned resources.
         staged_resources_fs: FileSystem for writing to the staging location.
-        dvc_prefix: Prefix path for resolving .dvc tracking files.
         source_descriptor: The source descriptor identifying the data source folder.
     """
-    extractor = Extractor(versioned_resources_fs)
     loader = Loader(staged_resources_fs)
 
     folder_ids: list[str | None] = [
         loader.create_folder(f'{TIMESERIES_FOLDER}/{source_descriptor}')
     ]
-
-    resources = [
-        (filename, resolve_dvc_path(f'{dvc_prefix}/{filename}.dvc'))
-        for filename in SUPPORTING_RESOURCES
-    ]
-
-    for filename, blob_path in resources:
-        staged_path = filename
-        if loader.file_exists(staged_path):
-            logger.debug('%s already exists, skipping provisioning', filename)
-            continue
-
-        with extractor.read_file(blob_path) as f:
-            loader.write_text(staged_path, f.read(), overwrite=False)
 
     return folder_ids
 

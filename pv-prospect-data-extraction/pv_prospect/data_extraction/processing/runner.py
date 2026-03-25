@@ -39,7 +39,6 @@ from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.backends import LocalStorageConfig
-from pv_prospect.etl.storage.resolve import resolve_dvc_path
 
 # ---------------------------------------------------------------------------
 # Argument parsing (mirrors task_producer.py)
@@ -150,18 +149,14 @@ def _main() -> None:
         else config.staged_raw_data_storage
     )
     staging_fs = get_filesystem(staging_location_config)
-    versioned_resources_fs = get_filesystem(config.versioned_resources_storage)
-    tracking = config.versioned_resources_storage.tracking
-    dvc_prefix = tracking.prefix if tracking else ''
+    resources_fs = get_filesystem(config.resources_storage)
 
     # --- preprocess (sequential, one per source) ----------------------------
     for sd in source_descriptors:
-        core.preprocess(
-            resolve_dvc_path, versioned_resources_fs, staging_fs, dvc_prefix, sd
-        )
+        core.preprocess(staging_fs, sd)
 
     # --- initialise in-memory repos ----------------------------------------
-    _init_repos(staging_fs)
+    _init_repos(resources_fs)
 
     # --- resolve PV system IDs ----------------------------------------------
     pv_system_ids = (

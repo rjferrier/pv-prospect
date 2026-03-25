@@ -3,7 +3,6 @@ from .factory import (
     AnyStorageConfig,
     get_filesystem,
     parse_storage_config,
-    parse_tracking_config,
 )
 
 __all__ = [
@@ -13,5 +12,4 @@ __all__ = [
     'AnyStorageConfig',
     'get_filesystem',
     'parse_storage_config',
-    'parse_tracking_config',
 ]

@@ -13,6 +13,11 @@ _DATA_SOURCES = {
 
 def test_from_dict_parses_gcs_config():
     data = {
+        'resources_storage': {
+            'backend': 'gcs',
+            'bucket_name': 'my-bucket',
+            'prefix': 'resources',
+        },
         'staged_raw_data_storage': {
             'backend': 'gcs',
             'bucket_name': 'my-bucket',
@@ -51,6 +56,10 @@ def test_from_dict_parses_gcs_config():
 
 def test_from_dict_parses_local_config():
     data = {
+        'resources_storage': {
+            'backend': 'local',
+            'prefix': '/tmp/resources',
+        },
         'staged_raw_data_storage': {
             'backend': 'local',
             'prefix': '/tmp/raw',
@@ -94,6 +103,7 @@ def test_from_dict_raises_on_missing_key():
 
 def test_from_dict_parses_data_sources():
     data = {
+        'resources_storage': {'backend': 'local', 'prefix': '/tmp'},
         'staged_raw_data_storage': {'backend': 'local', 'prefix': '/tmp'},
         'staged_cleaned_data_storage': {'backend': 'local', 'prefix': '/tmp'},
         'staged_prepared_batches_data_storage': {'backend': 'local', 'prefix': '/tmp'},

@@ -5,6 +5,11 @@ from typing import Any, Dict, Protocol, Type, TypeVar
 
 import yaml  # type: ignore[import-untyped]
 
+DEFAULT_RUNTIME_ENV = 'default'
+LOCAL_RUNTIME_ENV = 'local'
+RUNTIME_ENV_VAR = 'RUNTIME_ENV'
+CONFIG_DIR_VAR = 'CONFIG_DIR'
+
 
 class Config(Protocol):
     @classmethod
@@ -33,7 +38,7 @@ def _load_from_dir(config_dir: Path, runtime_env: str) -> Dict[str, Any]:
         with open(default_path, 'r') as f:
             _merge_dicts(data, yaml.safe_load(f) or {})
 
-    if runtime_env != 'default':
+    if runtime_env != DEFAULT_RUNTIME_ENV:
         env_path = config_dir / f'config-{runtime_env}.yaml'
         if env_path.exists():
             with open(env_path, 'r') as f:
@@ -44,7 +49,7 @@ def _load_from_dir(config_dir: Path, runtime_env: str) -> Dict[str, Any]:
 
 def load_config_tree(
     config_dirs: Sequence[Path] | Path,
-    runtime_env: str = 'default',
+    runtime_env: str = DEFAULT_RUNTIME_ENV,
 ) -> Dict[str, Any]:
     """
     Load configuration from one or more directories, merging in order.
@@ -96,29 +101,21 @@ def map_from_yaml(
 def resolve_env_config(
     runtime_env: str | None,
     config_dir: str | None,
-    container_path_exists: bool,
-) -> tuple[str, str]:
+) -> tuple[str, str | None]:
     """
-    Resolve the runtime environment and config directory from the given inputs.
+    Resolve the runtime environment and optional config directory.
 
-    If neither is provided, falls back to container defaults when
-    container_path_exists is True, or local defaults otherwise.
+    Args:
+        runtime_env: Value of RUNTIME_ENV env var (or None).
+        config_dir: Value of CONFIG_DIR env var (or None).
 
     Returns:
-        Tuple of (runtime_env, config_dir).
+        Tuple of (runtime_env, config_dir). config_dir may be None
+        when no additional config directory is needed.
     """
-    if not runtime_env and not config_dir:
-        if container_path_exists:
-            runtime_env = 'default'
-            config_dir = '/app/resources'
-        else:
-            runtime_env = 'local'
-            config_dir = 'resources'
-
-    runtime_env = runtime_env or 'default'
-    config_dir = config_dir or '/app/resources'
-
-    return runtime_env, config_dir
+    resolved_env = runtime_env if runtime_env else LOCAL_RUNTIME_ENV
+    resolved_dir = config_dir if config_dir else None
+    return resolved_env, resolved_dir
 
 
 def get_config(
@@ -127,16 +124,20 @@ def get_config(
 ) -> T:
     """
     Load configuration from YAML files using the provided factory.
-    Reads 'RUNTIME_ENV' and 'CONFIG_DIR' from the environment.
+    Reads RUNTIME_ENV and CONFIG_DIR from the environment.
 
     If *base_config_dirs* is provided, those directories are loaded first
-    (in order) and the package's own config directory is merged on top.
+    (in order).  If CONFIG_DIR is set and points to an existing directory,
+    it is appended as a final overlay.
     """
     runtime_env, config_dir = resolve_env_config(
-        os.getenv('RUNTIME_ENV'),
-        os.getenv('CONFIG_DIR'),
-        os.path.exists('/app/resources'),
+        os.getenv(RUNTIME_ENV_VAR),
+        os.getenv(CONFIG_DIR_VAR),
     )
 
-    config_dirs = list(base_config_dirs or []) + [Path(config_dir)]
+    config_dirs = list(base_config_dirs or [])
+    if config_dir:
+        config_dir_path = Path(config_dir)
+        if config_dir_path.is_dir():
+            config_dirs.append(config_dir_path)
     return map_from_yaml(cls, runtime_env, config_dirs)

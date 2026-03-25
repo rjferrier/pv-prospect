@@ -47,7 +47,6 @@ from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
-from pv_prospect.etl.storage.resolve import resolve_dvc_path
 
 logger = logging.getLogger(__name__)
 
@@ -57,23 +56,16 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _run_preprocess(
-    versioned_resources_fs: FileSystem,
     staging_fs: FileSystem,
-    dvc_prefix: str,
     source_descriptor: SourceDescriptor,
 ) -> None:
     logger.info('preprocess: %s', source_descriptor)
-    core.preprocess(
-        resolve_dvc_path,
-        versioned_resources_fs,
-        staging_fs,
-        dvc_prefix,
-        source_descriptor,
-    )
+    core.preprocess(staging_fs, source_descriptor)
 
 
 def _run_extract_and_load(
     staging_fs: FileSystem,
+    resources_fs: FileSystem,
     source_descriptor: SourceDescriptor,
 ) -> None:
     pv_system_id = int(os.environ['PV_SYSTEM_ID'])
@@ -97,10 +89,10 @@ def _run_extract_and_load(
         by_week,
     )
 
-    staging_extractor = Extractor(staging_fs)
-    build_pv_site_repo(staging_extractor.read_file(core.PV_SITES_CSV_FILE))
+    resources_extractor = Extractor(resources_fs)
+    build_pv_site_repo(resources_extractor.read_file(core.PV_SITES_CSV_FILE))
     build_location_mapping_repo(
-        staging_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
+        resources_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
     )
 
     split_period = Period.WEEK if by_week else Period.DAY
@@ -156,16 +148,12 @@ def main() -> None:
 
     # Cloud Run always uses GCS — resolve storage backends once.
     staging_fs = get_filesystem(config.staged_raw_data_storage)
-    versioned_resources_fs = get_filesystem(config.versioned_resources_storage)
-    tracking = config.versioned_resources_storage.tracking
-    dvc_prefix = tracking.prefix if tracking else ''
+    resources_fs = get_filesystem(config.resources_storage)
 
     if job_type == 'preprocess':
-        _run_preprocess(
-            versioned_resources_fs, staging_fs, dvc_prefix, source_descriptor
-        )
+        _run_preprocess(staging_fs, source_descriptor)
     elif job_type == 'extract_and_load':
-        _run_extract_and_load(staging_fs, source_descriptor)
+        _run_extract_and_load(staging_fs, resources_fs, source_descriptor)
     else:
         logger.error('unknown JOB_TYPE=%r', job_type)
         sys.exit(1)

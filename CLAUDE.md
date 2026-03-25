@@ -14,12 +14,11 @@ This is a Python monorepo with four primary packages and supporting directories:
 |---|---|
 | `pv-prospect-common/` | Shared domain models and utilities |
 | `pv-prospect-etl/` | Storage abstraction (Loader/Extractor protocols for Local and GCS) |
+| `pv-prospect-data-sources/` | Shared constants, path builders, source descriptors |
 | `pv-prospect-data-extraction/` | API extraction pipeline (PVOutput + OpenMeteo) |
 | `pv-prospect-data-transformation/` | Data cleaning and processing pipeline |
 | `pv-prospect-model/` | ML model training (early stage) |
-| `data-exploration/` | Jupyter notebooks for exploratory analysis |
 | `terraform/` | GCP infrastructure (Cloud Scheduler → Workflows → Cloud Run Jobs) |
-| `resources/` | Versioned resources tracked with DVC (`pv_sites.csv`, `location_mapping.csv`) |
 
 Each package has its own `pyproject.toml`, `.venv`, and is installed with Poetry. Local deps are declared as `{ path = "../pv-prospect-common", develop = true }`.
 
@@ -105,7 +104,7 @@ build_openmeteo_bounding_box_repo(file_like)
 get_pv_site_by_system_id(system_id)
 get_openmeteo_bounding_box_by_pv_system_id(pvo_sys_id)
 ```
-These are seeded from `pv_sites.csv` and `openmeteo_bounding_boxes.csv`, which are versioned resources managed by DVC.
+These are seeded from `pv_sites.csv` and `location_mapping.csv`. At runtime, these CSVs are read from the `resources_storage` config backend (GCS `staging/resources/` in production, local `resources/` directory for development). For local development, create a `resources/` directory with the required CSVs — this directory is gitignored.
 
 ## Code Style
 

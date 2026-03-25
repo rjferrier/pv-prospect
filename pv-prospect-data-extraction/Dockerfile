@@ -42,8 +42,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # ---- Cloud Run Job entrypoint (primary cloud target) ----
 FROM runtime-common AS entrypoint
-COPY ./resources/pv_sites.csv.dvc /app/resources/pv_sites.csv.dvc
-COPY ./resources/location_mapping.csv.dvc /app/resources/location_mapping.csv.dvc
+ENV RUNTIME_ENV=default
 CMD ["python", "-m", "pv_prospect.data_extraction.processing.entrypoint"]
 
 
@@ -59,8 +58,7 @@ ENTRYPOINT ["python", "-m", "pv_prospect.data_extraction.processing.task_produce
 
 # ---- Legacy: Celery worker ----
 FROM runtime-common AS worker
-COPY ./resources/pv_sites.csv.dvc /app/resources/pv_sites.csv.dvc
-COPY ./resources/location_mapping.csv.dvc /app/resources/location_mapping.csv.dvc
+ENV RUNTIME_ENV=default
 CMD ["celery", "-A", "pv_prospect.data_extraction.processing.worker", "worker", "--loglevel=info"]
 
 

@@ -5,16 +5,14 @@
 collections "Third Party APIs" as ThirdPartyAPIs
 
 database "Staging" as Staging {
+  database "Resources" as StagingResources
   database "Raw" as StagingRaw
   database "Cleaned" as StagingCleaned
   database "Prepared" as StagingPrepared
 }
 
 database "Versioned Raw Data" as VersionedRawData
-database "Versioned Project Data" as VersionedProjectData
 database "Versioned Model Data" as VersionedModelData
-
-VersionedRawData -[hidden]> VersionedModelData
 
 component "Data Extractor" as DataExtractor
 component "Data Transformer" as DataTransformer
@@ -29,49 +27,51 @@ component "Model Trainer" as ModelTrainer
 component "PV Prospect App" as PvProspectApp {
   component "Prediction API" as PredictionApi
   component "Validation API" as ValidationApi
-  component "Irradiance Calculator" as IrradianceCalculator
+'  component "Irradiance Calculator" as IrradianceCalculator
   component "In-Memory Data" as InMemoryData
 }
 
 component "Data Versioner" as DataVersioner
-database "Version Control Repo" as VCRepo
+database "Project Instance Repo" as ProjectInstanceRepo #transparent
 
 actor User
+
 
 User --> ValidationApi
 User --> PredictionApi : lat, lon, period
 
 PredictionApi ---> WeatherModel : DNI, DHI, \ntemperature = \ncall_model(\nlat, lon, \nday, year)
-PredictionApi -> IrradianceCalculator : calculate_POA(DNI, DHI)
+PredictionApi <- PredictionApi : calculate_POA
 PredictionApi ----> PvModel : predicted\nenergy \nyield = \ncall_model(\nPOA, \ntemperature)
 
 ValidationApi --> PvModel : predicted\nenergy\nyield = \ncall_model(\nPOA, \ntemperature, \nsite ID)
 ValidationApi --> InMemoryData : get_actual_energy_yield()
 
-VersionedModelData <-- ModelTrainer : M1: pulls
-Models <-- ModelTrainer : M2: trains
+VersionedModelData <-- ModelTrainer : M1: pull
+Models <-- ModelTrainer : M2: train
 
-ThirdPartyAPIs <--- DataExtractor : E2: calls
+ThirdPartyAPIs <-- DataExtractor : E2: call
 
-VersionedProjectData <-- DataExtractor: E1: pulls
-DataExtractor --> StagingRaw : E3: puts
+StagingResources <-- DataExtractor: E1: get
+DataExtractor --> StagingRaw : E3: put
 
-VersionedProjectData <-[hidden]- DataTransformer
-DataTransformer --> StagingRaw : C1: gets
-DataTransformer --> StagingCleaned : C2: puts\nP1: gets
-DataTransformer --> StagingPrepared : P2: puts
+DataTransformer --> StagingResources : C1: get
+DataTransformer --> StagingRaw : C2: get
+DataTransformer --> StagingCleaned : C3: put\nP1: get
+DataTransformer <- DataTransformer : P2: calculate_POA
+DataTransformer --> StagingPrepared : P3: put
 StagingCleaned -[hidden]> StagingPrepared
 
-InMemoryData <--- DataTransformer : P3: puts
+InMemoryData <--- DataTransformer : P3: put
 
-StagingRaw <-- DataVersioner : V1: gets
-DataVersioner -> VersionedRawData : V2: pushes (using DVC)
+StagingRaw <-- DataVersioner : V1: get
+VersionedRawData <- DataVersioner : V2: push (using DVC)
 
-StagingPrepared <-- DataVersioner : V3: gets
-VersionedModelData <-- DataVersioner : V4: pushes (using DVC)
-DataVersioner -> VCRepo : V5: pushes (using Git)
+StagingPrepared <-- DataVersioner : V3: get
+VersionedModelData <-- DataVersioner : V4: push (using DVC)
+DataVersioner -> ProjectInstanceRepo : V5: push (using Git)
 
-InMemoryData ---> VersionedModelData : A1: pulls
-InMemoryData ---> StagingPrepared : A2: gets
+InMemoryData ---> VersionedModelData : A1: pull
+InMemoryData ---> StagingPrepared : A2: get
 
 @enduml

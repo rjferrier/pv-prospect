@@ -1,9 +1,7 @@
-versioned_resources_storage:
-  tracking:
-    backend: 'local'
-    prefix: '/app/resources'
+resources_storage:
   backend: 'gcs'
-  bucket_name: 'pv-prospect-versioned-resources'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'resources'
 
 staged_raw_data_storage:
   backend: 'gcs'

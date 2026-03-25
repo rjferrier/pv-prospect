@@ -28,7 +28,7 @@ class TaskQueueConfig:
 class DataExtractionConfig:
     """Configuration for ETL processing behavior."""
 
-    versioned_resources_storage: AnyStorageConfig
+    resources_storage: AnyStorageConfig
     staged_raw_data_storage: AnyStorageConfig
     task_queue: TaskQueueConfig
     data_sources: DataSourcesConfig
@@ -38,9 +38,7 @@ class DataExtractionConfig:
         task_queue_config = TaskQueueConfig.from_dict(data.get('task_queue', {}))
         return cls(
             task_queue=task_queue_config,
-            versioned_resources_storage=parse_storage_config(
-                data['versioned_resources_storage']
-            ),
+            resources_storage=parse_storage_config(data['resources_storage']),
             staged_raw_data_storage=parse_storage_config(
                 data['staged_raw_data_storage']
             ),

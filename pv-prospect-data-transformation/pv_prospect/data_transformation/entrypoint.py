@@ -80,6 +80,7 @@ def main() -> None:
             get_dt_config_dir(),
         ],
     )
+    resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
     cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
     batches_fs = get_filesystem(config.staged_prepared_batches_data_storage)
@@ -87,7 +88,7 @@ def main() -> None:
     pv_descriptor = config.data_sources.pv
     weather_descriptor = config.data_sources.weather
 
-    _load_resources(raw_fs)
+    _load_resources(resources_fs)
 
     logger.info('Starting %s for date %s', step, target_date)
 

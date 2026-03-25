@@ -11,6 +11,7 @@ from pv_prospect.etl.storage.factory import AnyStorageConfig, parse_storage_conf
 class DataTransformationConfig:
     """Configuration for data transformation processing."""
 
+    resources_storage: AnyStorageConfig
     staged_raw_data_storage: AnyStorageConfig
     staged_cleaned_data_storage: AnyStorageConfig
     staged_prepared_batches_data_storage: AnyStorageConfig
@@ -20,6 +21,7 @@ class DataTransformationConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DataTransformationConfig':
         return cls(
+            resources_storage=parse_storage_config(data['resources_storage']),
             staged_raw_data_storage=parse_storage_config(
                 data['staged_raw_data_storage']
             ),

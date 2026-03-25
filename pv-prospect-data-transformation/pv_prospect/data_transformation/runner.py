@@ -211,9 +211,12 @@ def _main() -> None:
     }
 
     # --- initialise in-memory repos ---------------------------------------
-    extractor = Extractor(raw_fs)
-    build_pv_site_repo(extractor.read_file(PV_SITES_CSV_FILE))
-    build_location_mapping_repo(extractor.read_file(LOCATION_MAPPING_CSV_FILE))
+    resources_fs = get_filesystem(config.resources_storage)
+    resources_extractor = Extractor(resources_fs)
+    build_pv_site_repo(resources_extractor.read_file(PV_SITES_CSV_FILE))
+    build_location_mapping_repo(
+        resources_extractor.read_file(LOCATION_MAPPING_CSV_FILE)
+    )
 
     # --- resolve PV system IDs and weather locations ----------------------
     needs_pv_id = any(s in STEPS_NEEDING_PV_ID for s in steps)

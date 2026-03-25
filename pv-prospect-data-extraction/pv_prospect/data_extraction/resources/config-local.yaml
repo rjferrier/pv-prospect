@@ -1,4 +1,3 @@
-versioned_resources_storage:
-  tracking:
-    backend: 'local'
-    prefix: '../resources'
+resources_storage:
+  backend: 'local'
+  prefix: 'resources'

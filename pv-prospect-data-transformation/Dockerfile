@@ -41,6 +41,5 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # ---- Cloud Run Job entrypoint (primary cloud target) ----
 FROM runtime-common AS entrypoint
-RUN mkdir -p /app/resources
-# The entrypoint coordinates the cleaning and processing steps
+ENV RUNTIME_ENV=default
 CMD ["python", "-m", "pv_prospect.data_transformation.entrypoint"]

@@ -22,7 +22,6 @@ from pv_prospect.etl import Extractor
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.backends import LocalStorageConfig
-from pv_prospect.etl.storage.resolve import resolve_dvc_path
 
 # Re-export constants so existing imports (e.g. task_producer) keep working.
 PV_SITES_CSV_FILE = core.PV_SITES_CSV_FILE
@@ -53,20 +52,8 @@ def preprocess(
     source_descriptor: SourceDescriptor,
     local_dir: str | None,
 ) -> list[str | None]:
-    config, staging_fs = _resolve_storage(local_dir)
-    versioned_resources_fs = get_filesystem(config.versioned_resources_storage)
-    dvc_prefix = (
-        config.versioned_resources_storage.tracking.prefix
-        if config.versioned_resources_storage.tracking
-        else ''
-    )
-    return core.preprocess(
-        resolve_dvc_path,
-        versioned_resources_fs,
-        staging_fs,
-        dvc_prefix,
-        source_descriptor,
-    )
+    _config, staging_fs = _resolve_storage(local_dir)
+    return core.preprocess(staging_fs, source_descriptor)
 
 
 @app.task
@@ -78,12 +65,13 @@ def extract_and_load(
     overwrite: bool,
     dry_run: bool,
 ) -> Result:
-    _config, staging_fs = _resolve_storage(local_dir)
+    config, staging_fs = _resolve_storage(local_dir)
 
-    staging_extractor = Extractor(staging_fs)
-    build_pv_site_repo(staging_extractor.read_file(core.PV_SITES_CSV_FILE))
+    resources_fs = get_filesystem(config.resources_storage)
+    resources_extractor = Extractor(resources_fs)
+    build_pv_site_repo(resources_extractor.read_file(core.PV_SITES_CSV_FILE))
     build_location_mapping_repo(
-        staging_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
+        resources_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
     )
 
     return core.extract_and_load(

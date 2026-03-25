@@ -54,6 +54,9 @@ cover/
 # Outputs
 out/
 
+# Local static data (provisioned manually for standalone dev)
+/resources/
+
 # Translations
 *.mo
 *.pot
