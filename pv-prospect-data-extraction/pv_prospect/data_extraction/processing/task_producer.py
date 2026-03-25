@@ -60,7 +60,7 @@ def _parse_args() -> 'Any':
         '-e',
         '--end-date',
         type=str,
-        help="end date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: start date plus one day)",
+        help="end date (exclusive): 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: start date plus one day)",
     )
     parser.add_argument(
         '-r', '--reverse', action='store_true', help='process dates in reverse order'
@@ -153,15 +153,15 @@ def _get_complete_date_range(args: 'Any') -> DateRange:
     # Parse end date
     if args.end_date is None:
         if start_is_month:
-            # If start date was a month, default end date to end of that month
-            end = _get_last_day_of_month(start)
+            # If start date was a month, default end date to first day of next month
+            end = _get_last_day_of_month(start) + timedelta(days=1)
         else:
             end = start + timedelta(days=1)
     else:
         if _is_month_format(args.end_date):
-            # Parse as first day of month, then convert to last day
+            # Parse as first day of month, then convert to first day of next month
             temp_date = _parse_date(args.end_date)
-            end = _get_last_day_of_month(temp_date)
+            end = _get_last_day_of_month(temp_date) + timedelta(days=1)
         else:
             end = _parse_date(args.end_date)
 

@@ -12,19 +12,20 @@ For **preprocess**:
     DATA_SOURCE — ``pv`` or ``weather`` (optional; defaults to weather)
 
 For **extract_and_load**:
-    DATA_SOURCE — ``pv`` or ``weather`` (optional; defaults to weather)
-    PV_SYSTEM_ID      — integer system id
-    START_DATE        — ISO date ``YYYY-MM-DD``
-    END_DATE          — ISO date ``YYYY-MM-DD``
-    OVERWRITE         — ``true`` or ``false`` (default ``false``)
-    DRY_RUN           — ``true`` or ``false`` (default ``false``)
-    BY_WEEK           — ``true`` or ``false`` (chunking hint)
+    DATA_SOURCE     — ``pv`` or ``weather`` (optional; defaults to weather)
+    PV_SYSTEM_ID    — integer system id
+    START_DATE      — ISO date ``YYYY-MM-DD``
+    END_DATE        — ISO date ``YYYY-MM-DD``, exclusive (optional; defaults to
+                        START_DATE + 1 day)
+    OVERWRITE       — ``true`` or ``false`` (default ``false``)
+    DRY_RUN         — ``true`` or ``false`` (default ``false``)
+    BY_WEEK         — ``true`` or ``false`` (chunking hint)
 """
 
 import logging
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 from pv_prospect.common import (
     DateRange,
@@ -79,7 +80,12 @@ def _run_extract_and_load(
 ) -> None:
     pv_system_id = int(os.environ['PV_SYSTEM_ID'])
     start_date = date.fromisoformat(os.environ['START_DATE'])
-    end_date = date.fromisoformat(os.environ['END_DATE'])
+    end_date_env = os.environ.get('END_DATE')
+    end_date = (
+        date.fromisoformat(end_date_env)
+        if end_date_env
+        else start_date + timedelta(days=1)
+    )
     overwrite = _env_bool('OVERWRITE')
     dry_run = _env_bool('DRY_RUN')
     by_week = _env_bool('BY_WEEK')

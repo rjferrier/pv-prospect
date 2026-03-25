@@ -20,7 +20,6 @@ resource "google_workflows_workflow" "data_extraction" {
               - job_name: "${var.cloud_run_job_name}"
               - data_sources: $${default(map.get(args, "data_sources"), ${jsonencode(var.default_data_sources)})}
               - start_date: $${default(map.get(args, "start_date"), text.substring(time.format(sys.now()), 0, 10))}
-              - end_date: $${default(map.get(args, "end_date"), text.substring(time.format(sys.now()), 0, 10))}
               - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
               - overwrite: $${default(map.get(args, "overwrite"), "false")}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
@@ -73,8 +72,6 @@ resource "google_workflows_workflow" "data_extraction" {
                                             value: $${string(pv_system_id)}
                                           - name: START_DATE
                                             value: $${start_date}
-                                          - name: END_DATE
-                                            value: $${end_date}
                                           - name: OVERWRITE
                                             value: $${overwrite}
                                           - name: DRY_RUN
