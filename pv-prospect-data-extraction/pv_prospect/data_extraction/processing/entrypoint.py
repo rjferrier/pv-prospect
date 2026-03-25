@@ -25,10 +25,8 @@ For **extract_and_load**:
 import logging
 import os
 import sys
-from datetime import date, timedelta
 
 from pv_prospect.common import (
-    DateRange,
     Period,
     build_location_mapping_repo,
     build_pv_site_repo,
@@ -46,7 +44,7 @@ from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
 from pv_prospect.data_sources import DataSource
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
-from pv_prospect.etl import Extractor
+from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.resolve import resolve_dvc_path
@@ -79,18 +77,18 @@ def _run_extract_and_load(
     source_descriptor: SourceDescriptor,
 ) -> None:
     pv_system_id = int(os.environ['PV_SYSTEM_ID'])
-    start_date = date.fromisoformat(os.environ['START_DATE'])
-    end_date_env = os.environ.get('END_DATE')
-    end_date = (
-        date.fromisoformat(end_date_env)
-        if end_date_env
-        else start_date + timedelta(days=1)
-    )
     overwrite = _env_bool('OVERWRITE')
     dry_run = _env_bool('DRY_RUN')
     by_week = _env_bool('BY_WEEK')
 
-    complete_date_range = DateRange(start_date, end_date)
+    try:
+        complete_date_range = build_date_range(
+            os.environ['START_DATE'], os.environ.get('END_DATE')
+        )
+    except DegenerateDateRange as e:
+        logger.error('%s', e)
+        sys.exit(1)
+
     logger.info(
         'extract_and_load: %s, site=%s, %s, by_week=%s',
         source_descriptor,
@@ -115,6 +113,15 @@ def _run_extract_and_load(
             final_ranges.extend(dr.split_by(Period.DAY))
     else:
         final_ranges = sub_date_ranges
+
+    if not final_ranges:
+        logger.warning(
+            'extract_and_load: %s, site=%s — no dates to process in %s',
+            source_descriptor,
+            pv_system_id,
+            complete_date_range,
+        )
+        return
 
     for dr in final_ranges:
         result = core.extract_and_load(

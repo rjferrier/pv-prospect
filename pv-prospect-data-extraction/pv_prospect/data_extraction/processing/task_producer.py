@@ -1,9 +1,8 @@
+import sys
 from argparse import ArgumentParser, RawTextHelpFormatter
-from datetime import date, timedelta
 from typing import Any
 
 from pv_prospect.common import (
-    DateRange,
     Period,
     build_pv_site_repo,
     get_all_pv_system_ids,
@@ -15,7 +14,7 @@ from pv_prospect.data_extraction.processing.task_queuer import TaskQueuer
 from pv_prospect.data_extraction.processing.tasks import PV_SITES_CSV_FILE
 from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
-from pv_prospect.etl import Extractor
+from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import get_filesystem
 from pv_prospect.etl.storage.backends import LocalStorageConfig
@@ -94,80 +93,6 @@ def _parse_args() -> 'Any':
     return parser.parse_args()
 
 
-def _parse_date(date_str: str) -> date:
-    """Parse date string supporting 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format."""
-    if date_str.lower() == 'today':
-        return date.today()
-    elif date_str.lower() == 'yesterday':
-        return date.today() - timedelta(days=1)
-
-    # Try YYYY-MM format (month specification)
-    if len(date_str) == 7 and date_str[4] == '-':
-        try:
-            year, month = date_str.split('-')
-            year_int = int(year)
-            month_int = int(month)
-            # Return the first day of the month
-            return date(year_int, month_int, 1)
-        except (ValueError, IndexError):
-            pass
-
-    # Default to ISO format (YYYY-MM-DD)
-    return date.fromisoformat(date_str)
-
-
-def _is_month_format(date_str: str) -> bool:
-    """Check if a date string is in YYYY-MM format."""
-    return len(date_str) == 7 and date_str[4] == '-' and date_str.count('-') == 1
-
-
-def _get_last_day_of_month(year_month_date: date) -> date:
-    """Given a date in YYYY-MM format, return the last day of that month."""
-    next_month = year_month_date.month % 12 + 1
-    year = year_month_date.year + (year_month_date.month // 12)
-    first_of_next_month = date(year, next_month, 1)
-    last_day_of_month = first_of_next_month - timedelta(days=1)
-    return last_day_of_month
-
-
-def _get_complete_date_range(args: 'Any') -> DateRange:
-    """
-    Parse and convert the command-line date arguments into a DateRange.
-
-    Args:
-        args: Parsed command-line arguments with start_date and end_date as strings
-
-    Returns:
-        DateRange with parsed start and end dates
-    """
-    yesterday = date.today() - timedelta(days=1)
-
-    # Parse start date
-    if args.start_date is None:
-        start = yesterday
-        start_is_month = False
-    else:
-        start_is_month = _is_month_format(args.start_date)
-        start = _parse_date(args.start_date)
-
-    # Parse end date
-    if args.end_date is None:
-        if start_is_month:
-            # If start date was a month, default end date to first day of next month
-            end = _get_last_day_of_month(start) + timedelta(days=1)
-        else:
-            end = start + timedelta(days=1)
-    else:
-        if _is_month_format(args.end_date):
-            # Parse as first day of month, then convert to first day of next month
-            temp_date = _parse_date(args.end_date)
-            end = _get_last_day_of_month(temp_date) + timedelta(days=1)
-        else:
-            end = _parse_date(args.end_date)
-
-    return DateRange(start, end)
-
-
 def _parse_pv_system_ids(system_ids_str: str) -> list[int]:
     return [int(s.strip()) for s in system_ids_str.split(',') if s.strip()]
 
@@ -204,7 +129,11 @@ def _main(config: DataExtractionConfig, args: 'Any') -> None:
 
     print(f'Processing {len(pv_system_ids)} PV site(s).\n')
 
-    complete_date_range = _get_complete_date_range(args)
+    try:
+        complete_date_range = build_date_range(args.start_date, args.end_date)
+    except DegenerateDateRange as e:
+        print(str(e))
+        sys.exit(1)
 
     # Split into date ranges first (by week or by day)
     sub_date_ranges = complete_date_range.split_by(

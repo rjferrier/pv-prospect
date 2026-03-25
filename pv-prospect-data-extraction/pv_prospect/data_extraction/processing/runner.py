@@ -11,9 +11,9 @@ Usage::
         --local-dir ./out --workers 4
 """
 
+import sys
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, timedelta
 from typing import Any
 
 from pv_prospect.common import (
@@ -35,7 +35,7 @@ from pv_prospect.data_extraction.processing import ProcessingStats, Result, core
 from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
 from pv_prospect.data_sources import DataSource
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
-from pv_prospect.etl import Extractor
+from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.backends import LocalStorageConfig
@@ -110,58 +110,6 @@ def _parse_args() -> 'Any':
     return parser.parse_args()
 
 
-# ---------------------------------------------------------------------------
-# Date helpers (shared with task_producer.py)
-# ---------------------------------------------------------------------------
-
-
-def _parse_date(date_str: str) -> date:
-    if date_str.lower() == 'today':
-        return date.today()
-    elif date_str.lower() == 'yesterday':
-        return date.today() - timedelta(days=1)
-    if len(date_str) == 7 and date_str[4] == '-':
-        try:
-            year, month = date_str.split('-')
-            return date(int(year), int(month), 1)
-        except (ValueError, IndexError):
-            pass
-    return date.fromisoformat(date_str)
-
-
-def _is_month_format(date_str: str) -> bool:
-    return len(date_str) == 7 and date_str[4] == '-' and date_str.count('-') == 1
-
-
-def _get_last_day_of_month(d: date) -> date:
-    next_m = d.month % 12 + 1
-    y = d.year + (d.month // 12)
-    return date(y, next_m, 1) - timedelta(days=1)
-
-
-def _get_complete_date_range(args: 'Any') -> DateRange:
-    yesterday = date.today() - timedelta(days=1)
-    if args.start_date is None:
-        start, start_is_month = yesterday, False
-    else:
-        start_is_month = _is_month_format(args.start_date)
-        start = _parse_date(args.start_date)
-
-    if args.end_date is None:
-        end = (
-            _get_last_day_of_month(start) + timedelta(days=1)
-            if start_is_month
-            else start + timedelta(days=1)
-        )
-    else:
-        if _is_month_format(args.end_date):
-            end = _get_last_day_of_month(_parse_date(args.end_date)) + timedelta(days=1)
-        else:
-            end = _parse_date(args.end_date)
-
-    return DateRange(start, end)
-
-
 def _parse_pv_system_ids(s: str) -> list[int]:
     return [int(x.strip()) for x in s.split(',') if x.strip()]
 
@@ -224,7 +172,12 @@ def _main() -> None:
     print(f'Processing {len(pv_system_ids)} PV site(s).\n')
 
     # --- build work items ---------------------------------------------------
-    complete_date_range = _get_complete_date_range(args)
+    try:
+        complete_date_range = build_date_range(args.start_date, args.end_date)
+    except DegenerateDateRange as e:
+        print(str(e))
+        sys.exit(1)
+
     sub_date_ranges = complete_date_range.split_by(
         Period.WEEK if args.by_week else Period.DAY
     )
