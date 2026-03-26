@@ -8,19 +8,73 @@ echo "=========================================================="
 
 cd "$(dirname "$0")"
 
-# Resolve project ID: first argument, then env var, then gcloud default
-PROJECT_ID="${1:-${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}}"
+usage() {
+  echo "Usage: $0 [-p|--project-id PROJECT_ID] [STAGES]"
+  echo ""
+  echo "  -p, --project-id  GCP project ID (or set PROJECT_ID env var / gcloud default)"
+  echo "  STAGES            Comma-separated stages to run (default: all)"
+  echo ""
+  echo "  Available stages:"
+  echo "    registry              — provision Artifact Registries and required APIs"
+  echo "    build-extraction      — build and push extraction Docker image"
+  echo "    build-transformation  — build and push transformation Docker image"
+  echo "    terraform-extraction  — apply extraction infrastructure (Cloud Run, Workflow, Scheduler)"
+  echo "    terraform-transform   — apply transformation infrastructure (Cloud Run, Workflow)"
+  echo "    terraform             — apply all infrastructure (full apply)"
+  echo ""
+  echo "  Shorthand aliases:"
+  echo "    build   = build-extraction,build-transformation"
+  echo "    all     = registry,build,terraform  (the default)"
+  echo ""
+  echo "Examples:"
+  echo "  $0                                                       # run everything"
+  echo "  $0 -p my-project build-transformation                   # rebuild transformation image only"
+  echo "  $0 -p my-project build-transformation,terraform-transform  # redeploy transformation"
+  echo "  $0 --project-id my-project terraform                    # re-apply all infra, no image build"
+  exit 1
+}
+
+# Parse flags
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--project-id) PROJECT_ID="$2"; shift 2 ;;
+    -h|--help)       usage ;;
+    -*)              echo "ERROR: Unknown flag: $1"; usage ;;
+    *)               break ;;
+  esac
+done
+
+# Resolve project ID: flag > env var > gcloud default
+PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 if [ -z "$PROJECT_ID" ]; then
-  echo "ERROR: PROJECT_ID is not set. Pass it as the first argument or set the PROJECT_ID env var."
+  echo "ERROR: PROJECT_ID is not set. Use -p/--project-id or set the PROJECT_ID env var."
   exit 1
 fi
+
+# Expand shorthand aliases, then check each stage
+expand_stages() {
+  echo "$1" | tr ',' '\n' | while read -r stage; do
+    case "$stage" in
+      all)      echo "registry"; echo "build-extraction"; echo "build-transformation"; echo "terraform" ;;
+      build)    echo "build-extraction"; echo "build-transformation" ;;
+      *)        echo "$stage" ;;
+    esac
+  done
+}
+
+STAGES_ARG="${1:-all}"
+STAGES=$(expand_stages "$STAGES_ARG")
+
+run_stage() {
+  echo "$STAGES" | grep -qx "$1"
+}
 
 TFSTATE_BUCKET="${PROJECT_ID}-tfstate"
 TFVARS_REMOTE="gs://${TFSTATE_BUCKET}/terraform/terraform.tfvars"
 
-# 0. Generate backend.hcl and pull the authoritative tfvars from GCS
+# 0. Always configure backend and pull tfvars
 echo ""
-echo "[0/3] Configuring backend and pulling terraform.tfvars from GCS..."
+echo "[0] Configuring backend and pulling terraform.tfvars from GCS..."
 cat > backend.hcl <<EOF
 bucket = "${TFSTATE_BUCKET}"
 prefix = "terraform/state"
@@ -30,44 +84,84 @@ gcloud storage cp "$TFVARS_REMOTE" terraform.tfvars
 
 terraform init -backend-config=backend.hcl -upgrade
 
-# 1. Provision the Registry and APIs first
-echo ""
-echo "[1/3] Provisioning Artifact Registry and required APIs..."
-terraform apply -target=module.artifact_registry -target=module.artifact_registry_transformer -auto-approve
+# Helper: resolve region and image URLs from terraform outputs
+resolve_image_urls() {
+  REGION=$(terraform output -raw region 2>/dev/null || echo "europe-west2")
+  IMAGE_URL_EXTRACT=$(terraform output -raw artifact_registry_url)/data-extraction
+  IMAGE_URL_TRANSFORM=$(terraform output -raw artifact_registry_transformer_url)/data-transformation
+  gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+}
 
-# 2. Build and push Docker image
-echo ""
-echo "[2/3] Building and pushing Docker image..."
-REGION=$(terraform output -raw region 2>/dev/null || echo "europe-west2")
-IMAGE_URL_EXTRACT=$(terraform output -raw artifact_registry_url)/data-extraction
-IMAGE_URL_TRANSFORM=$(terraform output -raw artifact_registry_transformer_url)/data-transformation
+# 1. Provision Artifact Registries and APIs
+if run_stage registry; then
+  echo ""
+  echo "[registry] Provisioning Artifact Registry and required APIs..."
+  terraform apply \
+    -target=module.artifact_registry \
+    -target=module.artifact_registry_transformer \
+    -auto-approve
+fi
 
-echo "Authenticating Docker to $REGION-docker.pkg.dev..."
-gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+# 2a. Build and push extraction image
+if run_stage build-extraction; then
+  echo ""
+  echo "[build-extraction] Building and pushing extraction Docker image..."
+  resolve_image_urls
+  echo "Building: $IMAGE_URL_EXTRACT:latest"
+  docker build -t "$IMAGE_URL_EXTRACT:latest" --target entrypoint -f ../pv-prospect-data-extraction/Dockerfile ..
+  docker push "$IMAGE_URL_EXTRACT:latest"
+fi
 
-echo "Building Image (Extraction): $IMAGE_URL_EXTRACT:latest"
-docker build -t "$IMAGE_URL_EXTRACT:latest" --target entrypoint -f ../pv-prospect-data-extraction/Dockerfile ..
+# 2b. Build and push transformation image
+if run_stage build-transformation; then
+  echo ""
+  echo "[build-transformation] Building and pushing transformation Docker image..."
+  resolve_image_urls
+  echo "Building: $IMAGE_URL_TRANSFORM:latest"
+  docker build -t "$IMAGE_URL_TRANSFORM:latest" --target entrypoint -f ../pv-prospect-data-transformation/Dockerfile ..
+  docker push "$IMAGE_URL_TRANSFORM:latest"
+fi
 
-echo "Pushing Image (Extraction) to Artifact Registry..."
-docker push "$IMAGE_URL_EXTRACT:latest"
+# 3a. Apply extraction infrastructure
+if run_stage terraform-extraction; then
+  echo ""
+  echo "[terraform-extraction] Provisioning extraction Cloud Run, Workflow, and Scheduler..."
+  terraform apply \
+    -target=module.cloud_run \
+    -target=module.workflows \
+    -target=module.scheduler \
+    -auto-approve
+fi
 
-echo "Building Image (Transformation): $IMAGE_URL_TRANSFORM:latest"
-docker build -t "$IMAGE_URL_TRANSFORM:latest" --target entrypoint -f ../pv-prospect-data-transformation/Dockerfile ..
+# 3b. Apply transformation infrastructure
+if run_stage terraform-transform; then
+  echo ""
+  echo "[terraform-transform] Provisioning transformation Cloud Run and Workflow..."
+  terraform apply \
+    -target=module.cloud_run_transformer \
+    -target=module.workflows_transform \
+    -auto-approve
+fi
 
-echo "Pushing Image (Transformation) to Artifact Registry..."
-docker push "$IMAGE_URL_TRANSFORM:latest"
-
-# 3. Apply the rest of the infrastructure
-echo ""
-echo "[3/3] Provisioning Cloud Run, Workflows, and Scheduler..."
-terraform apply -auto-approve
+# 3c. Full infrastructure apply
+if run_stage terraform; then
+  echo ""
+  echo "[terraform] Applying all infrastructure..."
+  terraform apply -auto-approve
+fi
 
 echo ""
 echo "=========================================================="
 echo " Deployment Complete!"
 echo "=========================================================="
 echo ""
-echo "To test the pipeline via an ad-hoc run, use:"
-echo "gcloud workflows run pv-prospect-extract \\"
-echo "  --location=$REGION \\"
-echo "  --data='{\"pv_system_ids\": [12345], \"start_date\": \"2025-06-24\", \"end_date\": \"2025-06-25\"}'"
+REGION=$(terraform output -raw region 2>/dev/null || echo "europe-west2")
+echo "To test extraction:"
+echo "  gcloud workflows run pv-prospect-extract \\"
+echo "    --location=$REGION \\"
+echo "    --data='{\"pv_system_ids\": [12345], \"start_date\": \"2025-06-24\", \"end_date\": \"2025-06-25\"}'"
+echo ""
+echo "To test transformation:"
+echo "  gcloud workflows run pv-prospect-transform \\"
+echo "    --location=$REGION \\"
+echo "    --data='{\"pv_system_ids\": [12345], \"date\": \"2025-06-24\"}'"

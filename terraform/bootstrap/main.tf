@@ -37,8 +37,9 @@ resource "google_storage_bucket" "tfstate" {
 
 # The Artifact Registry (Moved from main config)
 module "artifact_registry" {
-  source = "../modules/artifact_registry"
-  region = var.region
+  source        = "../modules/artifact_registry"
+  region        = var.region
+  repository_id = "data-extraction"
 
   depends_on = [google_project_service.bootstrap_apis]
 }

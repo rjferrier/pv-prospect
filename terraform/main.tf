@@ -76,7 +76,7 @@ resource "google_project_iam_member" "pipeline_secret_accessor" {
 }
 
 # ---------------------------------------------------------------------------
-# Modules
+# Shared infrastructure
 # ---------------------------------------------------------------------------
 
 module "storage" {
@@ -85,72 +85,100 @@ module "storage" {
   region        = var.region
 }
 
-module "cloud_run" {
-  source = "./modules/cloud_run"
-  region = var.region
+# ---------------------------------------------------------------------------
+# Extraction pipeline
+# ---------------------------------------------------------------------------
 
-  project_id            = var.project_id
+module "artifact_registry_extract" {
+  source        = "./modules/artifact_registry"
+  region        = var.region
+  repository_id = "data-extraction"
+}
+
+module "cloud_run_extract" {
+  source   = "./modules/cloud_run_job"
+  job_name = "data-extraction"
+  region   = var.region
   image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
   image_tag             = var.image_tag
-  staging_bucket        = module.storage.staging_bucket_name
+  timeout               = "600s"
+  cpu                   = "1"
+  memory                = "512Mi"
   service_account_email = google_service_account.pipeline.email
-  secret_env_vars       = var.secret_env_vars
+  env_vars = {
+    JOB_TYPE             = "extract_and_load"
+    STAGING_BUCKET       = module.storage.staging_bucket_name
+    GOOGLE_CLOUD_PROJECT = var.project_id
+    LOG_LEVEL            = "INFO"
+  }
+  secret_env_vars = var.secret_env_vars
 
   depends_on = [google_project_service.apis]
 }
 
-module "artifact_registry_transformer" {
-  source = "./modules/artifact_registry_transformer"
-  region = var.region
-}
-
-module "cloud_run_transformer" {
-  source = "./modules/cloud_run_transformer"
-  region = var.region
-
-  project_id = var.project_id
-  # Temporary placeholder since the real image hasn't been built yet
-  image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
-  image_tag             = var.transformer_image_tag
-  staging_bucket        = module.storage.staging_bucket_name
-  service_account_email = google_service_account.pipeline.email
-
-  depends_on = [google_project_service.apis, module.artifact_registry_transformer]
-}
-
-module "workflows" {
-  source = "./modules/workflows"
-  region = var.region
-
-  service_account_email      = google_service_account.pipeline.email
-  cloud_run_job_name         = module.cloud_run.job_name
-  default_data_sources       = var.default_data_sources
-  default_pv_system_ids      = var.default_pv_system_ids
-  default_by_week            = var.default_by_week
-
-  depends_on = [google_project_service.apis, module.cloud_run]
-}
-
-module "workflows_transform" {
-  source = "./modules/workflows_transform"
+module "extract_workflow" {
+  source = "./modules/extract/workflow"
   region = var.region
 
   service_account_email = google_service_account.pipeline.email
-  cloud_run_job_name    = module.cloud_run_transformer.job_name
+  cloud_run_job_name    = module.cloud_run_extract.job_name
+  default_data_sources  = var.default_data_sources
   default_pv_system_ids = var.default_pv_system_ids
+  default_by_week       = var.default_by_week
 
-  depends_on = [google_project_service.apis, module.cloud_run_transformer]
+  depends_on = [google_project_service.apis, module.cloud_run_extract]
 }
 
-module "scheduler" {
-  source = "./modules/scheduler"
+module "extract_scheduler" {
+  source = "./modules/extract/scheduler"
   region = var.region
 
-  workflow_id           = module.workflows.workflow_id
+  workflow_id           = module.extract_workflow.workflow_id
   service_account_email = google_service_account.pipeline.email
   schedule              = var.scheduler_cron
 
-  depends_on = [google_project_service.apis, module.workflows]
+  depends_on = [google_project_service.apis, module.extract_workflow]
+}
+
+# ---------------------------------------------------------------------------
+# Transformation pipeline
+# ---------------------------------------------------------------------------
+
+module "artifact_registry_transform" {
+  source        = "./modules/artifact_registry"
+  region        = var.region
+  repository_id = "data-transformation"
+}
+
+module "cloud_run_transform" {
+  source   = "./modules/cloud_run_job"
+  job_name = "data-transformation"
+  region   = var.region
+  image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-transformation/data-transformation"
+  image_tag             = var.transformer_image_tag
+  timeout               = "900s"
+  cpu                   = "2"
+  memory                = "2Gi"
+  service_account_email = google_service_account.pipeline.email
+  env_vars = {
+    TRANSFORM_STEP       = "clean_weather"
+    STAGING_BUCKET       = module.storage.staging_bucket_name
+    GOOGLE_CLOUD_PROJECT = var.project_id
+    LOG_LEVEL            = "INFO"
+  }
+
+  depends_on = [google_project_service.apis, module.artifact_registry_transform]
+}
+
+module "transform_workflow" {
+  source = "./modules/transform/workflow"
+  region = var.region
+
+  service_account_email = google_service_account.pipeline.email
+  cloud_run_job_name    = module.cloud_run_transform.job_name
+  default_pv_system_ids = var.default_pv_system_ids
+
+  depends_on = [google_project_service.apis, module.cloud_run_transform]
 }
 
 # ---------------------------------------------------------------------------
@@ -173,26 +201,26 @@ output "staging_bucket_name" {
 }
 
 output "artifact_registry_url" {
-  value       = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction"
-  description = "Docker registry URL"
+  value       = module.artifact_registry_extract.repository_url
+  description = "Docker registry URL for data extraction"
 }
 
 output "artifact_registry_transformer_url" {
-  value       = "${var.region}-docker.pkg.dev/${var.project_id}/data-transformation"
+  value       = module.artifact_registry_transform.repository_url
   description = "Docker registry URL for data transformation"
 }
 
 output "cloud_run_job_name" {
-  value       = module.cloud_run.job_name
-  description = "Cloud Run Job name"
+  value       = module.cloud_run_extract.job_name
+  description = "Extraction Cloud Run Job name"
 }
 
 output "workflow_name" {
-  value       = module.workflows.workflow_name
-  description = "Workflow name"
+  value       = module.extract_workflow.workflow_name
+  description = "Extraction workflow name"
 }
 
 output "scheduler_job_name" {
-  value       = module.scheduler.scheduler_job_name
+  value       = module.extract_scheduler.scheduler_job_name
   description = "Cloud Scheduler job name"
 }
