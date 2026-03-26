@@ -1,8 +1,8 @@
 # Cloud Storage resources for data management and DVC
 #
-# - staging: single bucket with raw/, cleaned/, prepared/ prefixes
-# - versioned-raw-data: corpus of raw CSV data tracked by DVC
-# - versioned-model-data: corpus of model-ready Parquet data tracked by DVC
+# - staging: single bucket with resources/, raw/, cleaned/, prepared/ prefixes
+# - versioned-raw: corpus of raw CSV data tracked by DVC
+# - versioned-feature: corpus of model-ready Parquet data tracked by DVC
 
 resource "google_storage_bucket" "pv_prospect_data" {
   name                        = "pv-prospect-data"
@@ -23,8 +23,8 @@ resource "google_storage_bucket" "staging" {
   }
 }
 
-resource "google_storage_bucket" "versioned_raw_data" {
-  name                        = "${var.bucket_prefix}-versioned-raw-data"
+resource "google_storage_bucket" "versioned_raw" {
+  name                        = "${var.bucket_prefix}-versioned-raw"
   location                    = var.region
   uniform_bucket_level_access = true
 
@@ -33,18 +33,8 @@ resource "google_storage_bucket" "versioned_raw_data" {
   }
 }
 
-resource "google_storage_bucket" "versioned_model_data" {
-  name                        = "${var.bucket_prefix}-versioned-model-data"
-  location                    = var.region
-  uniform_bucket_level_access = true
-
-  hierarchical_namespace {
-    enabled = true
-  }
-}
-
-resource "google_storage_bucket" "versioned_resources" {
-  name                        = "${var.bucket_prefix}-versioned-resources"
+resource "google_storage_bucket" "versioned_feature" {
+  name                        = "${var.bucket_prefix}-versioned-feature"
   location                    = var.region
   uniform_bucket_level_access = true
 
@@ -60,19 +50,13 @@ resource "google_service_account" "dvc_sa" {
 
 # The DVC SA only needs write access to the versioned buckets.
 resource "google_storage_bucket_iam_member" "dvc_sa_versioned_raw" {
-  bucket = google_storage_bucket.versioned_raw_data.name
+  bucket = google_storage_bucket.versioned_raw.name
   role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.dvc_sa.email}"
 }
 
-resource "google_storage_bucket_iam_member" "dvc_sa_versioned_model" {
-  bucket = google_storage_bucket.versioned_model_data.name
+resource "google_storage_bucket_iam_member" "dvc_sa_versioned_feature" {
+  bucket = google_storage_bucket.versioned_feature.name
   role   = "roles/storage.objectCreator"
-  member = "serviceAccount:${google_service_account.dvc_sa.email}"
-}
-
-resource "google_storage_bucket_iam_member" "dvc_sa_versioned_resources" {
-  bucket = google_storage_bucket.versioned_resources.name
-  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.dvc_sa.email}"
 }

@@ -4,15 +4,15 @@
 
 collections "Third Party APIs" as ThirdPartyAPIs
 
-database "Staging" as Staging {
+database Staging {
   database "Resources" as StagingResources
   database "Raw" as StagingRaw
   database "Cleaned" as StagingCleaned
   database "Prepared" as StagingPrepared
 }
 
-database "Versioned Raw Data" as VersionedRawData
-database "Versioned Model Data" as VersionedModelData
+database "Versioned Raw Data" as VersionedRaw
+database "Versioned Feature Store" as VersionedFeature
 
 component "Data Extractor" as DataExtractor
 component "Data Transformer" as DataTransformer
@@ -27,7 +27,6 @@ component "Model Trainer" as ModelTrainer
 component "PV Prospect App" as PvProspectApp {
   component "Prediction API" as PredictionApi
   component "Validation API" as ValidationApi
-'  component "Irradiance Calculator" as IrradianceCalculator
   component "In-Memory Data" as InMemoryData
 }
 
@@ -47,7 +46,7 @@ PredictionApi ----> PvModel : predicted\nenergy \nyield = \ncall_model(\nPOA, \n
 ValidationApi --> PvModel : predicted\nenergy\nyield = \ncall_model(\nPOA, \ntemperature, \nsite ID)
 ValidationApi --> InMemoryData : get_actual_energy_yield()
 
-VersionedModelData <-- ModelTrainer : M1: pull
+VersionedFeature <-- ModelTrainer : M1: pull
 Models <-- ModelTrainer : M2: train
 
 ThirdPartyAPIs <-- DataExtractor : E2: call
@@ -65,13 +64,13 @@ StagingCleaned -[hidden]> StagingPrepared
 InMemoryData <--- DataTransformer : P3: put
 
 StagingRaw <-- DataVersioner : V1: get
-VersionedRawData <- DataVersioner : V2: push (using DVC)
+VersionedRaw <- DataVersioner : V2: push (using DVC)
 
 StagingPrepared <-- DataVersioner : V3: get
-VersionedModelData <-- DataVersioner : V4: push (using DVC)
+VersionedFeature <-- DataVersioner : V4: push (using DVC)
 DataVersioner -> ProjectInstanceRepo : V5: push (using Git)
 
-InMemoryData ---> VersionedModelData : A1: pull
+InMemoryData ---> VersionedFeature : A1: pull
 InMemoryData ---> StagingPrepared : A2: get
 
 @enduml

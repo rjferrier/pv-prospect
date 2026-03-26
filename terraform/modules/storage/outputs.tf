@@ -5,20 +5,15 @@ output "service_account_email" {
 
 output "staging_bucket_name" {
   value       = google_storage_bucket.staging.name
-  description = "Name of the staging bucket (raw/, cleaned/, prepared/ prefixes)"
+  description = "Name of the staging bucket (resources/, raw/, cleaned/, prepared/ prefixes)"
 }
 
-output "versioned_raw_data_bucket_name" {
-  value       = google_storage_bucket.versioned_raw_data.name
+output "versioned_raw_bucket_name" {
+  value       = google_storage_bucket.versioned_raw.name
   description = "Name of the versioned raw data bucket"
 }
 
-output "versioned_model_data_bucket_name" {
-  value       = google_storage_bucket.versioned_model_data.name
-  description = "Name of the versioned model data bucket"
-}
-
-output "versioned_resources_bucket_name" {
-  value       = google_storage_bucket.versioned_resources.name
-  description = "Name of the versioned resources bucket"
+output "versioned_feature_bucket_name" {
+  value       = google_storage_bucket.versioned_feature.name
+  description = "Name of the versioned feature data bucket"
 }

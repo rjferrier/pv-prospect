@@ -25,8 +25,8 @@ staged_prepared_data_storage:
 
 versioned_raw_data_storage:
   backend: 'gcs'
-  bucket_name: 'pv-prospect-versioned-raw-data'
+  bucket_name: 'pv-prospect-versioned-raw'
 
-versioned_model_data_storage:
+versioned_feature_data_storage:
   backend: 'gcs'
-  bucket_name: 'pv-prospect-versioned-model-data'
+  bucket_name: 'pv-prospect-versioned-feature'
