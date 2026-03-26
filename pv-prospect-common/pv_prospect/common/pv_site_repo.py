@@ -96,11 +96,11 @@ def create_pv_site_from_csv_row(row: dict) -> PVSite:
     )
 
     # Create panel geometries
-    panel_geometries = [
+    panel_geometries = tuple(
         geometry
         for i in (1, 2)
         if (geometry := create_panel_geometry_from_row(row, i)) is not None
-    ]
+    )
 
     if not panel_geometries:
         raise ValueError('At least one panel geometry must be defined in the CSV row')

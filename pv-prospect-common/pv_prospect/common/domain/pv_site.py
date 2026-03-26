@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
-from typing import List, Optional
+from typing import Optional
 
 from numpy import deg2rad
 from spherical_coordinates import az_zd_to_cx_cy_cz
@@ -15,7 +15,7 @@ class Shading(Enum):
     MEDIUM = 2
 
 
-@dataclass
+@dataclass(frozen=True)
 class PanelGeometry:
     azimuth: int
     tilt: int
@@ -35,7 +35,7 @@ class PanelGeometry:
         return cx_cy_cz[0], cx_cy_cz[1], -cx_cy_cz[2]
 
 
-@dataclass
+@dataclass(frozen=True)
 class System:
     brand: str
     capacity: int
@@ -48,7 +48,7 @@ class PVSite:
     location: Location
     shading: Shading
     panel_system: System
-    panel_geometries: List[PanelGeometry]
+    panel_geometries: tuple[PanelGeometry, ...]
     inverter_system: System
     installation_date: Optional[date] = None
 

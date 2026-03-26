@@ -26,19 +26,27 @@ resource "google_workflows_workflow" "data_transformation" {
               branches:
                 - clean_weather_branch:
                     steps:
-                      - run_clean_weather:
-                          call: googleapis.run.v2.projects.locations.jobs.run
-                          args:
-                            name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                            body:
-                              overrides:
-                                containerOverrides:
-                                  - env:
-                                      - name: TRANSFORM_STEP
-                                        value: clean_weather
-                                      - name: DATE
-                                        value: $${date}
-                          result: clean_weather_result
+                      - run_clean_weather_loop:
+                          parallel:
+                            for:
+                              value: pv_system_id
+                              in: $${pv_system_ids}
+                              steps:
+                                - run_clean_weather:
+                                    call: googleapis.run.v2.projects.locations.jobs.run
+                                    args:
+                                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                                      body:
+                                        overrides:
+                                          containerOverrides:
+                                            - env:
+                                                - name: TRANSFORM_STEP
+                                                  value: clean_weather
+                                                - name: PV_SYSTEM_ID
+                                                  value: $${string(pv_system_id)}
+                                                - name: DATE
+                                                  value: $${date}
+                                    result: clean_weather_result
                 - clean_pv_branch:
                     steps:
                       - run_clean_pv_loop:
@@ -66,30 +74,15 @@ resource "google_workflows_workflow" "data_transformation" {
         - process_parallel:
             parallel:
               branches:
-                - process_weather_branch:
+                - prepare_weather_branch:
                     steps:
-                      - run_process_weather:
-                          call: googleapis.run.v2.projects.locations.jobs.run
-                          args:
-                            name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                            body:
-                              overrides:
-                                containerOverrides:
-                                  - env:
-                                      - name: TRANSFORM_STEP
-                                        value: process_weather
-                                      - name: DATE
-                                        value: $${date}
-                          result: process_weather_result
-                - process_pv_branch:
-                    steps:
-                      - run_process_pv_loop:
+                      - run_prepare_weather_loop:
                           parallel:
                             for:
                               value: pv_system_id
                               in: $${pv_system_ids}
                               steps:
-                                - run_process_pv:
+                                - run_prepare_weather:
                                     call: googleapis.run.v2.projects.locations.jobs.run
                                     args:
                                       name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
@@ -98,12 +91,35 @@ resource "google_workflows_workflow" "data_transformation" {
                                           containerOverrides:
                                             - env:
                                                 - name: TRANSFORM_STEP
-                                                  value: process_pv
+                                                  value: prepare_weather
                                                 - name: PV_SYSTEM_ID
                                                   value: $${string(pv_system_id)}
                                                 - name: DATE
                                                   value: $${date}
-                                    result: process_pv_result
+                                    result: prepare_weather_result
+                - prepare_pv_branch:
+                    steps:
+                      - run_prepare_pv_loop:
+                          parallel:
+                            for:
+                              value: pv_system_id
+                              in: $${pv_system_ids}
+                              steps:
+                                - run_prepare_pv:
+                                    call: googleapis.run.v2.projects.locations.jobs.run
+                                    args:
+                                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                                      body:
+                                        overrides:
+                                          containerOverrides:
+                                            - env:
+                                                - name: TRANSFORM_STEP
+                                                  value: prepare_pv
+                                                - name: PV_SYSTEM_ID
+                                                  value: $${string(pv_system_id)}
+                                                - name: DATE
+                                                  value: $${date}
+                                    result: prepare_pv_result
 
         - done:
             return: "completed"

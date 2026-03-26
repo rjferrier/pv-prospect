@@ -10,9 +10,12 @@ TRANSFORM_STEP
 DATE
     ISO date ``YYYY-MM-DD`` to process
 PV_SYSTEM_ID
-    (Optional) integer system id, required for pv steps
+    (Optional) integer system id; required for pv steps. For weather steps,
+    accepted as an alternative to ``OPENMETEO_LOCATION`` — the location is
+    derived via the location mapping repo.
 OPENMETEO_LOCATION
-    (Optional) stringified lat_lon, required for weather steps
+    (Optional) stringified lat_lon; required for weather steps unless
+    ``PV_SYSTEM_ID`` is provided instead. Exactly one of the two must be set.
 """
 
 import logging
@@ -50,9 +53,9 @@ from pv_prospect.etl.storage import FileSystem, get_filesystem
 logger = logging.getLogger(__name__)
 
 
-def _load_resources(raw_fs: FileSystem) -> None:
+def _load_resources(resources_fs: FileSystem) -> None:
     """Load the PV site and location mapping repos from the raw data bucket."""
-    extractor = Extractor(raw_fs)
+    extractor = Extractor(resources_fs)
 
     if extractor.file_exists('pv_sites.csv'):
         build_pv_site_repo(extractor.read_file('pv_sites.csv'))
@@ -61,10 +64,40 @@ def _load_resources(raw_fs: FileSystem) -> None:
         build_location_mapping_repo(extractor.read_file('location_mapping.csv'))
 
 
-def _get_weather_location(pv_system_id: int) -> OpenMeteoTimeSeriesDescriptor:
+def _get_weather_ts_descriptor(pv_system_id: int) -> OpenMeteoTimeSeriesDescriptor:
     """Derive the weather grid point descriptor from a PV system ID."""
     loc = get_location_by_pv_system_id(pv_system_id)
     return OpenMeteoTimeSeriesDescriptor.from_coordinates(loc.latitude, loc.longitude)
+
+
+def _resolve_pv_system_id() -> int:
+    """Resolve the PV system ID from env vars for a PV step."""
+    pv_system_id_str = os.environ.get('PV_SYSTEM_ID')
+    if not pv_system_id_str:
+        raise ValueError('A PV step requires PV_SYSTEM_ID to be set.')
+    return int(pv_system_id_str)
+
+
+def _resolve_weather_ts_descriptor() -> OpenMeteoTimeSeriesDescriptor:
+    """Resolve the weather time series descriptor from env vars for a weather step.
+
+    Accepts either OPENMETEO_LOCATION or PV_SYSTEM_ID, but not both.
+    """
+    location_str = os.environ.get('OPENMETEO_LOCATION')
+    pv_system_id_str = os.environ.get('PV_SYSTEM_ID')
+
+    if location_str and pv_system_id_str:
+        raise ValueError(
+            'Ambiguous input: both OPENMETEO_LOCATION and PV_SYSTEM_ID are set '
+            'for a weather step. Provide exactly one.'
+        )
+    if location_str:
+        return OpenMeteoTimeSeriesDescriptor.from_str(location_str)
+    if pv_system_id_str:
+        return _get_weather_ts_descriptor(int(pv_system_id_str))
+    raise ValueError(
+        'A weather step requires either OPENMETEO_LOCATION or PV_SYSTEM_ID to be set.'
+    )
 
 
 def main() -> None:
@@ -93,38 +126,34 @@ def main() -> None:
     logger.info('Starting %s for date %s', step, target_date)
 
     if step == 'clean_weather':
-        location = OpenMeteoTimeSeriesDescriptor.from_str(
-            os.environ['OPENMETEO_LOCATION']
-        )
+        location = _resolve_weather_ts_descriptor()
         run_clean_weather(raw_fs, cleaned_fs, weather_descriptor, location, date_str)
     elif step == 'clean_pv':
-        pv_system_id = int(os.environ['PV_SYSTEM_ID'])
-        pv_ts = PVOutputTimeSeriesDescriptor(pv_system_id)
-        run_clean_pv(raw_fs, cleaned_fs, pv_descriptor, pv_ts, date_str)
+        pv_system_id = _resolve_pv_system_id()
+        pv_ts_descriptor = PVOutputTimeSeriesDescriptor(pv_system_id)
+        run_clean_pv(raw_fs, cleaned_fs, pv_descriptor, pv_ts_descriptor, date_str)
     elif step == 'prepare_weather':
-        location = OpenMeteoTimeSeriesDescriptor.from_str(
-            os.environ['OPENMETEO_LOCATION']
-        )
+        location = _resolve_weather_ts_descriptor()
         run_prepare_weather(
             cleaned_fs, batches_fs, weather_descriptor, location, date_str
         )
     elif step == 'prepare_pv':
-        pv_system_id = int(os.environ['PV_SYSTEM_ID'])
-        pv_ts = PVOutputTimeSeriesDescriptor(pv_system_id)
-        weather_location = _get_weather_location(pv_system_id)
+        pv_system_id = _resolve_pv_system_id()
+        pv_ts_descriptor = PVOutputTimeSeriesDescriptor(pv_system_id)
+        weather_ts_descriptor = _get_weather_ts_descriptor(pv_system_id)
         run_prepare_pv(
             cleaned_fs,
             batches_fs,
             pv_descriptor,
             weather_descriptor,
-            pv_ts,
-            weather_location,
+            pv_ts_descriptor,
+            weather_ts_descriptor,
             date_str,
         )
     elif step == 'assemble_weather':
         assemble_prepared_weather(batches_fs, prepared_fs)
     elif step == 'assemble_pv':
-        pv_system_id = int(os.environ['PV_SYSTEM_ID'])
+        pv_system_id = _resolve_pv_system_id()
         assemble_prepared_pv(batches_fs, prepared_fs, pv_system_id)
     else:
         logger.error('unknown TRANSFORM_STEP=%s', step)
@@ -133,4 +162,8 @@ def main() -> None:
 
 if __name__ == '__main__':
     configure_logging()
-    main()
+    try:
+        main()
+    except Exception:
+        logger.exception('Unhandled exception')
+        sys.exit(1)

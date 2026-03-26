@@ -161,4 +161,8 @@ def main() -> None:
 
 if __name__ == '__main__':
     configure_logging()
-    main()
+    try:
+        main()
+    except Exception:
+        logger.exception('Unhandled exception')
+        sys.exit(1)

@@ -31,6 +31,9 @@ class GcsFileSystem:
         self._bucket = self._client.bucket(bucket_name)
         self._prefix = prefix.strip('/')
 
+    def __str__(self) -> str:
+        return f'GCS bucket: {self._bucket.name}/{self._prefix}'
+
     def _blob_path(self, relative_path: str) -> str:
         """Prepend the prefix to *relative_path*."""
         return f'{self._prefix}/{relative_path}' if self._prefix else relative_path

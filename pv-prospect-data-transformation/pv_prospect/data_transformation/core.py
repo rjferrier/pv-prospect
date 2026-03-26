@@ -55,10 +55,10 @@ PV_COLUMNS = ['time', 'temperature', 'plane_of_array_irradiance', 'power']
 # ---------------------------------------------------------------------------
 
 
-def read_csv(fs: FileSystem, path: str) -> pd.DataFrame | None:
+def read_csv(fs: FileSystem, path: str) -> pd.DataFrame:
     """Read a CSV file from a FileSystem, returning None if it doesn't exist."""
     if not fs.exists(path):
-        return None
+        raise FileNotFoundError(f'CSV not found in {fs}/{path}')
     return pd.read_csv(io.BytesIO(fs.read_bytes(path)), encoding='utf-8')
 
 
@@ -109,8 +109,6 @@ def run_clean_weather(
     in_path = _build_path(weather_descriptor, location, date_str, 'csv')
     logger.info('[clean_weather] Processing %s', in_path)
     df = read_csv(raw_fs, in_path)
-    if df is None:
-        raise FileNotFoundError(f'CSV not found: {in_path}')
     if df.empty:
         raise ValueError(f'CSV is empty: {in_path}')
     write_csv(
@@ -131,8 +129,6 @@ def run_clean_pv(
     in_path = _build_path(pv_descriptor, pv_ts, date_str, 'csv')
     logger.info('[clean_pv] Processing %s', in_path)
     df = read_csv(raw_fs, in_path)
-    if df is None:
-        raise FileNotFoundError(f'CSV not found: {in_path}')
     if df.empty:
         raise ValueError(f'CSV is empty: {in_path}')
     write_csv(
@@ -153,8 +149,6 @@ def run_prepare_weather(
     path = _build_path(weather_descriptor, location, date_str, 'csv')
     logger.info('[prepare_weather] Processing %s', path)
     cleaned_df = read_csv(cleaned_fs, path)
-    if cleaned_df is None:
-        raise FileNotFoundError(f'CSV not found: {path}')
     prepared_df = _prepare_weather_transform(cleaned_df)
     prepared_df.insert(0, 'latitude', float(location.latitude))
     prepared_df.insert(1, 'longitude', float(location.longitude))
@@ -171,19 +165,21 @@ def run_prepare_pv(
     batches_fs: FileSystem,
     pv_descriptor: SourceDescriptor,
     weather_descriptor: SourceDescriptor,
-    pv_ts: PVOutputTimeSeriesDescriptor,
-    weather_location: OpenMeteoTimeSeriesDescriptor,
+    pv_ts_descriptor: PVOutputTimeSeriesDescriptor,
+    weather_ts_descriptor: OpenMeteoTimeSeriesDescriptor,
     date_str: str,
 ) -> None:
     """Join cleaned PV and weather data and write a headerless CSV batch."""
-    pv_site = get_pv_site_by_system_id(pv_ts.pv_system_id)
+    pv_site = get_pv_site_by_system_id(pv_ts_descriptor.pv_system_id)
 
-    in_pv_path = _build_path(pv_descriptor, pv_ts, date_str, 'csv')
+    in_pv_path = _build_path(pv_descriptor, pv_ts_descriptor, date_str, 'csv')
     if not cleaned_fs.exists(in_pv_path):
         logger.warning('[prepare_pv] Cleaned PV data not found: %s', in_pv_path)
         return
 
-    weather_path = _build_path(weather_descriptor, weather_location, date_str, 'csv')
+    weather_path = _build_path(
+        weather_descriptor, weather_ts_descriptor, date_str, 'csv'
+    )
     if not cleaned_fs.exists(weather_path):
         logger.warning('[prepare_pv] Cleaned weather data not found: %s', weather_path)
         return
@@ -201,7 +197,7 @@ def run_prepare_pv(
     write_csv(
         batches_fs,
         prepared_df,
-        _pv_batch_path(pv_ts.pv_system_id, date_str),
+        _pv_batch_path(pv_ts_descriptor.pv_system_id, date_str),
         header=False,
     )
 
@@ -223,9 +219,11 @@ def assemble_prepared_weather(
 
     frames: list[pd.DataFrame] = []
 
-    existing = read_csv(prepared_fs, PREPARED_WEATHER_PATH)
-    if existing is not None:
+    try:
+        existing = read_csv(prepared_fs, PREPARED_WEATHER_PATH)
         frames.append(existing)
+    except FileNotFoundError:
+        pass
 
     for entry in batch_files:
         content = batches_fs.read_text(entry.path)
@@ -260,9 +258,11 @@ def assemble_prepared_pv(
     frames: list[pd.DataFrame] = []
 
     master_path = _prepared_pv_path(system_id)
-    existing = read_csv(prepared_fs, master_path)
-    if existing is not None:
+    try:
+        existing = read_csv(prepared_fs, master_path)
         frames.append(existing)
+    except FileNotFoundError:
+        pass
 
     for entry in batch_files:
         content = batches_fs.read_text(entry.path)

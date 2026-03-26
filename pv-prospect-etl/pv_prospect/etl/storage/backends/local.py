@@ -23,6 +23,9 @@ class LocalFileSystem:
         self._base_dir = Path(base_dir).resolve()
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
+    def __str__(self) -> str:
+        return f'Local filesystem: {self._base_dir}'
+
     def exists(self, path: str) -> bool:
         return (self._base_dir / path).exists()
 
