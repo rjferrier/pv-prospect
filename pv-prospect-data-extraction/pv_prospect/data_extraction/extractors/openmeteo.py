@@ -297,17 +297,17 @@ class OpenMeteoWeatherDataExtractor:
         if len(grid_points) == 1:
             return [
                 TimeSeries(
-                    entity=grid_points[0],
+                    entity=_grid_point_from_response(json_data),
                     rows=self._process_time_series_data(json_data),
                 )
             ]
         else:
             return [
                 TimeSeries(
-                    entity=grid_point,
-                    rows=self._process_time_series_data(json_data[i]),
+                    entity=_grid_point_from_response(entry),
+                    rows=self._process_time_series_data(entry),
                 )
-                for i, grid_point in enumerate(grid_points)
+                for entry in json_data
             ]
 
     def _process_time_series_data(self, json_data: dict[str, Any]) -> list[list[str]]:
@@ -338,3 +338,13 @@ class OpenMeteoWeatherDataExtractor:
             rows.append(row)
 
         return rows
+
+
+def _grid_point_from_response(json_data: dict[str, Any]) -> GridPoint:
+    """Build a GridPoint from the latitude/longitude returned by the API."""
+    return GridPoint(
+        Location.from_coordinates(
+            str(json_data['latitude']),
+            str(json_data['longitude']),
+        )
+    )

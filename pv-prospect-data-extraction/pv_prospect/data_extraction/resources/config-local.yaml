@@ -1,3 +1,3 @@
 resources_storage:
   backend: 'local'
-  prefix: 'resources'
+  prefix: '../../pv-prospect-instance/data/static'
