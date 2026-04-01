@@ -1,3 +1,5 @@
+exclude: ^uk-geo/
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -45,3 +47,10 @@ repos:
         entry: .hooks/render-diagrams.sh
         files: ^doc/.*\.puml$
         pass_filenames: true
+
+      - id: regenerate-uk-grid
+        name: Regenerate UK grid images
+        language: script
+        entry: .hooks/regenerate-uk-grid.sh
+        always_run: true
+        pass_filenames: false

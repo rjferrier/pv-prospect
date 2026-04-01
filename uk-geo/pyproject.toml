@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "pv-prospect-geo"
+version = "0.1.0"
+description = "UK grid point generation for PV Prospect"
+authors = ["RJ Ferrier <rjferrier@outlook.com>"]
+packages = [{include = "pv_prospect"}]
+
+[project]
+name = "pv-prospect-geo"
+version = "0.1.0"
+description = "UK grid point generation for PV Prospect"
+authors = [{name = "RJ Ferrier", email = "rjferrier@outlook.com"}]
+requires-python = ">=3.12"
+dependencies = [
+    "geopandas>=1.0,<2",
+    "shapely>=2.0,<3",
+    "matplotlib (>=3.10.8,<4.0.0)",
+]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+geopandas = "^1.0"
+shapely = "^2.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = { version = "^0.13" }
+mypy = { version = "^1.18" }
+pytest = "^9.0.1"
+
+[build-system]
+requires = ["poetry-core>=2.2.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
