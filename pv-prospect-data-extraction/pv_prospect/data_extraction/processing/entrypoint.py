@@ -14,12 +14,12 @@ For **preprocess**:
 For **extract_and_load**:
     DATA_SOURCE     — ``pv`` or ``weather`` (optional; defaults to weather)
     PV_SYSTEM_ID    — integer system id (required for PV sources; for weather
-                      sources, exactly one of PV_SYSTEM_ID or OPENMETEO_LOCATION
+                      sources, exactly one of PV_SYSTEM_ID or GRID_POINT_ID
                       must be set)
-    OPENMETEO_LOCATION
-                    — stringified lat_lon (e.g. ``504900_-35400``); alternative
+    GRID_POINT_ID   — stringified lat_lon (e.g. ``504900_-35400``); alternative
                       to PV_SYSTEM_ID for weather sources
-    START_DATE      — ISO date ``YYYY-MM-DD``
+    START_DATE      — ISO date ``YYYY-MM-DD``. Alias: ``DATE`` (clearer when
+                      no end date is given).
     END_DATE        — ISO date ``YYYY-MM-DD``, exclusive (optional; defaults to
                         START_DATE + 1 day)
     OVERWRITE       — ``true`` or ``false`` (default ``false``)
@@ -36,11 +36,11 @@ from pv_prospect.common import (
     build_pv_site_repo,
     configure_logging,
     get_config,
+    get_location_by_pv_system_id,
     get_pv_site_by_system_id,
 )
 from pv_prospect.common.domain import (
     AnyEntity,
-    GridPoint,
     Period,
 )
 from pv_prospect.data_extraction import (
@@ -51,7 +51,7 @@ from pv_prospect.data_extraction import (
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
-from pv_prospect.data_sources import DataSourceType
+from pv_prospect.data_sources import DataSourceType, resolve_grid_point
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
@@ -83,14 +83,17 @@ def _run_extract_and_load(
     data_source: DataSource,
 ) -> None:
     pv_system_id = _env_int('PV_SYSTEM_ID')
-    grid_point_id = os.environ.get('OPENMETEO_LOCATION')
+    grid_point_id = os.environ.get('GRID_POINT_ID')
     overwrite = _env_bool('OVERWRITE')
     dry_run = _env_bool('DRY_RUN')
     by_week = _env_bool('BY_WEEK')
 
     try:
+        start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
+        if not start_date_str:
+            raise ValueError('START_DATE (or DATE) must be set.')
         complete_date_range = build_date_range(
-            os.environ['START_DATE'], os.environ.get('END_DATE')
+            start_date_str, os.environ.get('END_DATE')
         )
     except DegenerateDateRange as e:
         logger.error('%s', e)
@@ -104,12 +107,16 @@ def _run_extract_and_load(
 
     # Resolve PV site or weather grid point
     entity: AnyEntity
-    if grid_point_id is not None:
-        entity = GridPoint.from_id(grid_point_id)
+    if data_source.type == DataSourceType.WEATHER:
+        entity = resolve_grid_point(
+            get_location_by_pv_system_id,
+            pv_system_id=pv_system_id,
+            location_str=grid_point_id,
+        )
     elif pv_system_id is not None:
         entity = get_pv_site_by_system_id(pv_system_id)
     else:
-        raise ValueError('Either PV_SYSTEM_ID or OPENMETEO_LOCATION must be set.')
+        raise ValueError('PV_SYSTEM_ID must be set for PV sources.')
 
     logger.info(
         'extract_and_load: %s, %s, %s, by_week=%s',

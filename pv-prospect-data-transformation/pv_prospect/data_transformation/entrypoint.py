@@ -10,7 +10,7 @@ TRANSFORM_STEP
     ``assemble_weather``, or ``assemble_pv``
 START_DATE
     ISO date ``YYYY-MM-DD`` (start of the date range to process).
-    Falls back to ``DATE`` for backward compatibility.
+    Alias: ``DATE`` (clearer when no end date is given).
 END_DATE
     ISO date ``YYYY-MM-DD``, exclusive (optional; defaults to
     START_DATE + 1 day)
@@ -20,9 +20,9 @@ BY_WEEK
     files.  Other steps always iterate per day.
 PV_SYSTEM_ID
     (Optional) integer system id; required for pv steps. For weather steps,
-    accepted as an alternative to ``OPENMETEO_LOCATION`` — the location is
+    accepted as an alternative to ``GRID_POINT_ID`` — the location is
     derived via the location mapping repo.
-OPENMETEO_LOCATION
+GRID_POINT_ID
     (Optional) stringified lat_lon; required for weather steps unless
     ``PV_SYSTEM_ID`` is provided instead. Exactly one of the two must be set.
 """
@@ -88,7 +88,7 @@ def main() -> None:
     transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
     by_week = _env_bool('BY_WEEK')
     pv_system_id = _env_int('PV_SYSTEM_ID')
-    location_str = os.environ.get('OPENMETEO_LOCATION')
+    location_str = os.environ.get('GRID_POINT_ID')
 
     start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
     if not start_date_str:

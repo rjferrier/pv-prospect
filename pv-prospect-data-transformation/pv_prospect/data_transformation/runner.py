@@ -80,31 +80,38 @@ def _parse_args() -> Any:
     )
     parser.add_argument(
         'steps',
-        help='transformation step(s), comma-separated from: {}'.format(
+        nargs='?',
+        default=None,
+        help='transformation step(s), comma-separated from: {} . '
+        'Defaults to all steps.'.format(
             ', '.join(t.value for t in ALL_TRANSFORMATIONS)
         ),
     )
     parser.add_argument(
-        'system_ids',
-        nargs='?',
+        '-p',
+        '--pv-system-ids',
+        type=str,
         default=None,
-        help='system ID or comma-separated list of system IDs (e.g. 123 or 123,456). '
-        'Required for steps: {}. If omitted, all systems are processed.'.format(
+        help="PV system ID or comma-separated list (e.g. 123 or 123,456), or 'all'. "
+        'Required for steps: {}.'.format(
             ', '.join(sorted(t.value for t in TRANSFORMATIONS_NEEDING_PV_SITE))
         ),
     )
     parser.add_argument(
-        '--location',
+        '-g',
+        '--grid-point-ids',
         type=str,
         default=None,
         help='comma-separated lat_lon values (e.g. 504900_-35400). '
-        'Required for weather steps when no system_ids are given.',
+        'Required for weather steps when no pv-system-ids are given.',
     )
     parser.add_argument(
         '-d',
         '--start-date',
+        '--date',
         type=str,
         default=None,
+        dest='start_date',
         help="start date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM (default: yesterday)",
     )
     parser.add_argument(
@@ -242,13 +249,16 @@ def _main() -> None:
     )
 
     # --- validate steps ---------------------------------------------------
-    all_transformations = [Transformation(s.strip()) for s in args.steps.split(',')]
-    invalid = [s for s in all_transformations if s not in ALL_TRANSFORMATIONS]
-    if invalid:
-        raise ValueError(
-            f'Invalid step(s): {", ".join(str(s) for s in invalid)}. '
-            f'Valid: {", ".join(t.value for t in ALL_TRANSFORMATIONS)}'
-        )
+    if args.steps:
+        all_transformations = [Transformation(s.strip()) for s in args.steps.split(',')]
+        invalid = [s for s in all_transformations if s not in ALL_TRANSFORMATIONS]
+        if invalid:
+            raise ValueError(
+                f'Invalid step(s): {", ".join(str(s) for s in invalid)}. '
+                f'Valid: {", ".join(t.value for t in ALL_TRANSFORMATIONS)}'
+            )
+    else:
+        all_transformations = list(ALL_TRANSFORMATIONS)
 
     # --- resolve storage backends -----------------------------------------
     if args.local_dir:
@@ -285,12 +295,14 @@ def _main() -> None:
     )
 
     pv_system_ids = (
-        _parse_pv_system_ids(args.system_ids)
-        if args.system_ids
-        else (get_all_pv_system_ids() if needs_pv_id else [])
+        get_all_pv_system_ids()
+        if args.pv_system_ids == 'all'
+        else _parse_pv_system_ids(args.pv_system_ids)
+        if args.pv_system_ids
+        else []
     )
     pv_sites = [get_pv_site_by_system_id(sid) for sid in pv_system_ids]
-    grid_points = _parse_grid_points(args.location) if args.location else []
+    grid_points = _parse_grid_points(args.grid_point_ids) if args.grid_point_ids else []
 
     if needs_pv_id:
         print(f'Processing {len(pv_system_ids)} PV site(s).')

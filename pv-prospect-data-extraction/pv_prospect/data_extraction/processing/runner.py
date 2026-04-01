@@ -21,6 +21,7 @@ from pv_prospect.common import (
     build_pv_site_repo,
     get_all_pv_system_ids,
     get_config,
+    get_location_by_pv_system_id,
     get_pv_site_by_system_id,
 )
 from pv_prospect.common.domain import (
@@ -28,7 +29,6 @@ from pv_prospect.common.domain import (
     DateRange,
     GridPoint,
     Period,
-    PVSite,
 )
 from pv_prospect.data_extraction import (
     DataSource,
@@ -65,24 +65,27 @@ def _parse_args() -> 'Any':
         ),
     )
     parser.add_argument(
-        'system_ids',
-        nargs='?',
+        '-p',
+        '--pv-system-ids',
+        type=str,
         default=None,
-        help='system ID or comma-separated list of system IDs (e.g. 123 or 123,456). '
-        'If omitted, all systems will be processed.',
+        help="PV system ID or comma-separated list (e.g. 123 or 123,456), or 'all'.",
     )
     parser.add_argument(
-        '--location',
+        '-g',
+        '--grid-point-ids',
         type=str,
         default=None,
         help='comma-separated lat_lon values (e.g. 504900_-35400). '
-        'Alternative to system_ids for weather sources.',
+        'For weather sources, combined with any grid points derived from --pv-systems.',
     )
     parser.add_argument(
         '-d',
         '--start-date',
+        '--date',
         type=str,
         default=None,
+        dest='start_date',
         help="start date: 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM format (default: yesterday)",
     )
     parser.add_argument(
@@ -177,19 +180,21 @@ def _main() -> None:
     _init_repos(resources_fs)
 
     # --- resolve targets ----------------------------------------------------
-    grid_points: list[GridPoint] = []
-    if args.location:
-        grid_points = _parse_grid_points(args.location)
-
-    pv_sites: list[PVSite] = []
-    if args.system_ids:
-        pv_system_ids = _parse_pv_system_ids(args.system_ids)
-    elif not grid_points:
+    if args.pv_system_ids == 'all':
         pv_system_ids = get_all_pv_system_ids()
+    elif args.pv_system_ids:
+        pv_system_ids = _parse_pv_system_ids(args.pv_system_ids)
     else:
         pv_system_ids = []
 
     pv_sites = [get_pv_site_by_system_id(sid) for sid in pv_system_ids]
+
+    # Grid points = those resolved from PV sites + any explicit --location values
+    grid_points: list[GridPoint] = [
+        GridPoint(get_location_by_pv_system_id(site.pvo_sys_id)) for site in pv_sites
+    ]
+    if args.grid_point_ids:
+        grid_points += _parse_grid_points(args.grid_point_ids)
 
     if pv_sites:
         print(f'Processing {len(pv_sites)} PV site(s).')
@@ -210,7 +215,6 @@ def _main() -> None:
     if args.reverse:
         sub_date_ranges.reverse()
 
-    all_entities: list[AnyEntity] = [*pv_sites, *grid_points]
     work_items: list[tuple[DataSource, AnyEntity, DateRange]] = []
     for dr in sub_date_ranges:
         for sd in data_sources:
@@ -218,8 +222,11 @@ def _main() -> None:
                 day_ranges = dr.split_by(Period.DAY)
             else:
                 day_ranges = [dr]
+            entities: list[AnyEntity] = (
+                grid_points if sd.type == DataSourceType.WEATHER else pv_sites
+            )
             for day_dr in day_ranges:
-                for ent in all_entities:
+                for ent in entities:
                     work_items.append((sd, ent, day_dr))
 
     if not work_items:
