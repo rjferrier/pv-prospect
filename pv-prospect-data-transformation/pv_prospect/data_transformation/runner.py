@@ -20,21 +20,25 @@ Usage::
 import sys
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, Callable
 
 from pv_prospect.common import (
-    Period,
     build_location_mapping_repo,
     build_pv_site_repo,
     get_all_pv_system_ids,
     get_config,
     get_location_by_pv_system_id,
+    get_pv_site_by_system_id,
+)
+from pv_prospect.common.domain import (
+    DateRange,
+    GridPoint,
+    PVSite,
 )
 from pv_prospect.data_sources import (
     LOCATION_MAPPING_CSV_FILE,
     PV_SITES_CSV_FILE,
-    OpenMeteoTimeSeriesDescriptor,
-    PVOutputTimeSeriesDescriptor,
+    DataSource,
 )
 from pv_prospect.data_sources import (
     get_config_dir as get_ds_config_dir,
@@ -51,15 +55,18 @@ from pv_prospect.data_transformation.core import (
 from pv_prospect.data_transformation.resources import (
     get_config_dir as get_dt_config_dir,
 )
+from pv_prospect.data_transformation.transformation import (
+    ALL_TRANSFORMATIONS,
+    CLEANING_TRANSFORMATIONS,
+    PREPARING_TRANSFORMATIONS,
+    TRANSFORMATIONS_NEEDING_GRID_POINT,
+    TRANSFORMATIONS_NEEDING_PV_SITE,
+    Transformation,
+)
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
-from pv_prospect.etl.storage import get_filesystem
+from pv_prospect.etl.storage import FileSystem, get_filesystem
 from pv_prospect.etl.storage.backends import LocalStorageConfig
-
-STEPS = ['clean_weather', 'clean_pv', 'prepare_weather', 'prepare_pv']
-STEPS_NEEDING_PV_ID: frozenset[str] = frozenset({'clean_pv', 'prepare_pv'})
-STEPS_NEEDING_LOCATION: frozenset[str] = frozenset({'clean_weather', 'prepare_weather'})
-
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -74,7 +81,7 @@ def _parse_args() -> Any:
     parser.add_argument(
         'steps',
         help='transformation step(s), comma-separated from: {}'.format(
-            ', '.join(STEPS)
+            ', '.join(t.value for t in ALL_TRANSFORMATIONS)
         ),
     )
     parser.add_argument(
@@ -83,7 +90,7 @@ def _parse_args() -> Any:
         default=None,
         help='system ID or comma-separated list of system IDs (e.g. 123 or 123,456). '
         'Required for steps: {}. If omitted, all systems are processed.'.format(
-            ', '.join(sorted(STEPS_NEEDING_PV_ID))
+            ', '.join(sorted(t.value for t in TRANSFORMATIONS_NEEDING_PV_SITE))
         ),
     )
     parser.add_argument(
@@ -108,6 +115,12 @@ def _parse_args() -> Any:
         help="end date (exclusive): 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM (default: start date + 1 day)",
     )
     parser.add_argument(
+        '-w',
+        '--by-week',
+        action='store_true',
+        help='raw weather files span a full week (read weekly, write per-day cleaned files)',
+    )
+    parser.add_argument(
         '-l',
         '--local-dir',
         type=str,
@@ -127,46 +140,94 @@ def _parse_pv_system_ids(s: str) -> list[int]:
     return [int(x.strip()) for x in s.split(',') if x.strip()]
 
 
-def _parse_locations(s: str) -> list[OpenMeteoTimeSeriesDescriptor]:
-    return [
-        OpenMeteoTimeSeriesDescriptor.from_str(x.strip())
-        for x in s.split(',')
-        if x.strip()
-    ]
+def _parse_grid_points(s: str) -> list[GridPoint]:
+    return [GridPoint.from_id(x.strip()) for x in s.split(',') if x.strip()]
 
 
-def _get_weather_location(pv_system_id: int) -> OpenMeteoTimeSeriesDescriptor:
-    loc = get_location_by_pv_system_id(pv_system_id)
-    return OpenMeteoTimeSeriesDescriptor.from_coordinates(loc.latitude, loc.longitude)
+# ---------------------------------------------------------------------------
+# Step dispatch
+# ---------------------------------------------------------------------------
+
+
+def _make_step_fn(
+    step: Transformation,
+    raw_fs: FileSystem,
+    cleaned_fs: FileSystem,
+    batches_fs: FileSystem,
+    pv_data_source: DataSource,
+    weather_data_source: DataSource,
+    date_range: DateRange,
+    by_week: bool,
+) -> Callable[[GridPoint, PVSite | None], None]:
+    """Return a callable that runs *step* for a single entity."""
+    if step == Transformation.CLEAN_WEATHER:
+
+        def fn_clean_weather(grid_point: GridPoint, _: PVSite | None) -> None:
+            run_clean_weather(
+                raw_fs, cleaned_fs, weather_data_source, grid_point, date_range, by_week
+            )
+
+        return fn_clean_weather  # type: ignore[return-value]
+
+    if step == Transformation.PREPARE_WEATHER:
+
+        def fn_prepare_weather(grid_point: GridPoint, _: PVSite | None) -> None:
+            run_prepare_weather(
+                cleaned_fs, batches_fs, weather_data_source, grid_point, date_range
+            )
+
+        return fn_prepare_weather  # type: ignore[return-value]
+
+    if step == Transformation.CLEAN_PV:
+
+        def fn_clean_pv(_: GridPoint, pv_site: PVSite | None) -> None:
+            if pv_site is None:
+                raise ValueError('pv_site must be set for clean_pv')
+            run_clean_pv(raw_fs, cleaned_fs, pv_data_source, pv_site, date_range)
+
+        return fn_clean_pv  # type: ignore[return-value]
+
+    if step == Transformation.PREPARE_PV:
+
+        def fn_prepare_pv(grid_point: GridPoint, pv_site: PVSite | None) -> None:
+            if pv_site is None:
+                raise ValueError('pv_site must be set for prepare_pv')
+            run_prepare_pv(
+                cleaned_fs,
+                batches_fs,
+                pv_data_source,
+                weather_data_source,
+                pv_site,
+                grid_point,
+                date_range,
+                get_pv_site_by_system_id,
+            )
+
+        return fn_prepare_pv  # type: ignore[return-value]
+
+    raise ValueError(f'Unknown step: {step}')
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-_PV_STEP_DISPATCH = {
-    'clean_pv': lambda ctx, date_str, pv_ts: run_clean_pv(
-        ctx['raw_fs'], ctx['cleaned_fs'], ctx['pv'], pv_ts, date_str
-    ),
-    'prepare_pv': lambda ctx, date_str, pv_ts: run_prepare_pv(
-        ctx['cleaned_fs'],
-        ctx['batches_fs'],
-        ctx['pv'],
-        ctx['weather'],
-        pv_ts,
-        _get_weather_location(pv_ts.pv_system_id),
-        date_str,
-    ),
-}
 
-_WEATHER_STEP_DISPATCH = {
-    'clean_weather': lambda ctx, date_str, loc: run_clean_weather(
-        ctx['raw_fs'], ctx['cleaned_fs'], ctx['weather'], loc, date_str
-    ),
-    'prepare_weather': lambda ctx, date_str, loc: run_prepare_weather(
-        ctx['cleaned_fs'], ctx['batches_fs'], ctx['weather'], loc, date_str
-    ),
-}
+def _build_work_items(
+    steps: list[Transformation],
+    grid_points: list[GridPoint],
+    pv_sites: list[PVSite],
+) -> list[tuple[Transformation, GridPoint, PVSite | None]]:
+    work_items: list[tuple[Transformation, GridPoint, PVSite | None]] = []
+    for step in steps:
+        if step in TRANSFORMATIONS_NEEDING_PV_SITE:
+            for pv_site in pv_sites:
+                grid_point = GridPoint(get_location_by_pv_system_id(pv_site.pvo_sys_id))
+                work_items.append((step, grid_point, pv_site))
+        elif step in TRANSFORMATIONS_NEEDING_GRID_POINT:
+            for grid_point in grid_points:
+                work_items.append((step, grid_point, None))
+    return work_items
 
 
 def _main() -> None:
@@ -181,11 +242,12 @@ def _main() -> None:
     )
 
     # --- validate steps ---------------------------------------------------
-    steps = [s.strip() for s in args.steps.split(',')]
-    invalid = [s for s in steps if s not in STEPS]
+    all_transformations = [Transformation(s.strip()) for s in args.steps.split(',')]
+    invalid = [s for s in all_transformations if s not in ALL_TRANSFORMATIONS]
     if invalid:
         raise ValueError(
-            f'Invalid step(s): {", ".join(invalid)}. Valid: {", ".join(STEPS)}'
+            f'Invalid step(s): {", ".join(str(s) for s in invalid)}. '
+            f'Valid: {", ".join(t.value for t in ALL_TRANSFORMATIONS)}'
         )
 
     # --- resolve storage backends -----------------------------------------
@@ -201,15 +263,6 @@ def _main() -> None:
 
     cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
 
-    ctx = {
-        'raw_fs': raw_fs,
-        'cleaned_fs': cleaned_fs,
-        'batches_fs': batches_fs,
-        'prepared_fs': prepared_fs,
-        'pv': config.data_sources.pv,
-        'weather': config.data_sources.weather,
-    }
-
     # --- initialise in-memory repos ---------------------------------------
     resources_fs = get_filesystem(config.resources_storage)
     resources_extractor = Extractor(resources_fs)
@@ -218,94 +271,93 @@ def _main() -> None:
         resources_extractor.read_file(LOCATION_MAPPING_CSV_FILE)
     )
 
-    # --- resolve PV system IDs and weather locations ----------------------
-    needs_pv_id = any(s in STEPS_NEEDING_PV_ID for s in steps)
-    needs_location = any(s in STEPS_NEEDING_LOCATION for s in steps)
+    # --- resolve date range -----------------------------------------------
+    try:
+        date_range = build_date_range(args.start_date, args.end_date)
+    except DegenerateDateRange as e:
+        print(str(e))
+        sys.exit(1)
+
+    # --- resolve PV system IDs and weather grid points --------------------
+    needs_pv_id = any(s in TRANSFORMATIONS_NEEDING_PV_SITE for s in all_transformations)
+    needs_grid_point = any(
+        s in TRANSFORMATIONS_NEEDING_GRID_POINT for s in all_transformations
+    )
 
     pv_system_ids = (
         _parse_pv_system_ids(args.system_ids)
         if args.system_ids
         else (get_all_pv_system_ids() if needs_pv_id else [])
     )
-
-    if args.location:
-        locations = _parse_locations(args.location)
-    elif needs_location:
-        all_ids = pv_system_ids or get_all_pv_system_ids()
-        locations = list({_get_weather_location(sid) for sid in all_ids})
-    else:
-        locations = []
+    pv_sites = [get_pv_site_by_system_id(sid) for sid in pv_system_ids]
+    grid_points = _parse_grid_points(args.location) if args.location else []
 
     if needs_pv_id:
         print(f'Processing {len(pv_system_ids)} PV site(s).')
-    if needs_location:
-        print(f'Processing {len(locations)} weather location(s).')
+    if needs_grid_point:
+        print(f'Processing {len(grid_points)} grid point(s).')
     print()
 
-    # --- build work items -------------------------------------------------
-    try:
-        complete_date_range = build_date_range(args.start_date, args.end_date)
-    except DegenerateDateRange as e:
-        print(str(e))
-        sys.exit(1)
+    def run(transformations_filter: frozenset[Transformation]) -> None:
+        transformations = [
+            t for t in all_transformations if t in transformations_filter
+        ]
 
-    date_strings = [
-        dr.start.strftime('%Y%m%d') for dr in complete_date_range.split_by(Period.DAY)
-    ]
+        work_items = _build_work_items(transformations, grid_points, pv_sites)
 
-    WorkItem = tuple[
-        str, str, PVOutputTimeSeriesDescriptor | OpenMeteoTimeSeriesDescriptor
-    ]
-    work_items: list[WorkItem] = []
-    for date_str in date_strings:
-        for step in steps:
-            if step in STEPS_NEEDING_PV_ID:
-                for pv_id in pv_system_ids:
-                    work_items.append(
-                        (step, date_str, PVOutputTimeSeriesDescriptor(pv_id))
+        if not work_items:
+            return
+
+        print(f'Submitting {len(work_items)} task(s) with {args.workers} worker(s).\n')
+
+        errors = 0
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futures = {}
+            for step, grid_point, pv_site in work_items:
+                step_fn = _make_step_fn(
+                    step,
+                    raw_fs,
+                    cleaned_fs,
+                    batches_fs,
+                    config.data_sources.pv,
+                    config.data_sources.weather,
+                    date_range,
+                    args.by_week,
+                )
+                futures[pool.submit(step_fn, grid_point, pv_site)] = (
+                    step,
+                    grid_point,
+                    pv_site,
+                )
+
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    step, grid_point, pv_site = futures[future]
+                    print(
+                        f'    UNHANDLED ERROR for {step}/{grid_point or pv_site}: {exc}'
                     )
-            elif step in STEPS_NEEDING_LOCATION:
-                for loc in locations:
-                    work_items.append((step, date_str, loc))
+                    errors += 1
 
-    if not work_items:
-        print('No tasks to process.')
-        return
-
-    print(f'Submitting {len(work_items)} task(s) with {args.workers} worker(s).\n')
-
-    # --- fan-out with ThreadPoolExecutor ----------------------------------
-    dispatch = {**_PV_STEP_DISPATCH, **_WEATHER_STEP_DISPATCH}
-    errors = 0
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {
-            pool.submit(dispatch[step], ctx, date_str, desc): (
-                step,
-                date_str,
-                desc,
+            print(
+                f'\nDone with {[t.value for t in transformations]}. '
+                f'{len(work_items) - errors} succeeded, {errors} failed.'
             )
-            for step, date_str, desc in work_items
-        }
 
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as exc:
-                step, date_str, desc = futures[future]
-                label = f'{step}/{desc}/{date_str}'
-                print(f'    UNHANDLED ERROR for {label}: {exc}')
-                errors += 1
+    run(CLEANING_TRANSFORMATIONS)
+    run(PREPARING_TRANSFORMATIONS)
 
-    if 'prepare_weather' in steps:
+    if Transformation.ASSEMBLE_WEATHER in all_transformations:
         print('\nAssembling prepared weather data...')
         assemble_prepared_weather(batches_fs, prepared_fs)
 
-    if 'prepare_pv' in steps:
+    if Transformation.ASSEMBLE_PV in all_transformations:
         print('\nAssembling prepared PV data...')
         for pv_id in pv_system_ids:
             assemble_prepared_pv(batches_fs, prepared_fs, pv_id)
 
-    print(f'\nDone. {len(work_items) - errors} succeeded, {errors} failed.')
+    print('\nDone.')
 
 
 if __name__ == '__main__':

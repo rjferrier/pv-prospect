@@ -1,14 +1,23 @@
 """Cloud Run Job entrypoint for Data Transformation.
 
 Reads task parameters from environment variables set by the Cloud Workflow
-and calls the corresponding clean or prepare function.
+and calls the corresponding core function.
 
 Environment variables
 ---------------------
 TRANSFORM_STEP
-    ``clean_weather``, ``clean_pv``, ``prepare_weather``, or ``prepare_pv``
-DATE
-    ISO date ``YYYY-MM-DD`` to process
+    ``clean_weather``, ``clean_pv``, ``prepare_weather``, ``prepare_pv``,
+    ``assemble_weather``, or ``assemble_pv``
+START_DATE
+    ISO date ``YYYY-MM-DD`` (start of the date range to process).
+    Falls back to ``DATE`` for backward compatibility.
+END_DATE
+    ISO date ``YYYY-MM-DD``, exclusive (optional; defaults to
+    START_DATE + 1 day)
+BY_WEEK
+    ``true`` or ``false`` (default ``false``).  When set, ``clean_weather``
+    reads a single raw file spanning the week and writes per-day cleaned
+    files.  Other steps always iterate per day.
 PV_SYSTEM_ID
     (Optional) integer system id; required for pv steps. For weather steps,
     accepted as an alternative to ``OPENMETEO_LOCATION`` — the location is
@@ -28,12 +37,10 @@ from pv_prospect.common import (
     configure_logging,
     get_config,
     get_location_by_pv_system_id,
-)
-from pv_prospect.data_sources import (
-    OpenMeteoTimeSeriesDescriptor,
-    PVOutputTimeSeriesDescriptor,
+    get_pv_site_by_system_id,
 )
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
+from pv_prospect.data_sources import resolve_grid_point
 from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.core import (
     assemble_prepared_pv,
@@ -46,11 +53,24 @@ from pv_prospect.data_transformation.core import (
 from pv_prospect.data_transformation.resources import (
     get_config_dir as get_dt_config_dir,
 )
-from pv_prospect.etl import Extractor
+from pv_prospect.data_transformation.transformation import (
+    TRANSFORMATIONS_NEEDING_PV_SITE,
+    Transformation,
+)
+from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import FileSystem, get_filesystem
 
 logger = logging.getLogger(__name__)
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).lower() in ('true', '1', 'yes')
+
+
+def _env_int(name: str) -> int | None:
+    val = os.environ.get(name)
+    return int(val) if val else None
 
 
 def _load_resources(resources_fs: FileSystem) -> None:
@@ -64,46 +84,21 @@ def _load_resources(resources_fs: FileSystem) -> None:
         build_location_mapping_repo(extractor.read_file('location_mapping.csv'))
 
 
-def _get_weather_ts_descriptor(pv_system_id: int) -> OpenMeteoTimeSeriesDescriptor:
-    """Derive the weather grid point descriptor from a PV system ID."""
-    loc = get_location_by_pv_system_id(pv_system_id)
-    return OpenMeteoTimeSeriesDescriptor.from_coordinates(loc.latitude, loc.longitude)
-
-
-def _resolve_pv_system_id() -> int:
-    """Resolve the PV system ID from env vars for a PV step."""
-    pv_system_id_str = os.environ.get('PV_SYSTEM_ID')
-    if not pv_system_id_str:
-        raise ValueError('A PV step requires PV_SYSTEM_ID to be set.')
-    return int(pv_system_id_str)
-
-
-def _resolve_weather_ts_descriptor() -> OpenMeteoTimeSeriesDescriptor:
-    """Resolve the weather time series descriptor from env vars for a weather step.
-
-    Accepts either OPENMETEO_LOCATION or PV_SYSTEM_ID, but not both.
-    """
-    location_str = os.environ.get('OPENMETEO_LOCATION')
-    pv_system_id_str = os.environ.get('PV_SYSTEM_ID')
-
-    if location_str and pv_system_id_str:
-        raise ValueError(
-            'Ambiguous input: both OPENMETEO_LOCATION and PV_SYSTEM_ID are set '
-            'for a weather step. Provide exactly one.'
-        )
-    if location_str:
-        return OpenMeteoTimeSeriesDescriptor.from_str(location_str)
-    if pv_system_id_str:
-        return _get_weather_ts_descriptor(int(pv_system_id_str))
-    raise ValueError(
-        'A weather step requires either OPENMETEO_LOCATION or PV_SYSTEM_ID to be set.'
-    )
-
-
 def main() -> None:
-    step = os.environ.get('TRANSFORM_STEP', '')
-    target_date = os.environ['DATE']
-    date_str = target_date.replace('-', '')
+    transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
+    by_week = _env_bool('BY_WEEK')
+    pv_system_id = _env_int('PV_SYSTEM_ID')
+    location_str = os.environ.get('OPENMETEO_LOCATION')
+
+    start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
+    if not start_date_str:
+        raise ValueError('START_DATE (or DATE) must be set.')
+
+    try:
+        date_range = build_date_range(start_date_str, os.environ.get('END_DATE'))
+    except DegenerateDateRange as e:
+        logger.error('%s', e)
+        sys.exit(1)
 
     config = get_config(
         DataTransformationConfig,
@@ -118,45 +113,79 @@ def main() -> None:
     cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
     batches_fs = get_filesystem(config.staged_prepared_batches_data_storage)
     prepared_fs = get_filesystem(config.staged_prepared_data_storage)
-    pv_descriptor = config.data_sources.pv
-    weather_descriptor = config.data_sources.weather
 
     _load_resources(resources_fs)
 
-    logger.info('Starting %s for date %s', step, target_date)
+    if transformation in TRANSFORMATIONS_NEEDING_PV_SITE and pv_system_id is None:
+        raise ValueError('PV_SYSTEM_ID must be set for PV steps.')
 
-    if step == 'clean_weather':
-        location = _resolve_weather_ts_descriptor()
-        run_clean_weather(raw_fs, cleaned_fs, weather_descriptor, location, date_str)
-    elif step == 'clean_pv':
-        pv_system_id = _resolve_pv_system_id()
-        pv_ts_descriptor = PVOutputTimeSeriesDescriptor(pv_system_id)
-        run_clean_pv(raw_fs, cleaned_fs, pv_descriptor, pv_ts_descriptor, date_str)
-    elif step == 'prepare_weather':
-        location = _resolve_weather_ts_descriptor()
-        run_prepare_weather(
-            cleaned_fs, batches_fs, weather_descriptor, location, date_str
+    logger.info('Starting %s for %s, by_week=%s', transformation, date_range, by_week)
+
+    if transformation is Transformation.CLEAN_WEATHER:
+        grid_point = resolve_grid_point(
+            get_location_by_pv_system_id,
+            pv_system_id=pv_system_id,
+            location_str=location_str,
         )
-    elif step == 'prepare_pv':
-        pv_system_id = _resolve_pv_system_id()
-        pv_ts_descriptor = PVOutputTimeSeriesDescriptor(pv_system_id)
-        weather_ts_descriptor = _get_weather_ts_descriptor(pv_system_id)
+        run_clean_weather(
+            raw_fs,
+            cleaned_fs,
+            config.data_sources.weather,
+            grid_point,
+            date_range,
+            by_week,
+        )
+
+    elif transformation is Transformation.CLEAN_PV:
+        pv_site = get_pv_site_by_system_id(pv_system_id)  # type: ignore[arg-type]
+        run_clean_pv(
+            raw_fs,
+            cleaned_fs,
+            config.data_sources.pv,
+            pv_site,
+            date_range,
+        )
+
+    elif transformation is Transformation.PREPARE_WEATHER:
+        grid_point = resolve_grid_point(
+            get_location_by_pv_system_id,
+            pv_system_id=pv_system_id,
+            location_str=location_str,
+        )
+        run_prepare_weather(
+            cleaned_fs,
+            batches_fs,
+            config.data_sources.weather,
+            grid_point,
+            date_range,
+        )
+
+    elif transformation is Transformation.PREPARE_PV:
+        pv_site = get_pv_site_by_system_id(pv_system_id)  # type: ignore[arg-type]
+        grid_point = resolve_grid_point(
+            get_location_by_pv_system_id,
+            pv_system_id=pv_system_id,
+            location_str=location_str,
+        )
         run_prepare_pv(
             cleaned_fs,
             batches_fs,
-            pv_descriptor,
-            weather_descriptor,
-            pv_ts_descriptor,
-            weather_ts_descriptor,
-            date_str,
+            config.data_sources.pv,
+            config.data_sources.weather,
+            pv_site,
+            grid_point,
+            date_range,
+            get_pv_site_by_system_id,
         )
-    elif step == 'assemble_weather':
+
+    elif transformation is Transformation.ASSEMBLE_WEATHER:
         assemble_prepared_weather(batches_fs, prepared_fs)
-    elif step == 'assemble_pv':
-        pv_system_id = _resolve_pv_system_id()
-        assemble_prepared_pv(batches_fs, prepared_fs, pv_system_id)
+
+    elif transformation is Transformation.ASSEMBLE_PV:
+        assemble_prepared_pv(batches_fs, prepared_fs, pv_system_id)  # type: ignore[arg-type]
+
     else:
-        logger.error('unknown TRANSFORM_STEP=%s', step)
+        logger.error('unknown TRANSFORM_STEP=%s', transformation)
         sys.exit(1)
 
 

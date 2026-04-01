@@ -52,5 +52,9 @@ class PVSite:
     inverter_system: System
     installation_date: Optional[date] = None
 
+    @property
+    def id(self) -> str:
+        return str(self.pvo_sys_id)
+
     def __str__(self) -> str:
-        return f'{self.name} (system_id={self.pvo_sys_id})'
+        return f'PVSite(id={self.id})'

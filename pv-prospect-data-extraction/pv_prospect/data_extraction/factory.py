@@ -1,7 +1,8 @@
 from functools import lru_cache
 from typing import Callable
 
-from pv_prospect.common import Location, PVSite, get_location_by_pv_system_id
+from pv_prospect.common import get_location_by_pv_system_id
+from pv_prospect.common.domain import Location, PVSite
 from pv_prospect.data_extraction import TimeSeriesDataExtractor
 from pv_prospect.data_extraction.extractors import (
     OpenMeteoWeatherDataExtractor,
@@ -14,7 +15,7 @@ from pv_prospect.data_extraction.extractors.openmeteo import (
     TimeResolution,
 )
 from pv_prospect.data_extraction.extractors.openmeteo import Mode as OMMode
-from pv_prospect.data_sources import SourceDescriptor
+from pv_prospect.data_sources import DataSource
 
 
 @lru_cache(maxsize=None)
@@ -23,34 +24,34 @@ def _location_getter(pv_site: PVSite) -> list[Location]:
 
 
 @lru_cache(maxsize=None)
-def get_extractor(source_descriptor: SourceDescriptor) -> TimeSeriesDataExtractor:
-    """Get an extractor instance for the given source descriptor.
+def get_extractor(data_source: DataSource) -> TimeSeriesDataExtractor:
+    """Get an extractor instance for the given data source.
 
     Results are cached to avoid recreating extractors for the same source.
 
     Args:
-        source_descriptor: The SourceDescriptor enum value
+        data_source: The DataSource enum value
 
     Returns:
         An extractor instance
     """
-    factory = _EXTRACTOR_FACTORIES[source_descriptor]
+    factory = _EXTRACTOR_FACTORIES[data_source]
     return factory()
 
 
 _MULTI_DATE_EXTRACTORS = {
-    SourceDescriptor.OPENMETEO_HISTORICAL,
-    SourceDescriptor.OPENMETEO_SATELLITE,
+    DataSource.OPENMETEO_HISTORICAL,
+    DataSource.OPENMETEO_SATELLITE,
 }
 
 
-def supports_multi_date(source_descriptor: SourceDescriptor) -> bool:
-    return source_descriptor in _MULTI_DATE_EXTRACTORS
+def supports_multi_date(data_source: DataSource) -> bool:
+    return data_source in _MULTI_DATE_EXTRACTORS
 
 
-_EXTRACTOR_FACTORIES: dict[SourceDescriptor, Callable[[], TimeSeriesDataExtractor]] = {
-    SourceDescriptor.PVOUTPUT: lambda: PVOutputExtractor.from_env(),
-    SourceDescriptor.OPENMETEO_QUARTERHOURLY: lambda: (
+_EXTRACTOR_FACTORIES: dict[DataSource, Callable[[], TimeSeriesDataExtractor]] = {
+    DataSource.PVOUTPUT: lambda: PVOutputExtractor.from_env(),
+    DataSource.OPENMETEO_QUARTERHOURLY: lambda: (
         OpenMeteoWeatherDataExtractor.from_components(
             location_getter=_location_getter,
             api_selector=APISelector.FORECAST,
@@ -59,16 +60,14 @@ _EXTRACTOR_FACTORIES: dict[SourceDescriptor, Callable[[], TimeSeriesDataExtracto
             models=Models.ALL_FORECAST,
         )
     ),
-    SourceDescriptor.OPENMETEO_HOURLY: lambda: (
-        OpenMeteoWeatherDataExtractor.from_components(
-            location_getter=_location_getter,
-            api_selector=APISelector.FORECAST,
-            time_resolution=TimeResolution.HOURLY,
-            fields=Fields.FORECAST,
-            models=Models.ALL_FORECAST,
-        )
+    DataSource.OPENMETEO_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_components(
+        location_getter=_location_getter,
+        api_selector=APISelector.FORECAST,
+        time_resolution=TimeResolution.HOURLY,
+        fields=Fields.FORECAST,
+        models=Models.ALL_FORECAST,
     ),
-    SourceDescriptor.OPENMETEO_SATELLITE: lambda: (
+    DataSource.OPENMETEO_SATELLITE: lambda: (
         OpenMeteoWeatherDataExtractor.from_components(
             location_getter=_location_getter,
             api_selector=APISelector.SATELLITE,
@@ -77,7 +76,7 @@ _EXTRACTOR_FACTORIES: dict[SourceDescriptor, Callable[[], TimeSeriesDataExtracto
             models=Models.ALL_SATELLITE,
         )
     ),
-    SourceDescriptor.OPENMETEO_HISTORICAL: lambda: (
+    DataSource.OPENMETEO_HISTORICAL: lambda: (
         OpenMeteoWeatherDataExtractor.from_components(
             location_getter=_location_getter,
             api_selector=APISelector.HISTORICAL,
@@ -86,14 +85,12 @@ _EXTRACTOR_FACTORIES: dict[SourceDescriptor, Callable[[], TimeSeriesDataExtracto
             models=Models.ALL_FORECAST,
         )
     ),
-    SourceDescriptor.OPENMETEO_V0_QUARTERHOURLY: lambda: (
+    DataSource.OPENMETEO_V0_QUARTERHOURLY: lambda: (
         OpenMeteoWeatherDataExtractor.from_mode(
             location_getter=_location_getter, mode=OMMode.QUARTERHOURLY
         )
     ),
-    SourceDescriptor.OPENMETEO_V0_HOURLY: lambda: (
-        OpenMeteoWeatherDataExtractor.from_mode(
-            location_getter=_location_getter, mode=OMMode.HOURLY
-        )
+    DataSource.OPENMETEO_V0_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_mode(
+        location_getter=_location_getter, mode=OMMode.HOURLY
     ),
 }

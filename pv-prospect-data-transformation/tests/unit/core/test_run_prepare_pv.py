@@ -1,55 +1,64 @@
 """Tests for run_prepare_pv."""
 
+from datetime import date
 from decimal import Decimal
-from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 import pytest
-from pv_prospect.common import Location, PanelGeometry, PVSite, Shading, System
-from pv_prospect.data_sources import SourceDescriptor
-from pv_prospect.data_sources.ts_descriptors import (
-    OpenMeteoTimeSeriesDescriptor,
-    PVOutputTimeSeriesDescriptor,
+from pv_prospect.common.domain import (
+    DateRange,
+    GridPoint,
+    Location,
+    PanelGeometry,
+    PVSite,
+    Shading,
+    System,
 )
+from pv_prospect.data_sources import DataSource
 from pv_prospect.data_transformation.core import run_prepare_pv
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem
 
 _SYSTEM_ID = 89665
 _DATE_STR = '20260621'
-_PV_DESCRIPTOR = SourceDescriptor.PVOUTPUT
-_WEATHER_DESCRIPTOR = SourceDescriptor.OPENMETEO_HISTORICAL
+_DATE_RANGE = DateRange(date(2026, 6, 21), date(2026, 6, 22))
+_PV_DESCRIPTOR = DataSource.PVOUTPUT
+_WEATHER_DESCRIPTOR = DataSource.OPENMETEO_HISTORICAL
 
 
-def _make_location() -> OpenMeteoTimeSeriesDescriptor:
-    return OpenMeteoTimeSeriesDescriptor(
-        location_id='504900_-35400',
-        latitude=Decimal('50.4900'),
-        longitude=Decimal('-3.5400'),
+def _make_grid_point() -> GridPoint:
+    return GridPoint.from_id('504900_-35400')
+
+
+def _build_path(descriptor: DataSource, entity_id: str, date_str: str) -> str:
+    source_str = str(descriptor)
+    time_series_id = f'{source_str.replace("/", "-")}_{entity_id}_{date_str}'
+    return f'timeseries/{source_str}/{entity_id}/{time_series_id}.csv'
+
+
+@pytest.fixture
+def pv_site() -> PVSite:
+    return PVSite(
+        pvo_sys_id=_SYSTEM_ID,
+        name='Test Site',
+        location=Location(latitude=Decimal('50.4900'), longitude=Decimal('-3.5400')),
+        shading=Shading.NONE,
+        panel_system=System(brand='Test', capacity=4000),
+        panel_geometries=(PanelGeometry(tilt=35, azimuth=180, area_fraction=1.0),),
+        inverter_system=System(brand='Test', capacity=3600),
     )
 
 
-def _build_path(descriptor: SourceDescriptor, ts_str: str, date_str: str) -> str:
-    source_str = str(descriptor)
-    filename = f'{source_str.replace("/", "-")}_{ts_str}_{date_str}.csv'
-    return f'timeseries/{source_str}/{ts_str}/{filename}'
-
-
 @pytest.fixture
-def pv_ts() -> PVOutputTimeSeriesDescriptor:
-    return PVOutputTimeSeriesDescriptor(_SYSTEM_ID)
-
-
-@pytest.fixture
-def location() -> OpenMeteoTimeSeriesDescriptor:
-    return _make_location()
+def grid_point() -> GridPoint:
+    return _make_grid_point()
 
 
 @pytest.fixture
 def cleaned_fs(
-    pv_ts: PVOutputTimeSeriesDescriptor,
-    location: OpenMeteoTimeSeriesDescriptor,
+    pv_site: PVSite,
+    grid_point: GridPoint,
 ) -> FakeFileSystem:
     times = pd.date_range('2026-06-21 00:00:00', periods=24, freq='h')
     rng = np.random.default_rng(42)
@@ -76,9 +85,9 @@ def cleaned_fs(
     fs = FakeFileSystem(
         binary_files={
             _build_path(
-                _WEATHER_DESCRIPTOR, str(location), _DATE_STR
+                _WEATHER_DESCRIPTOR, grid_point.id, _DATE_STR
             ): weather_df.to_csv(index=False).encode('utf-8'),
-            _build_path(_PV_DESCRIPTOR, str(pv_ts), _DATE_STR): pv_df.to_csv(
+            _build_path(_PV_DESCRIPTOR, pv_site.id, _DATE_STR): pv_df.to_csv(
                 index=False
             ).encode('utf-8'),
         }
@@ -91,41 +100,22 @@ def batches_fs() -> FakeFileSystem:
     return FakeFileSystem()
 
 
-@pytest.fixture
-def mock_pv_site() -> PVSite:
-    return PVSite(
-        pvo_sys_id=_SYSTEM_ID,
-        name='Test Site',
-        location=Location(latitude=Decimal('50.4900'), longitude=Decimal('-3.5400')),
-        shading=Shading.NONE,
-        panel_system=System(brand='Test', capacity=4000),
-        panel_geometries=[
-            PanelGeometry(tilt=35, azimuth=180, area_fraction=1.0),
-        ],
-        inverter_system=System(brand='Test', capacity=3600),
-    )
-
-
 def test_writes_batch_at_expected_path(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
-    pv_ts: PVOutputTimeSeriesDescriptor,
-    location: OpenMeteoTimeSeriesDescriptor,
-    mock_pv_site: PVSite,
+    pv_site: PVSite,
+    grid_point: GridPoint,
 ) -> None:
-    with patch(
-        'pv_prospect.data_transformation.core.get_pv_site_by_system_id',
-        return_value=mock_pv_site,
-    ):
-        run_prepare_pv(
-            cleaned_fs,
-            batches_fs,
-            _PV_DESCRIPTOR,
-            _WEATHER_DESCRIPTOR,
-            pv_ts,
-            location,
-            _DATE_STR,
-        )
+    run_prepare_pv(
+        cleaned_fs,
+        batches_fs,
+        _PV_DESCRIPTOR,
+        _WEATHER_DESCRIPTOR,
+        pv_site,
+        grid_point,
+        _DATE_RANGE,
+        lambda _: pv_site,
+    )
 
     expected_path = f'pv/{_SYSTEM_ID}_{_DATE_STR}.csv'
     assert batches_fs.exists(expected_path)
@@ -134,23 +124,19 @@ def test_writes_batch_at_expected_path(
 def test_batch_has_no_header(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
-    pv_ts: PVOutputTimeSeriesDescriptor,
-    location: OpenMeteoTimeSeriesDescriptor,
-    mock_pv_site: PVSite,
+    pv_site: PVSite,
+    grid_point: GridPoint,
 ) -> None:
-    with patch(
-        'pv_prospect.data_transformation.core.get_pv_site_by_system_id',
-        return_value=mock_pv_site,
-    ):
-        run_prepare_pv(
-            cleaned_fs,
-            batches_fs,
-            _PV_DESCRIPTOR,
-            _WEATHER_DESCRIPTOR,
-            pv_ts,
-            location,
-            _DATE_STR,
-        )
+    run_prepare_pv(
+        cleaned_fs,
+        batches_fs,
+        _PV_DESCRIPTOR,
+        _WEATHER_DESCRIPTOR,
+        pv_site,
+        grid_point,
+        _DATE_RANGE,
+        lambda _: pv_site,
+    )
 
     content = batches_fs.read_text(f'pv/{_SYSTEM_ID}_{_DATE_STR}.csv')
     lines = content.strip().split('\n')
@@ -161,23 +147,19 @@ def test_batch_has_no_header(
 
 def test_skips_when_cleaned_pv_missing(
     batches_fs: FakeFileSystem,
-    pv_ts: PVOutputTimeSeriesDescriptor,
-    location: OpenMeteoTimeSeriesDescriptor,
-    mock_pv_site: PVSite,
+    pv_site: PVSite,
+    grid_point: GridPoint,
 ) -> None:
     empty_cleaned_fs = FakeFileSystem()
-    with patch(
-        'pv_prospect.data_transformation.core.get_pv_site_by_system_id',
-        return_value=mock_pv_site,
-    ):
-        run_prepare_pv(
-            empty_cleaned_fs,
-            batches_fs,
-            _PV_DESCRIPTOR,
-            _WEATHER_DESCRIPTOR,
-            pv_ts,
-            location,
-            _DATE_STR,
-        )
+    run_prepare_pv(
+        empty_cleaned_fs,
+        batches_fs,
+        _PV_DESCRIPTOR,
+        _WEATHER_DESCRIPTOR,
+        pv_site,
+        grid_point,
+        _DATE_RANGE,
+        lambda _: pv_site,
+    )
 
     assert not batches_fs._files

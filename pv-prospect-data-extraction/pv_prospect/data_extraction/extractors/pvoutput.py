@@ -4,12 +4,9 @@ from typing import Collection, Optional
 
 import requests  # type: ignore[import-untyped]
 
-from pv_prospect.common import PVSite, VarMapping, map_from_env
-from pv_prospect.data_extraction import (
-    PVOutputTimeSeriesDescriptor,
-    TimeSeries,
-    TimeSeriesDescriptor,
-)
+from pv_prospect.common import VarMapping, map_from_env
+from pv_prospect.common.domain import PVSite
+from pv_prospect.data_extraction import TimeSeries
 from pv_prospect.data_extraction.util import retry_on_429
 
 URL = 'https://pvoutput.org/service/r2/getstatus.jsp'
@@ -128,36 +125,24 @@ class PVOutputExtractor:
         )
         return extractor
 
-    def get_time_series_descriptors(
-        self, pv_site: PVSite
-    ) -> list[TimeSeriesDescriptor]:
-        return [PVOutputTimeSeriesDescriptor(pv_site.pvo_sys_id)]
-
     @retry_on_429
     def extract(
         self,
-        time_series_descriptors: Collection[PVOutputTimeSeriesDescriptor],
+        entities: Collection[PVSite],
         date_: date,
         end_date: Optional[date] = None,
     ) -> list[TimeSeries]:
         """
-        Extract PV output status data for a single date from the PVOutput API for the given site.
+        Extract PV output status data for a single date from the PVOutput API.
 
         Args:
-            pv_site: PVSite object containing the target system id and site metadata.
-            time_series_descriptors:
-            end_date: Optional end date (ignored by this extractor since PVOutput only supports single-date queries).
+            entities: PVSite entities identifying the target systems.
+            date_: The date to extract data for.
+            end_date: Optional end date (ignored — PVOutput only supports single-date queries).
 
         Returns:
             list[TimeSeries]
-
-        Raises:
-            ValueError: If pv_site is missing or does not contain a valid system id.
-            requests.HTTPError: If the HTTP request to the PVOutput API fails.
         """
-
-        # PVOutput API only supports single-date queries, so ignore end_date
-        # If multi-date support is needed in the future, multiple API calls would be required
 
         headers = {
             API_KEY_HEADER_NAME: self.api_key,
@@ -165,11 +150,11 @@ class PVOutputExtractor:
             'X-Rate-Limit': '1',  # Request rate limit information in response headers
         }
 
-        ts_descriptor = next(iter(time_series_descriptors))
+        pv_site = next(iter(entities))
 
         params = {
-            'sid1': str(ts_descriptor),  # Target system ID from PVSite
-            'd': date_.strftime('%Y%m%d'),  # Date in YYYYMMDD format
+            'sid1': pv_site.id,
+            'd': date_.strftime('%Y%m%d'),
             **CONSTANT_QUERY_PARAMS,
         }
 
@@ -192,7 +177,7 @@ class PVOutputExtractor:
         entries = _to_clean_entries(response.text)
         data = [HEADER] + entries
 
-        return [TimeSeries(descriptor=ts_descriptor, rows=data)]
+        return [TimeSeries(entity=pv_site, rows=data)]
 
 
 def _to_clean_entries(text: str) -> list[list[str]]:

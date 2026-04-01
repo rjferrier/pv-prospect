@@ -3,12 +3,15 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 from typing import Any
 
 from pv_prospect.common import (
-    Period,
     build_pv_site_repo,
     get_all_pv_system_ids,
     get_config,
+    get_pv_site_by_system_id,
 )
-from pv_prospect.data_extraction import SourceDescriptor, supports_multi_date
+from pv_prospect.common.domain import (
+    Period,
+)
+from pv_prospect.data_extraction import DataSource, supports_multi_date
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing.task_queuer import TaskQueuer
 from pv_prospect.data_extraction.processing.tasks import PV_SITES_CSV_FILE
@@ -19,14 +22,14 @@ from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import get_filesystem
 from pv_prospect.etl.storage.backends import LocalStorageConfig
 
-SOURCE_DESCRIPTORS = {
-    'pv': SourceDescriptor.PVOUTPUT,
-    'weather-om-15': SourceDescriptor.OPENMETEO_QUARTERHOURLY,
-    'weather-om-60': SourceDescriptor.OPENMETEO_HOURLY,
-    'weather-om-satellite': SourceDescriptor.OPENMETEO_SATELLITE,
-    'weather-om-historical': SourceDescriptor.OPENMETEO_HISTORICAL,
-    'weather-om-15-v0': SourceDescriptor.OPENMETEO_V0_QUARTERHOURLY,
-    'weather-om-60-v0': SourceDescriptor.OPENMETEO_V0_HOURLY,
+DATA_SOURCES = {
+    'pv': DataSource.PVOUTPUT,
+    'weather-om-15': DataSource.OPENMETEO_QUARTERHOURLY,
+    'weather-om-60': DataSource.OPENMETEO_HOURLY,
+    'weather-om-satellite': DataSource.OPENMETEO_SATELLITE,
+    'weather-om-historical': DataSource.OPENMETEO_HISTORICAL,
+    'weather-om-15-v0': DataSource.OPENMETEO_V0_QUARTERHOURLY,
+    'weather-om-60-v0': DataSource.OPENMETEO_V0_HOURLY,
 }
 
 
@@ -39,7 +42,7 @@ def _parse_args() -> 'Any':
     parser.add_argument(
         'source',
         help='data source (comma-separated from: {} )'.format(
-            ', '.join(SOURCE_DESCRIPTORS.keys())
+            ', '.join(DATA_SOURCES.keys())
         ),
     )
     parser.add_argument(
@@ -109,15 +112,15 @@ def _main(config: DataExtractionConfig, args: 'Any') -> None:
     # Parse comma-separated sources
     sources = [s.strip() for s in args.source.split(',')]
     # Validate sources
-    source_descriptor_keys = SOURCE_DESCRIPTORS.keys()
-    invalid = [s for s in sources if s not in source_descriptor_keys]
+    data_source_keys = DATA_SOURCES.keys()
+    invalid = [s for s in sources if s not in data_source_keys]
     if invalid:
         raise ValueError(
-            f'Invalid source(s): {", ".join(invalid)}. Valid options: {", ".join(source_descriptor_keys)}'
+            f'Invalid source(s): {", ".join(invalid)}. Valid options: {", ".join(data_source_keys)}'
         )
 
-    source_descriptors = [SOURCE_DESCRIPTORS[source] for source in sources]
-    task_queuer.preprocess(source_descriptors, args.local_dir).wait_for_completion()
+    data_sources = [DATA_SOURCES[source] for source in sources]
+    task_queuer.preprocess(data_sources, args.local_dir).wait_for_completion()
 
     pv_system_ids = (
         _parse_pv_system_ids(args.system_ids)
@@ -147,11 +150,11 @@ def _main(config: DataExtractionConfig, args: 'Any') -> None:
         print(f'Processing {date_range}')
 
         for source in sources:
-            source_descriptor = SOURCE_DESCRIPTORS[source]
-            print(f'  Processing {source_descriptor}')
+            data_source = DATA_SOURCES[source]
+            print(f'  Processing {data_source}')
 
             # Determine which date ranges to use for this source
-            if args.by_week and not supports_multi_date(source_descriptor):
+            if args.by_week and not supports_multi_date(data_source):
                 # Extractor doesn't support multi-date, decompose week into single days
                 daily_ranges = date_range.split_by(Period.DAY)
                 print(f'  Decomposing week into {len(daily_ranges)} days')
@@ -164,13 +167,14 @@ def _main(config: DataExtractionConfig, args: 'Any') -> None:
 
             for dr in date_ranges_to_process:
                 for pv_system_id in pv_system_ids:
+                    pv_site = get_pv_site_by_system_id(pv_system_id)
                     print(
-                        f'    Adding {source_descriptor} for System {pv_system_id}, {dr}'
+                        f'    Adding {data_source} for {pv_site.name} ({pv_system_id}), {dr}'
                     )
 
                     task_queuer.extract_and_load(
-                        source_descriptor,
-                        pv_system_id,
+                        data_source,
+                        pv_site,
                         dr,
                         args.local_dir,
                         args.overwrite,

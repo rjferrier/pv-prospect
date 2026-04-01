@@ -5,7 +5,7 @@ from decimal import Decimal
 import numpy as np
 import pandas as pd
 import pytest
-from pv_prospect.common import Location, PanelGeometry, PVSite, Shading, System
+from pv_prospect.common.domain import Location, PanelGeometry, PVSite, Shading, System
 from pv_prospect.data_transformation.transformations import prepare_pv
 
 

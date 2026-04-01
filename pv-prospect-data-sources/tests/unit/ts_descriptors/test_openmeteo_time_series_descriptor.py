@@ -3,7 +3,7 @@ from decimal import Decimal
 from pv_prospect.data_sources import OpenMeteoTimeSeriesDescriptor
 
 
-def test_str_returns_location_id():
+def test_str_returns_filename_friendly_coords():
     descriptor = OpenMeteoTimeSeriesDescriptor.from_str('504900_-35400')
 
     assert str(descriptor) == '504900_-35400'
@@ -36,8 +36,8 @@ def test_from_coordinates_rounds_to_four_decimals():
 def test_from_str_restores_coordinates():
     descriptor = OpenMeteoTimeSeriesDescriptor.from_str('504900_-35400')
 
-    assert descriptor.latitude == Decimal('50.49')
-    assert descriptor.longitude == Decimal('-3.54')
+    assert descriptor.location.latitude == Decimal('50.49')
+    assert descriptor.location.longitude == Decimal('-3.54')
 
 
 def test_from_str_roundtrips_with_from_coordinates():

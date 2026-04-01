@@ -8,14 +8,6 @@ from pv_prospect.common.domain import Location, PanelGeometry, PVSite, Shading, 
 from pv_prospect.etl.storage import FileEntry
 
 
-class FakeTimeSeriesDescriptor:
-    def __init__(self, name: str) -> None:
-        self._name = name
-
-    def __str__(self) -> str:
-        return self._name
-
-
 def make_pv_site(pvo_sys_id: int = 42248) -> PVSite:
     return PVSite(
         pvo_sys_id=pvo_sys_id,

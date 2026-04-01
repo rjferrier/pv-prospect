@@ -16,7 +16,11 @@ class DateRange:
     end: date
 
     def __str__(self) -> str:
-        return self.start.strftime('%Y-%m-%d') + ' to ' + self.end.strftime('%Y-%m-%d')
+        return (
+            f'{self.__class__.__name__}('
+            f'{self.start.strftime("%Y-%m-%d")}, '
+            f'{self.end.strftime("%Y-%m-%d")})'
+        )
 
     @classmethod
     def of_single_day(cls, date_: date) -> 'DateRange':

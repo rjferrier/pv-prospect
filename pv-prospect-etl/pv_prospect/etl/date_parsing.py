@@ -1,11 +1,11 @@
-"""Date string parsing and DateRange construction.
+"""Date string parsing, DateRange construction, and env-var helpers.
 
 Shared by CLI runners and Cloud Run entrypoints across sub-projects.
 """
 
 from datetime import date, timedelta
 
-from pv_prospect.common import DateRange
+from pv_prospect.common.domain import DateRange
 
 _MONTH_FORMAT_LEN = 7  # 'YYYY-MM'
 

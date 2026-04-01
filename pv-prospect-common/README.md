@@ -20,6 +20,6 @@ pv-prospect-common = { path = "../pv-prospect-common", develop = true }
 ## Usage
 
 ```python
-from pv_prospect.common import PVSite, Location, DateRange, Period
-from pv_prospect.common.pv_site_repo import build_pv_site_repo, get_pv_site_by_system_id
+from pv_prospect.common import build_pv_site_repo, get_pv_site_by_system_id
+from pv_prospect.common.domain import PVSite, Location, DateRange, Period
 ```

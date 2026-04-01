@@ -7,7 +7,7 @@ from pv_prospect.common.domain import DateRange, Period
 
 def test_str_formats_as_date_range():
     dr = DateRange(date(2025, 1, 1), date(2025, 1, 8))
-    assert str(dr) == '2025-01-01 to 2025-01-08'
+    assert str(dr) == 'DateRange(2025-01-01, 2025-01-08)'
 
 
 def test_of_single_day_creates_range_with_next_day_as_end():

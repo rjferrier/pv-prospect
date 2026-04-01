@@ -46,7 +46,7 @@ def test_panel_geometry_v_norm_zero_tilt_points_straight_up():
     assert isclose(cz, -1.0)
 
 
-def test_pv_site_str_includes_name_and_id():
+def test_pv_site_str_includes_id():
     site = PVSite(
         pvo_sys_id=89665,
         name='Test Site',
@@ -56,4 +56,4 @@ def test_pv_site_str_includes_name_and_id():
         panel_geometries=[PanelGeometry(azimuth=180, tilt=30, area_fraction=1.0)],
         inverter_system=System(brand='Fronius', capacity=3600),
     )
-    assert str(site) == 'Test Site (system_id=89665)'
+    assert str(site) == 'PVSite(id=89665)'

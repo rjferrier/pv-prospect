@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pvlib
 
-from pv_prospect.common import PVSite
+from pv_prospect.common.domain import PVSite
 from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
 
 ALTITUDE = 0

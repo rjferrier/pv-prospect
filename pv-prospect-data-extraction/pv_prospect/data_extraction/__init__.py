@@ -1,8 +1,5 @@
 from pv_prospect.data_sources import (
-    OpenMeteoTimeSeriesDescriptor,
-    PVOutputTimeSeriesDescriptor,
-    SourceDescriptor,
-    TimeSeriesDescriptor,
+    DataSource,
 )
 
 from .base import (
@@ -15,12 +12,9 @@ from .factory import (
 )
 
 __all__ = [
-    'TimeSeriesDescriptor',
-    'OpenMeteoTimeSeriesDescriptor',
-    'PVOutputTimeSeriesDescriptor',
     'TimeSeriesDataExtractor',
     'TimeSeries',
-    'SourceDescriptor',
+    'DataSource',
     'get_extractor',
     'supports_multi_date',
 ]

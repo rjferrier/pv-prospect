@@ -5,13 +5,15 @@ development setup.  The Cloud Run path bypasses this module entirely.
 """
 
 from pv_prospect.common import (
-    DateRange,
     build_location_mapping_repo,
     build_pv_site_repo,
     get_config,
-    get_pv_site_by_system_id,
 )
-from pv_prospect.data_extraction import SourceDescriptor, get_extractor
+from pv_prospect.common.domain import (
+    AnyEntity,
+    DateRange,
+)
+from pv_prospect.data_extraction import DataSource, get_extractor
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.value_objects import Result
@@ -49,17 +51,17 @@ def _resolve_storage(local_dir: str | None) -> tuple[DataExtractionConfig, FileS
 
 @app.task
 def preprocess(
-    source_descriptor: SourceDescriptor,
+    data_source: DataSource,
     local_dir: str | None,
 ) -> list[str | None]:
     _config, staging_fs = _resolve_storage(local_dir)
-    return core.preprocess(staging_fs, source_descriptor)
+    return core.preprocess(staging_fs, data_source)
 
 
 @app.task
 def extract_and_load(
-    source_descriptor: SourceDescriptor,
-    pv_system_id: int,
+    data_source: DataSource,
+    entity: AnyEntity,
     date_range: DateRange,
     local_dir: str | None,
     overwrite: bool,
@@ -75,11 +77,10 @@ def extract_and_load(
     )
 
     return core.extract_and_load(
-        get_pv_site_by_system_id,
         get_extractor,
-        source_descriptor,
+        data_source,
         staging_fs,
-        pv_system_id,
+        entity,
         date_range,
         overwrite,
         dry_run,

@@ -1,23 +1,23 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from pv_prospect.common import DateRange
-from pv_prospect.data_extraction import SourceDescriptor
+from pv_prospect.common.domain import DateRange, Entity
+from pv_prospect.data_extraction import DataSource
 
 
 @dataclass(frozen=True)
 class Task:
-    """Represents a data extraction task for a specific site, source, and date range."""
+    """Represents a data extraction task for a specific locatable, source, and date range."""
 
-    source_descriptor: SourceDescriptor
-    pv_system_id: int
+    data_source: DataSource
+    entity: Entity
     date_range: DateRange
 
     def __str__(self) -> str:
         return (
             'Task('
-            f'source_descriptor={self.source_descriptor}, '
-            f'pv_system_id={self.pv_system_id}, '
+            f'data_source={self.data_source}, '
+            f'entity={self.entity}, '
             f'date_range={self.date_range}'
             ')'
         )

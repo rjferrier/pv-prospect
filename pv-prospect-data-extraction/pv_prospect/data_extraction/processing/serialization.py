@@ -1,11 +1,12 @@
 """Custom JSON serialization for Celery tasks."""
 
 from datetime import date
+from decimal import Decimal
 
 from kombu.utils.json import register_type
 
-from pv_prospect.common import DateRange
-from pv_prospect.data_extraction import SourceDescriptor
+from pv_prospect.common.domain import AnyEntity, DateRange, GridPoint, Location, PVSite
+from pv_prospect.data_extraction import DataSource
 from pv_prospect.data_extraction.processing.value_objects import (
     FailureDetails,
     Result,
@@ -40,14 +41,14 @@ def _decode_date_range(obj: dict[str, str]) -> DateRange:
     return DateRange(start, end)
 
 
-def _encode_source_descriptor(obj: SourceDescriptor) -> dict[str, str]:
-    """Encode a SourceDescriptor enum to its value."""
-    return {'__type__': 'SourceDescriptor', 'value': obj.value}
+def _encode_data_source(obj: DataSource) -> dict[str, str]:
+    """Encode a DataSource enum to its value."""
+    return {'__type__': 'DataSource', 'value': obj.value}
 
 
-def _decode_source_descriptor(obj: dict[str, str]) -> SourceDescriptor:
-    """Decode a SourceDescriptor enum from its value."""
-    return SourceDescriptor(obj['value'])
+def _decode_data_source(obj: dict[str, str]) -> DataSource:
+    """Decode a DataSource enum from its value."""
+    return DataSource(obj['value'])
 
 
 def _encode_result_type(obj: ResultType) -> dict[str, str]:
@@ -60,14 +61,43 @@ def _decode_result_type(obj: dict[str, str]) -> ResultType:
     return ResultType(obj['value'])
 
 
+def _encode_target(entity: AnyEntity) -> dict:
+    """Encode a PVSite or GridPoint to a dict."""
+    if isinstance(entity, PVSite):
+        return {
+            '__target_type__': 'pv_site',
+            'pvo_sys_id': entity.pvo_sys_id,
+        }
+    return {
+        '__target_type__': 'grid_point',
+        'latitude': str(entity.location.latitude),
+        'longitude': str(entity.location.longitude),
+    }
+
+
+def _decode_target(obj: dict) -> AnyEntity:
+    """Decode a PVSite or GridPoint from a dict."""
+    if obj['__target_type__'] in ('grid_point', 'location'):
+        return GridPoint(
+            Location(
+                latitude=Decimal(obj['latitude']),
+                longitude=Decimal(obj['longitude']),
+            )
+        )
+    # PVSite: reconstruct from in-memory repo
+    from pv_prospect.common import get_pv_site_by_system_id
+
+    return get_pv_site_by_system_id(obj['pvo_sys_id'])
+
+
 def _encode_task(obj: Task) -> dict:
     """Encode a Task to a dict."""
     return {
         '__type__': 'Task',
-        'source_descriptor': obj.source_descriptor.value
-        if hasattr(obj.source_descriptor, 'value')
-        else obj.source_descriptor,
-        'pv_system_id': obj.pv_system_id,
+        'data_source': obj.data_source.value
+        if hasattr(obj.data_source, 'value')
+        else obj.data_source,
+        'target': _encode_target(obj.entity),
         'date_range': {
             'start': obj.date_range.start.isoformat(),
             'end': obj.date_range.end.isoformat(),
@@ -77,20 +107,19 @@ def _encode_task(obj: Task) -> dict:
 
 def _decode_task(obj: dict) -> Task:
     """Decode a Task from a dict."""
-    source_desc = obj['source_descriptor']
-    # If it's already a SourceDescriptor, use it; otherwise, convert from string
-    if isinstance(source_desc, SourceDescriptor):
-        source_descriptor = source_desc
+    source_desc = obj['data_source']
+    if isinstance(source_desc, DataSource):
+        data_source = source_desc
     else:
-        source_descriptor = SourceDescriptor(source_desc)
+        data_source = DataSource(source_desc)
 
     date_range = DateRange(
         date.fromisoformat(obj['date_range']['start']),
         date.fromisoformat(obj['date_range']['end']),
     )
     return Task(
-        source_descriptor=source_descriptor,
-        pv_system_id=obj['pv_system_id'],
+        data_source=data_source,
+        entity=_decode_target(obj['target']),
         date_range=date_range,
     )
 
@@ -111,18 +140,17 @@ def _decode_failure_details(obj: dict[str, str]) -> FailureDetails:
 
 def _encode_result(obj: Result) -> dict:
     """Encode a Result to a dict."""
-    # Handle source_descriptor whether it's already a string or an enum
     source_desc_value = (
-        obj.task.source_descriptor.value
-        if hasattr(obj.task.source_descriptor, 'value')
-        else obj.task.source_descriptor
+        obj.task.data_source.value
+        if hasattr(obj.task.data_source, 'value')
+        else obj.task.data_source
     )
 
     return {
         '__type__': 'Result',
         'task': {
-            'source_descriptor': source_desc_value,
-            'pv_system_id': obj.task.pv_system_id,
+            'data_source': source_desc_value,
+            'target': _encode_target(obj.task.entity),
             'date_range': {
                 'start': obj.task.date_range.start.isoformat(),
                 'end': obj.task.date_range.end.isoformat(),
@@ -138,8 +166,8 @@ def _encode_result(obj: Result) -> dict:
 def _decode_result(obj: dict) -> Result:
     """Decode a Result from a dict."""
     task = Task(
-        source_descriptor=SourceDescriptor(obj['task']['source_descriptor']),
-        pv_system_id=obj['task']['pv_system_id'],
+        data_source=DataSource(obj['task']['data_source']),
+        entity=_decode_target(obj['task']['target']),
         date_range=DateRange(
             date.fromisoformat(obj['task']['date_range']['start']),
             date.fromisoformat(obj['task']['date_range']['end']),
@@ -173,12 +201,12 @@ def register_custom_types() -> None:
         _decode_date_range,
     )
 
-    # Register SourceDescriptor
+    # Register DataSource
     register_type(
-        SourceDescriptor,
-        'SourceDescriptor',
-        _encode_source_descriptor,
-        _decode_source_descriptor,
+        DataSource,
+        'DataSource',
+        _encode_data_source,
+        _decode_data_source,
     )
 
     # Register ResultType

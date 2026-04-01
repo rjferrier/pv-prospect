@@ -17,23 +17,28 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from pv_prospect.common import (
-    DateRange,
-    Period,
     build_location_mapping_repo,
     build_pv_site_repo,
     get_all_pv_system_ids,
     get_config,
     get_pv_site_by_system_id,
 )
+from pv_prospect.common.domain import (
+    AnyEntity,
+    DateRange,
+    GridPoint,
+    Period,
+    PVSite,
+)
 from pv_prospect.data_extraction import (
-    SourceDescriptor,
+    DataSource,
     get_extractor,
     supports_multi_date,
 )
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import ProcessingStats, Result, core
 from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
-from pv_prospect.data_sources import DataSource
+from pv_prospect.data_sources import DataSourceType
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
@@ -55,7 +60,9 @@ def _parse_args() -> 'Any':
         nargs='?',
         default=None,
         help='data source (comma-separated from: {} ). '
-        'Defaults to all data sources.'.format(', '.join(s.value for s in DataSource)),
+        'Defaults to all data sources.'.format(
+            ', '.join(s.value for s in DataSourceType)
+        ),
     )
     parser.add_argument(
         'system_ids',
@@ -63,6 +70,13 @@ def _parse_args() -> 'Any':
         default=None,
         help='system ID or comma-separated list of system IDs (e.g. 123 or 123,456). '
         'If omitted, all systems will be processed.',
+    )
+    parser.add_argument(
+        '--location',
+        type=str,
+        default=None,
+        help='comma-separated lat_lon values (e.g. 504900_-35400). '
+        'Alternative to system_ids for weather sources.',
     )
     parser.add_argument(
         '-d',
@@ -113,6 +127,10 @@ def _parse_pv_system_ids(s: str) -> list[int]:
     return [int(x.strip()) for x in s.split(',') if x.strip()]
 
 
+def _parse_grid_points(s: str) -> list[GridPoint]:
+    return [GridPoint.from_id(x.strip()) for x in s.split(',') if x.strip()]
+
+
 def _init_repos(staging_fs: FileSystem) -> None:
     extractor = Extractor(staging_fs)
     build_pv_site_repo(extractor.read_file(core.PV_SITES_CSV_FILE))
@@ -137,10 +155,10 @@ def _main() -> None:
 
     # --- resolve sources ----------------------------------------------------
     if args.source:
-        sources = [DataSource(s.strip()) for s in args.source.split(',')]
-        source_descriptors = [config.data_sources.get_descriptor(s) for s in sources]
+        sources = [DataSourceType(s.strip()) for s in args.source.split(',')]
+        data_sources = [config.data_sources.get_data_source(s) for s in sources]
     else:
-        source_descriptors = [config.data_sources.get_descriptor(s) for s in DataSource]
+        data_sources = [config.data_sources.get_data_source(s) for s in DataSourceType]
 
     # --- resolve storage backends -------------------------------------------
     staging_location_config = (
@@ -152,19 +170,32 @@ def _main() -> None:
     resources_fs = get_filesystem(config.resources_storage)
 
     # --- preprocess (sequential, one per source) ----------------------------
-    for sd in source_descriptors:
+    for sd in data_sources:
         core.preprocess(staging_fs, sd)
 
     # --- initialise in-memory repos ----------------------------------------
     _init_repos(resources_fs)
 
-    # --- resolve PV system IDs ----------------------------------------------
-    pv_system_ids = (
-        _parse_pv_system_ids(args.system_ids)
-        if args.system_ids
-        else get_all_pv_system_ids()
-    )
-    print(f'Processing {len(pv_system_ids)} PV site(s).\n')
+    # --- resolve targets ----------------------------------------------------
+    grid_points: list[GridPoint] = []
+    if args.location:
+        grid_points = _parse_grid_points(args.location)
+
+    pv_sites: list[PVSite] = []
+    if args.system_ids:
+        pv_system_ids = _parse_pv_system_ids(args.system_ids)
+    elif not grid_points:
+        pv_system_ids = get_all_pv_system_ids()
+    else:
+        pv_system_ids = []
+
+    pv_sites = [get_pv_site_by_system_id(sid) for sid in pv_system_ids]
+
+    if pv_sites:
+        print(f'Processing {len(pv_sites)} PV site(s).')
+    if grid_points:
+        print(f'Processing {len(grid_points)} weather location(s).')
+    print()
 
     # --- build work items ---------------------------------------------------
     try:
@@ -179,16 +210,17 @@ def _main() -> None:
     if args.reverse:
         sub_date_ranges.reverse()
 
-    work_items: list[tuple[SourceDescriptor, int, DateRange]] = []
+    all_entities: list[AnyEntity] = [*pv_sites, *grid_points]
+    work_items: list[tuple[DataSource, AnyEntity, DateRange]] = []
     for dr in sub_date_ranges:
-        for sd in source_descriptors:
+        for sd in data_sources:
             if args.by_week and not supports_multi_date(sd):
                 day_ranges = dr.split_by(Period.DAY)
             else:
                 day_ranges = [dr]
             for day_dr in day_ranges:
-                for pv_id in pv_system_ids:
-                    work_items.append((sd, pv_id, day_dr))
+                for ent in all_entities:
+                    work_items.append((sd, ent, day_dr))
 
     if not work_items:
         print('No tasks to process.')
@@ -203,24 +235,23 @@ def _main() -> None:
         futures = {
             pool.submit(
                 core.extract_and_load,
-                get_pv_site_by_system_id,
                 get_extractor,
                 sd,
                 staging_fs,
-                pv_id,
+                ent,
                 dr,
                 args.overwrite,
                 args.dry_run,
-            ): (sd, pv_id, dr)
-            for sd, pv_id, dr in work_items
+            ): (sd, ent, dr)
+            for sd, ent, dr in work_items
         }
         for future in as_completed(futures):
             try:
                 result: Result = future.result()
                 stats.record(result)
             except Exception as exc:
-                sd, pv_id, dr = futures[future]
-                print(f'    UNHANDLED ERROR for {sd}/{pv_id}/{dr}: {exc}')
+                sd, ent, dr = futures[future]
+                print(f'    UNHANDLED ERROR for {sd}/{ent}/{dr}: {exc}')
 
     stats.print_summary()
 

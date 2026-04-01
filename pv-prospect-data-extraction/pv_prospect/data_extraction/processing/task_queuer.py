@@ -4,8 +4,8 @@ from typing import Callable
 
 from celery.result import AsyncResult, ResultSet
 
-from pv_prospect.common import DateRange
-from pv_prospect.data_extraction import SourceDescriptor
+from pv_prospect.common.domain import AnyEntity, DateRange
+from pv_prospect.data_extraction import DataSource
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing.tasks import extract_and_load, preprocess
 
@@ -50,21 +50,21 @@ class TaskQueuer:
         )
 
     def preprocess(
-        self, source_descriptors: list[SourceDescriptor], local_dir: str | None
+        self, data_sources: list[DataSource], local_dir: str | None
     ) -> AsyncResultsWrapper:
-        print('Preprocessing for:', ', '.join(source_descriptors))
+        print('Preprocessing for:', ', '.join(data_sources))
         results_async = [
             preprocess.apply_async(
                 args=(sd, local_dir), countdown=self._calculate_delay(i)
             )
-            for i, sd in enumerate(source_descriptors)
+            for i, sd in enumerate(data_sources)
         ]
         return self._wrap_async_results(results_async, _preprocess_callback)
 
     def extract_and_load(
         self,
-        source_descriptor: SourceDescriptor,
-        pv_system_id: int,
+        data_source: DataSource,
+        entity: AnyEntity,
         date_range: DateRange,
         local_dir: str | None,
         overwrite: bool,
@@ -73,8 +73,8 @@ class TaskQueuer:
     ) -> None:
         extract_and_load.apply_async(
             args=(
-                source_descriptor,
-                pv_system_id,
+                data_source,
+                entity,
                 date_range,
                 local_dir,
                 overwrite,

@@ -1,5 +1,5 @@
 import pytest
-from pv_prospect.data_sources import DataSource, SourceDescriptor
+from pv_prospect.data_sources import DataSource, DataSourceType
 from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.etl.storage.backends import GcsStorageConfig, LocalStorageConfig
 
@@ -113,10 +113,8 @@ def test_from_dict_parses_data_sources():
 
     config = DataTransformationConfig.from_dict(data)
 
+    assert config.data_sources.get_data_source(DataSourceType.PV) is DataSource.PVOUTPUT
     assert (
-        config.data_sources.get_descriptor(DataSource.PV) is SourceDescriptor.PVOUTPUT
-    )
-    assert (
-        config.data_sources.get_descriptor(DataSource.WEATHER)
-        is SourceDescriptor.OPENMETEO_HISTORICAL
+        config.data_sources.get_data_source(DataSourceType.WEATHER)
+        is DataSource.OPENMETEO_HISTORICAL
     )

@@ -7,12 +7,8 @@ from typing import Any, Callable, Collection, Optional
 import requests  # type: ignore[import-untyped]
 from typing_extensions import deprecated
 
-from pv_prospect.common import Location, PVSite
-from pv_prospect.data_extraction import (
-    OpenMeteoTimeSeriesDescriptor,
-    TimeSeries,
-    TimeSeriesDescriptor,
-)
+from pv_prospect.common.domain import GridPoint, Location, PVSite
+from pv_prospect.data_extraction import TimeSeries
 from pv_prospect.data_extraction.util import retry_on_429
 
 MIN_TIME = time(4, 0)
@@ -272,29 +268,21 @@ class OpenMeteoWeatherDataExtractor:
             ),
         )
 
-    def get_time_series_descriptors(
-        self, pv_site: PVSite
-    ) -> list[TimeSeriesDescriptor]:
-        return [
-            OpenMeteoTimeSeriesDescriptor.from_coordinates(loc.latitude, loc.longitude)
-            for loc in self.location_getter(pv_site)
-        ]
-
     @retry_on_429
     def extract(
         self,
-        time_series_descriptors: Collection[OpenMeteoTimeSeriesDescriptor],
+        entities: Collection[GridPoint],
         date_: date,
         end_date: Optional[date] = None,
     ) -> list[TimeSeries]:
-        ts_descriptors = list(time_series_descriptors)
+        grid_points = list(entities)
 
         start_datetime = datetime.combine(date_, MIN_TIME)
 
         # For multi-date extraction, use end_date if provided; otherwise use same day
         end_datetime = datetime.combine(end_date if end_date else date_, MAX_TIME)
 
-        locations = [Location(tsd.latitude, tsd.longitude) for tsd in ts_descriptors]
+        locations = [gp.location for gp in grid_points]
 
         url = self.api_helper.get_url()
         params = self.api_helper.get_query_params(
@@ -306,22 +294,20 @@ class OpenMeteoWeatherDataExtractor:
         # Parse JSON response and convert to CSV rows
         json_data = json.loads(response.text)
 
-        if len(ts_descriptors) == 1:
-            # json will be an object
+        if len(grid_points) == 1:
             return [
                 TimeSeries(
-                    descriptor=ts_descriptors[0],
+                    entity=grid_points[0],
                     rows=self._process_time_series_data(json_data),
                 )
             ]
         else:
-            # json will be an array of objects
             return [
                 TimeSeries(
-                    descriptor=ts_descriptor,
+                    entity=grid_point,
                     rows=self._process_time_series_data(json_data[i]),
                 )
-                for i, ts_descriptor in enumerate(ts_descriptors)
+                for i, grid_point in enumerate(grid_points)
             ]
 
     def _process_time_series_data(self, json_data: dict[str, Any]) -> list[list[str]]:

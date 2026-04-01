@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 import pytest
-from pv_prospect.common import DateRange
+from pv_prospect.common.domain import DateRange
 from pv_prospect.etl import DegenerateDateRange, build_date_range
 
 

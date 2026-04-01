@@ -9,29 +9,22 @@ from pv_prospect.common.domain import (
     Shading,
     System,
 )
-from pv_prospect.data_sources import (
-    DataSource,
-    build_time_series_csv_file_path,
-)
+from pv_prospect.data_sources import DataSource, identify_time_series
 
 
-def test_builds_path_for_openmeteo_source():
+def test_identify_openmeteo_time_series():
     grid_point = GridPoint.from_id('526604_07808')
 
-    result = build_time_series_csv_file_path(
-        'timeseries',
+    result = identify_time_series(
         DataSource.OPENMETEO_QUARTERHOURLY,
         grid_point,
         date(2025, 6, 24),
     )
 
-    assert result == (
-        'timeseries/openmeteo/quarterhourly/526604_07808/'
-        'openmeteo-quarterhourly_526604_07808_20250624.csv'
-    )
+    assert result == 'openmeteo-quarterhourly_526604_07808_20250624'
 
 
-def test_builds_path_for_pvoutput_source():
+def test_identify_pvoutput_time_series():
     pv_site = PVSite(
         pvo_sys_id=89665,
         name='Test',
@@ -42,11 +35,10 @@ def test_builds_path_for_pvoutput_source():
         inverter_system=System(brand='Test', capacity=3600),
     )
 
-    result = build_time_series_csv_file_path(
-        'timeseries',
+    result = identify_time_series(
         DataSource.PVOUTPUT,
         pv_site,
         date(2025, 6, 1),
     )
 
-    assert result == ('timeseries/pvoutput/89665/pvoutput_89665_20250601.csv')
+    assert result == 'pvoutput_89665_20250601'
