@@ -75,16 +75,17 @@ class GridControl:
 
 NOMINAL_CELL_WIDTH = 4
 GRID_CONTROLS = (
-    GridControl(box=Box(lat_min=50, lon_min=-4, lat_max=51, lon_max=2), relative_size=1.0),
-    GridControl(box=Box(lat_min=50, lon_min=-3, lat_max=58, lon_max=2), relative_size=1.0),
-    GridControl(box=Box(lat_min=50, lon_min=-6, lat_max=56, lon_max=2), relative_size=2.0),
+    GridControl(
+        box=Box(lat_min=50, lon_min=-10, lat_max=54.5, lon_max=2),
+        relative_size=1.0
+    ),
 )
 MIN_RELATIVE_SIZE = 0.5
-MAX_RELATIVE_SIZE = 3.00
+MAX_RELATIVE_SIZE = 2.0
 
 MAX_MERGED_CELLS = 9
 
-DETAIL_BOX = Box(lat_min=50.6, lon_min=0, lat_max=51.6, lon_max=1.8)
+DETAIL_BOX = Box(lat_min=49.8, lon_min=-6, lat_max=50.5, lon_max=-4.5)
 SAMPLE_DETAIL_RANGE = range(0, 3)
 DETAIL_DPI = 150
 
