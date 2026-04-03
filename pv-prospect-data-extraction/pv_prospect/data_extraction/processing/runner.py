@@ -7,6 +7,7 @@ Usage::
 
     python -m pv_prospect.data_extraction.processing.runner \\
         pv,weather-om-15 \\
+        --locations 50.49,-3.54 \\
         --start-date 2025-06-01 --end-date 2025-06-30 \\
         --local-dir ./out --workers 4
 """
@@ -28,6 +29,7 @@ from pv_prospect.common.domain import (
     AnyEntity,
     DateRange,
     GridPoint,
+    Location,
     Period,
 )
 from pv_prospect.data_extraction import (
@@ -72,11 +74,10 @@ def _parse_args() -> 'Any':
         help="PV system ID or comma-separated list (e.g. 123 or 123,456), or 'all'.",
     )
     parser.add_argument(
-        '-g',
-        '--grid-point-ids',
+        '--locations',
         type=str,
         default=None,
-        help='comma-separated lat_lon values (e.g. 504900_-35400). '
+        help='comma-separated lat,lon pairs (e.g. 50.49,-3.54 or 50.49,-3.54,51.50,-0.12). '
         'For weather sources, combined with any grid points derived from --pv-systems.',
     )
     parser.add_argument(
@@ -130,8 +131,16 @@ def _parse_pv_system_ids(s: str) -> list[int]:
     return [int(x.strip()) for x in s.split(',') if x.strip()]
 
 
-def _parse_grid_points(s: str) -> list[GridPoint]:
-    return [GridPoint.from_id(x.strip()) for x in s.split(',') if x.strip()]
+def _parse_locations(s: str) -> list[GridPoint]:
+    parts = [x.strip() for x in s.split(',') if x.strip()]
+    if len(parts) % 2 != 0:
+        raise ValueError(
+            f'Expected pairs of lat,lon values but got {len(parts)} values.'
+        )
+    return [
+        GridPoint(Location.from_coordinates(parts[i], parts[i + 1]))
+        for i in range(0, len(parts), 2)
+    ]
 
 
 def _init_repos(staging_fs: FileSystem) -> None:
@@ -193,8 +202,8 @@ def _main() -> None:
     grid_points: list[GridPoint] = [
         GridPoint(get_location_by_pv_system_id(site.pvo_sys_id)) for site in pv_sites
     ]
-    if args.grid_point_ids:
-        grid_points += _parse_grid_points(args.grid_point_ids)
+    if args.locations:
+        grid_points += _parse_locations(args.locations)
 
     if pv_sites:
         print(f'Processing {len(pv_sites)} PV site(s).')

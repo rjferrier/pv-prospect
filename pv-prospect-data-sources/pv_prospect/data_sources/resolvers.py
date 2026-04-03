@@ -20,7 +20,7 @@ def resolve_grid_point(
             'Provide exactly one.'
         )
     if location_str is not None:
-        return GridPoint.from_id(location_str)
+        return GridPoint(Location.from_coordinate_string(location_str))
     if pv_system_id is not None:
         location = get_location_by_pv_system_id(pv_system_id)
         return GridPoint(location)

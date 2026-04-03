@@ -14,10 +14,10 @@ For **preprocess**:
 For **extract_and_load**:
     DATA_SOURCE     — ``pv`` or ``weather`` (optional; defaults to weather)
     PV_SYSTEM_ID    — integer system id (required for PV sources; for weather
-                      sources, exactly one of PV_SYSTEM_ID or GRID_POINT_ID
+                      sources, exactly one of PV_SYSTEM_ID or LOCATION
                       must be set)
-    GRID_POINT_ID   — stringified lat_lon (e.g. ``504900_-35400``); alternative
-                      to PV_SYSTEM_ID for weather sources
+    LOCATION        — comma-separated lat,lon (e.g. ``50.49,-3.54``);
+                      alternative to PV_SYSTEM_ID for weather sources
     START_DATE      — ISO date ``YYYY-MM-DD``. Alias: ``DATE`` (clearer when
                       no end date is given).
     END_DATE        — ISO date ``YYYY-MM-DD``, exclusive (optional; defaults to
@@ -83,7 +83,7 @@ def _run_extract_and_load(
     data_source: DataSource,
 ) -> None:
     pv_system_id = _env_int('PV_SYSTEM_ID')
-    grid_point_id = os.environ.get('GRID_POINT_ID')
+    location = os.environ.get('LOCATION')
     overwrite = _env_bool('OVERWRITE')
     dry_run = _env_bool('DRY_RUN')
     by_week = _env_bool('BY_WEEK')
@@ -111,7 +111,7 @@ def _run_extract_and_load(
         entity = resolve_grid_point(
             get_location_by_pv_system_id,
             pv_system_id=pv_system_id,
-            location_str=grid_point_id,
+            location_str=location,
         )
     elif pv_system_id is not None:
         entity = get_pv_site_by_system_id(pv_system_id)

@@ -20,11 +20,12 @@ BY_WEEK
     files.  Other steps always iterate per day.
 PV_SYSTEM_ID
     (Optional) integer system id; required for pv steps. For weather steps,
-    accepted as an alternative to ``GRID_POINT_ID`` — the location is
+    accepted as an alternative to ``LOCATION`` — the location is
     derived via the location mapping repo.
-GRID_POINT_ID
-    (Optional) stringified lat_lon; required for weather steps unless
-    ``PV_SYSTEM_ID`` is provided instead. Exactly one of the two must be set.
+LOCATION
+    (Optional) comma-separated lat,lon (e.g. ``50.49,-3.54``); required for
+    weather steps unless ``PV_SYSTEM_ID`` is provided instead. Exactly one
+    of the two must be set.
 """
 
 import logging
@@ -88,7 +89,7 @@ def main() -> None:
     transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
     by_week = _env_bool('BY_WEEK')
     pv_system_id = _env_int('PV_SYSTEM_ID')
-    location_str = os.environ.get('GRID_POINT_ID')
+    location_str = os.environ.get('LOCATION')
 
     start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
     if not start_date_str:

@@ -7,7 +7,7 @@ Usage::
 
     python -m pv_prospect.data_transformation.runner \
         clean_weather,prepare_weather \
-        --location 504900_-35400 \
+        --locations 50.49,-3.54 \
         --start-date 2025-06-01 --end-date 2025-06-30 \
         --local-dir ./out --workers 4
 
@@ -33,6 +33,7 @@ from pv_prospect.common import (
 from pv_prospect.common.domain import (
     DateRange,
     GridPoint,
+    Location,
     PVSite,
 )
 from pv_prospect.data_sources import (
@@ -98,11 +99,10 @@ def _parse_args() -> Any:
         ),
     )
     parser.add_argument(
-        '-g',
-        '--grid-point-ids',
+        '--locations',
         type=str,
         default=None,
-        help='comma-separated lat_lon values (e.g. 504900_-35400). '
+        help='comma-separated lat,lon pairs (e.g. 50.49,-3.54 or 50.49,-3.54,51.50,-0.12). '
         'Required for weather steps when no pv-system-ids are given.',
     )
     parser.add_argument(
@@ -147,8 +147,16 @@ def _parse_pv_system_ids(s: str) -> list[int]:
     return [int(x.strip()) for x in s.split(',') if x.strip()]
 
 
-def _parse_grid_points(s: str) -> list[GridPoint]:
-    return [GridPoint.from_id(x.strip()) for x in s.split(',') if x.strip()]
+def _parse_locations(s: str) -> list[GridPoint]:
+    parts = [x.strip() for x in s.split(',') if x.strip()]
+    if len(parts) % 2 != 0:
+        raise ValueError(
+            f'Expected pairs of lat,lon values but got {len(parts)} values.'
+        )
+    return [
+        GridPoint(Location.from_coordinates(parts[i], parts[i + 1]))
+        for i in range(0, len(parts), 2)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -302,12 +310,12 @@ def _main() -> None:
         else []
     )
     pv_sites = [get_pv_site_by_system_id(sid) for sid in pv_system_ids]
-    grid_points = _parse_grid_points(args.grid_point_ids) if args.grid_point_ids else []
+    grid_points = _parse_locations(args.locations) if args.locations else []
 
     if needs_pv_id:
         print(f'Processing {len(pv_system_ids)} PV site(s).')
     if needs_grid_point:
-        print(f'Processing {len(grid_points)} grid point(s).')
+        print(f'Processing {len(grid_points)} weather location(s).')
     print()
 
     def run(transformations_filter: frozenset[Transformation]) -> None:
