@@ -106,7 +106,11 @@ def _parse_args() -> 'Any':
         help='show what would be done without writing',
     )
     parser.add_argument(
-        '-w', '--by-week', action='store_true', help='process one week at a time'
+        '--split-by',
+        choices=['day', 'week'],
+        default=None,
+        dest='split_by',
+        help='split date range by day or week (omit to use the full range as a single chunk)',
     )
     parser.add_argument(
         '-l',
@@ -218,16 +222,19 @@ def _main() -> None:
         print(str(e))
         sys.exit(1)
 
-    sub_date_ranges = complete_date_range.split_by(
-        Period.WEEK if args.by_week else Period.DAY
-    )
+    if args.split_by == 'week':
+        sub_date_ranges = complete_date_range.split_by(Period.WEEK)
+    elif args.split_by == 'day':
+        sub_date_ranges = complete_date_range.split_by(Period.DAY)
+    else:
+        sub_date_ranges = [complete_date_range]
     if args.reverse:
         sub_date_ranges.reverse()
 
     work_items: list[tuple[DataSource, AnyEntity, DateRange]] = []
     for dr in sub_date_ranges:
         for sd in data_sources:
-            if args.by_week and not supports_multi_date(sd):
+            if args.split_by == 'week' and not supports_multi_date(sd):
                 day_ranges = dr.split_by(Period.DAY)
             else:
                 day_ranges = [dr]

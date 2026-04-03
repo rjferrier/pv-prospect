@@ -24,7 +24,8 @@ For **extract_and_load**:
                         START_DATE + 1 day)
     OVERWRITE       — ``true`` or ``false`` (default ``false``)
     DRY_RUN         — ``true`` or ``false`` (default ``false``)
-    BY_WEEK         — ``true`` or ``false`` (chunking hint)
+    SPLIT_BY        — ``day`` or ``week`` (chunking hint; omit to use the full
+                      date range as a single chunk)
 """
 
 import logging
@@ -86,7 +87,7 @@ def _run_extract_and_load(
     location = os.environ.get('LOCATION')
     overwrite = _env_bool('OVERWRITE')
     dry_run = _env_bool('DRY_RUN')
-    by_week = _env_bool('BY_WEEK')
+    split_by = os.environ.get('SPLIT_BY')
 
     try:
         start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
@@ -119,22 +120,25 @@ def _run_extract_and_load(
         raise ValueError('PV_SYSTEM_ID must be set for PV sources.')
 
     logger.info(
-        'extract_and_load: %s, %s, %s, by_week=%s',
+        'extract_and_load: %s, %s, %s, split_by=%s',
         data_source,
         entity,
         complete_date_range,
-        by_week,
+        split_by,
     )
 
-    split_period = Period.WEEK if by_week else Period.DAY
-    sub_date_ranges = complete_date_range.split_by(split_period)
-
-    if by_week and not supports_multi_date(data_source):
-        final_ranges = []
-        for dr in sub_date_ranges:
-            final_ranges.extend(dr.split_by(Period.DAY))
+    if split_by == 'week':
+        sub_date_ranges = complete_date_range.split_by(Period.WEEK)
+        if not supports_multi_date(data_source):
+            final_ranges = []
+            for dr in sub_date_ranges:
+                final_ranges.extend(dr.split_by(Period.DAY))
+        else:
+            final_ranges = sub_date_ranges
+    elif split_by == 'day':
+        final_ranges = complete_date_range.split_by(Period.DAY)
     else:
-        final_ranges = sub_date_ranges
+        final_ranges = [complete_date_range]
 
     if not final_ranges:
         logger.warning(

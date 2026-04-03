@@ -25,7 +25,7 @@ resource "google_workflows_workflow" "data_extraction" {
               - locations: $${default(map.get(args, "locations"), ${jsonencode(var.default_locations)})}
               - overwrite: $${default(map.get(args, "overwrite"), "false")}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
-              - by_week: $${default(map.get(args, "by_week"), "${var.default_by_week}")}
+              - split_by: $${default(map.get(args, "split_by"), "${var.default_split_by}")}
 
         - preprocess:
             parallel:
@@ -83,8 +83,8 @@ resource "google_workflows_workflow" "data_extraction" {
                                                           value: $${overwrite}
                                                         - name: DRY_RUN
                                                           value: $${dry_run}
-                                                        - name: BY_WEEK
-                                                          value: $${string(by_week)}
+                                                        - name: SPLIT_BY
+                                                          value: $${split_by}
                                             result: extract_result
                 - extract_for_weather_model:
                     steps:
@@ -119,8 +119,8 @@ resource "google_workflows_workflow" "data_extraction" {
                                                           value: $${overwrite}
                                                         - name: DRY_RUN
                                                           value: $${dry_run}
-                                                        - name: BY_WEEK
-                                                          value: $${string(by_week)}
+                                                        - name: SPLIT_BY
+                                                          value: $${split_by}
                                             result: extract_location_result
 
         - done:

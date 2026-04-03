@@ -56,10 +56,10 @@ variable "default_weather_model_data_sources" {
   description = "Data sources used for location-based extraction; must be weather sources only"
 }
 
-variable "default_by_week" {
-  type        = bool
-  default     = false
-  description = "Whether to process by week by default"
+variable "default_split_by" {
+  type        = string
+  default     = ""
+  description = "Default SPLIT_BY value passed to extract jobs: 'day', 'week', or '' (full range)"
 }
 
 variable "secret_env_vars" {

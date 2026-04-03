@@ -14,10 +14,10 @@ START_DATE
 END_DATE
     ISO date ``YYYY-MM-DD``, exclusive (optional; defaults to
     START_DATE + 1 day)
-BY_WEEK
-    ``true`` or ``false`` (default ``false``).  When set, ``clean_weather``
-    reads a single raw file spanning the week and writes per-day cleaned
-    files.  Other steps always iterate per day.
+SPLIT_BY
+    ``day`` or ``week`` (omit to use the full date range as a single chunk).
+    When ``week``, ``clean_weather`` reads a single raw file spanning the
+    week and writes per-day cleaned files.  Other steps always iterate per day.
 PV_SYSTEM_ID
     (Optional) integer system id; required for pv steps. For weather steps,
     accepted as an alternative to ``LOCATION`` — the location is
@@ -87,7 +87,7 @@ def _load_resources(resources_fs: FileSystem) -> None:
 
 def main() -> None:
     transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
-    by_week = _env_bool('BY_WEEK')
+    split_by = os.environ.get('SPLIT_BY')
     pv_system_id = _env_int('PV_SYSTEM_ID')
     location_str = os.environ.get('LOCATION')
 
@@ -120,7 +120,7 @@ def main() -> None:
     if transformation in TRANSFORMATIONS_NEEDING_PV_SITE and pv_system_id is None:
         raise ValueError('PV_SYSTEM_ID must be set for PV steps.')
 
-    logger.info('Starting %s for %s, by_week=%s', transformation, date_range, by_week)
+    logger.info('Starting %s for %s, split_by=%s', transformation, date_range, split_by)
 
     if transformation is Transformation.CLEAN_WEATHER:
         grid_point = resolve_grid_point(
@@ -134,7 +134,7 @@ def main() -> None:
             config.data_sources.weather,
             grid_point,
             date_range,
-            by_week,
+            split_by == 'week',
         )
 
     elif transformation is Transformation.CLEAN_PV:

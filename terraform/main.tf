@@ -96,9 +96,9 @@ module "artifact_registry_extract" {
 }
 
 module "cloud_run_extract" {
-  source   = "./modules/cloud_run_job"
-  job_name = "data-extraction"
-  region   = var.region
+  source                = "./modules/cloud_run_job"
+  job_name              = "data-extraction"
+  region                = var.region
   image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
   image_tag             = var.image_tag
   timeout               = "600s"
@@ -120,13 +120,13 @@ module "extract_workflow" {
   source = "./modules/extract/workflow"
   region = var.region
 
-  service_account_email         = google_service_account.pipeline.email
-  cloud_run_job_name            = module.cloud_run_extract.job_name
+  service_account_email              = google_service_account.pipeline.email
+  cloud_run_job_name                 = module.cloud_run_extract.job_name
   default_pv_model_data_sources      = var.default_pv_model_data_sources
   default_pv_system_ids              = var.default_pv_system_ids
   default_locations                  = var.default_locations
   default_weather_model_data_sources = var.default_weather_model_data_sources
-  default_by_week               = var.default_by_week
+  default_split_by                   = var.default_split_by
 
   depends_on = [google_project_service.apis, module.cloud_run_extract]
 }
@@ -153,9 +153,9 @@ module "artifact_registry_transform" {
 }
 
 module "cloud_run_transform" {
-  source   = "./modules/cloud_run_job"
-  job_name = "data-transformation"
-  region   = var.region
+  source                = "./modules/cloud_run_job"
+  job_name              = "data-transformation"
+  region                = var.region
   image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-transformation/data-transformation"
   image_tag             = var.transformer_image_tag
   timeout               = "900s"

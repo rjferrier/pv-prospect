@@ -36,8 +36,8 @@ variable "default_weather_model_data_sources" {
   default     = ["weather"]
 }
 
-variable "default_by_week" {
-  type        = bool
-  description = "Whether to process by week by default"
-  default     = false
+variable "default_split_by" {
+  type        = string
+  description = "Default SPLIT_BY value passed to extract jobs: 'day', 'week', or '' (full range)"
+  default     = ""
 }

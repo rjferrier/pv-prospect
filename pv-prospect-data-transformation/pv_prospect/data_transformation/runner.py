@@ -122,10 +122,12 @@ def _parse_args() -> Any:
         help="end date (exclusive): 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM (default: start date + 1 day)",
     )
     parser.add_argument(
-        '-w',
-        '--by-week',
-        action='store_true',
-        help='raw weather files span a full week (read weekly, write per-day cleaned files)',
+        '--split-by',
+        choices=['day', 'week'],
+        default=None,
+        dest='split_by',
+        help='split date range by day or week; when week, raw weather files span a full week '
+        '(read weekly, write per-day cleaned files)',
     )
     parser.add_argument(
         '-l',
@@ -172,14 +174,19 @@ def _make_step_fn(
     pv_data_source: DataSource,
     weather_data_source: DataSource,
     date_range: DateRange,
-    by_week: bool,
+    split_by: str | None,
 ) -> Callable[[GridPoint, PVSite | None], None]:
     """Return a callable that runs *step* for a single entity."""
     if step == Transformation.CLEAN_WEATHER:
 
         def fn_clean_weather(grid_point: GridPoint, _: PVSite | None) -> None:
             run_clean_weather(
-                raw_fs, cleaned_fs, weather_data_source, grid_point, date_range, by_week
+                raw_fs,
+                cleaned_fs,
+                weather_data_source,
+                grid_point,
+                date_range,
+                split_by == 'week',
             )
 
         return fn_clean_weather  # type: ignore[return-value]
@@ -342,7 +349,7 @@ def _main() -> None:
                     config.data_sources.pv,
                     config.data_sources.weather,
                     date_range,
-                    args.by_week,
+                    args.split_by,
                 )
                 futures[pool.submit(step_fn, grid_point, pv_site)] = (
                     step,
