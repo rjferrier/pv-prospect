@@ -17,3 +17,9 @@ variable "default_pv_system_ids" {
   type        = list(number)
   description = "Default PV system IDs for scheduled runs"
 }
+
+variable "default_locations" {
+  type        = list(string)
+  description = "Default lat,lon location strings for location-based weather transformation (e.g. [\"50.49,-3.54\"])"
+  default     = []
+}

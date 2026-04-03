@@ -33,7 +33,7 @@ variable "scheduler_cron" {
   description = "Cron schedule for daily extraction (default: 03:00 UTC)"
 }
 
-variable "default_data_sources" {
+variable "default_pv_model_data_sources" {
   type        = list(string)
   default     = ["pv", "weather"]
   description = "Data sources for the daily scheduled run"
@@ -42,6 +42,18 @@ variable "default_data_sources" {
 variable "default_pv_system_ids" {
   type        = list(number)
   description = "PV system IDs to process in the daily scheduled run"
+}
+
+variable "default_locations" {
+  type        = list(string)
+  default     = []
+  description = "Lat,lon location strings for location-based weather extraction/transformation (e.g. [\"50.49,-3.54\"])"
+}
+
+variable "default_weather_model_data_sources" {
+  type        = list(string)
+  default     = ["weather"]
+  description = "Data sources used for location-based extraction; must be weather sources only"
 }
 
 variable "default_by_week" {

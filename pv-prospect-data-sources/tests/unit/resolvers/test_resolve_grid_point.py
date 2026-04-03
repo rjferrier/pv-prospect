@@ -10,9 +10,11 @@ def _stub_get_location(pv_system_id: int) -> Location:
 
 
 def test_from_location_str() -> None:
-    result = resolve_grid_point(_stub_get_location, location_str='504900_-35400')
+    result = resolve_grid_point(_stub_get_location, location_str='50.49,-3.54')
 
-    assert result == GridPoint.from_id('504900_-35400')
+    assert result == GridPoint(
+        Location.from_coordinates(Decimal('50.49'), Decimal('-3.54'))
+    )
 
 
 def test_from_pv_system_id() -> None:

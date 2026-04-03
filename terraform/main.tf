@@ -120,11 +120,13 @@ module "extract_workflow" {
   source = "./modules/extract/workflow"
   region = var.region
 
-  service_account_email = google_service_account.pipeline.email
-  cloud_run_job_name    = module.cloud_run_extract.job_name
-  default_data_sources  = var.default_data_sources
-  default_pv_system_ids = var.default_pv_system_ids
-  default_by_week       = var.default_by_week
+  service_account_email         = google_service_account.pipeline.email
+  cloud_run_job_name            = module.cloud_run_extract.job_name
+  default_pv_model_data_sources      = var.default_pv_model_data_sources
+  default_pv_system_ids              = var.default_pv_system_ids
+  default_locations                  = var.default_locations
+  default_weather_model_data_sources = var.default_weather_model_data_sources
+  default_by_week               = var.default_by_week
 
   depends_on = [google_project_service.apis, module.cloud_run_extract]
 }
@@ -177,6 +179,7 @@ module "transform_workflow" {
   service_account_email = google_service_account.pipeline.email
   cloud_run_job_name    = module.cloud_run_transform.job_name
   default_pv_system_ids = var.default_pv_system_ids
+  default_locations     = var.default_locations
 
   depends_on = [google_project_service.apis, module.cloud_run_transform]
 }

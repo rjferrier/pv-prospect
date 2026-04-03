@@ -13,15 +13,27 @@ variable "cloud_run_job_name" {
   description = "Name of the Cloud Run Job to invoke"
 }
 
-variable "default_data_sources" {
+variable "default_pv_model_data_sources" {
   type        = list(string)
-  description = "Default data sources for scheduled runs"
+  description = "Default data sources for PV-system-based scheduled runs"
   default     = ["pv", "weather"]
 }
 
 variable "default_pv_system_ids" {
   type        = list(number)
   description = "Default PV system IDs for scheduled runs"
+}
+
+variable "default_locations" {
+  type        = list(string)
+  description = "Default lat,lon location strings for location-based weather extraction (e.g. [\"50.49,-3.54\"])"
+  default     = []
+}
+
+variable "default_weather_model_data_sources" {
+  type        = list(string)
+  description = "Data sources used for location-based extraction; must be weather sources only"
+  default     = ["weather"]
 }
 
 variable "default_by_week" {
