@@ -38,5 +38,10 @@ def build_time_series_csv_file_path(
     return _build_path(time_series_folder, data_source, subfolder, filename)
 
 
+def csv_path_to_metadata_path(csv_path: str) -> str:
+    """Derive the metadata JSON path from a CSV file path."""
+    return csv_path.removesuffix('.csv') + '-meta.json'
+
+
 def _build_path(*args: object) -> str:
     return '/'.join(str(a) for a in args)

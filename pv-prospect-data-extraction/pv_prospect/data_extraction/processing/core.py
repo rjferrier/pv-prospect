@@ -6,6 +6,7 @@ These are called by:
 - ``tasks.py``      for legacy Celery execution (optional)
 """
 
+import json
 import logging
 from typing import Callable
 
@@ -20,6 +21,7 @@ from pv_prospect.data_sources import (
     PV_SITES_CSV_FILE,
     SUPPORTING_RESOURCES,
     build_time_series_csv_file_path,
+    csv_path_to_metadata_path,
 )
 from pv_prospect.etl import TIMESERIES_FOLDER, Extractor, Loader
 from pv_prospect.etl.storage import FileSystem
@@ -116,6 +118,11 @@ def extract_and_load(
         for ts in timeseries:
             ts_file_path = get_csv_path(ts.entity)
             staging_loader.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
+            if ts.metadata is not None:
+                meta_path = csv_path_to_metadata_path(ts_file_path)
+                staging_loader.write_text(
+                    meta_path, json.dumps(ts.metadata), overwrite=overwrite
+                )
 
         logger.info('%s: success', task)
         return Result.success(task)

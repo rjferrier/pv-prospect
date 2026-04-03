@@ -15,8 +15,9 @@ from pv_prospect.common.domain import (
     Shading,
     System,
 )
-from pv_prospect.data_sources import DataSource
+from pv_prospect.data_sources import DataSource, build_time_series_csv_file_path
 from pv_prospect.data_transformation.core import run_prepare_pv
+from pv_prospect.etl import TIMESERIES_FOLDER
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem
 
@@ -29,12 +30,6 @@ _WEATHER_DESCRIPTOR = DataSource.OPENMETEO_HISTORICAL
 
 def _make_grid_point() -> GridPoint:
     return GridPoint.from_id('504900_-35400')
-
-
-def _build_path(descriptor: DataSource, entity_id: str, date_str: str) -> str:
-    source_str = str(descriptor)
-    time_series_id = f'{source_str.replace("/", "-")}_{entity_id}_{date_str}'
-    return f'timeseries/{source_str}/{entity_id}/{time_series_id}.csv'
 
 
 @pytest.fixture
@@ -82,14 +77,16 @@ def cleaned_fs(
             'power': np.clip(4000.0 * solar_factor + rng.normal(0, 50, 24), 0, None),
         }
     )
+    weather_path = build_time_series_csv_file_path(
+        TIMESERIES_FOLDER, _WEATHER_DESCRIPTOR, grid_point, _DATE_RANGE
+    )
+    pv_path = build_time_series_csv_file_path(
+        TIMESERIES_FOLDER, _PV_DESCRIPTOR, pv_site, _DATE_RANGE
+    )
     fs = FakeFileSystem(
         binary_files={
-            _build_path(
-                _WEATHER_DESCRIPTOR, grid_point.id, _DATE_STR
-            ): weather_df.to_csv(index=False).encode('utf-8'),
-            _build_path(_PV_DESCRIPTOR, pv_site.id, _DATE_STR): pv_df.to_csv(
-                index=False
-            ).encode('utf-8'),
+            weather_path: weather_df.to_csv(index=False).encode('utf-8'),
+            pv_path: pv_df.to_csv(index=False).encode('utf-8'),
         }
     )
     return fs

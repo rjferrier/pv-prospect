@@ -19,10 +19,10 @@ def test_merges_multiple_batches_into_master() -> None:
     batches_fs = FakeFileSystem(
         files={
             'weather/loc1_20260115.csv': _headerless_csv(
-                [[50.49, -3.54, '2026-01-15', 8.5, 200.0, 60.0]]
+                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
             ),
             'weather/loc1_20260116.csv': _headerless_csv(
-                [[50.49, -3.54, '2026-01-16', 9.0, 210.0, 65.0]]
+                [[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]]
             ),
         }
     )
@@ -41,6 +41,7 @@ def test_appends_to_existing_master() -> None:
         {
             'latitude': [50.49],
             'longitude': [-3.54],
+            'elevation': [120.0],
             'time': ['2026-01-14'],
             'temperature': [7.0],
             'direct_normal_irradiance': [180.0],
@@ -55,7 +56,7 @@ def test_appends_to_existing_master() -> None:
     batches_fs = FakeFileSystem(
         files={
             'weather/loc1_20260115.csv': _headerless_csv(
-                [[50.49, -3.54, '2026-01-15', 8.5, 200.0, 60.0]]
+                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
             ),
         }
     )
@@ -71,6 +72,7 @@ def test_deduplicates_on_lat_lon_time() -> None:
         {
             'latitude': [50.49],
             'longitude': [-3.54],
+            'elevation': [120.0],
             'time': ['2026-01-15'],
             'temperature': [7.0],
             'direct_normal_irradiance': [180.0],
@@ -85,7 +87,7 @@ def test_deduplicates_on_lat_lon_time() -> None:
     batches_fs = FakeFileSystem(
         files={
             'weather/loc1_20260115.csv': _headerless_csv(
-                [[50.49, -3.54, '2026-01-15', 8.5, 200.0, 60.0]]
+                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
             ),
         }
     )
@@ -101,7 +103,7 @@ def test_deletes_batches_after_assembly() -> None:
     batches_fs = FakeFileSystem(
         files={
             'weather/loc1_20260115.csv': _headerless_csv(
-                [[50.49, -3.54, '2026-01-15', 8.5, 200.0, 60.0]]
+                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
             ),
         }
     )

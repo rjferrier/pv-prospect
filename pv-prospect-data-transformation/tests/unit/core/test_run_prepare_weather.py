@@ -1,17 +1,29 @@
 """Tests for run_prepare_weather."""
 
+import json
 from datetime import date
 
 import numpy as np
 import pandas as pd
 import pytest
 from pv_prospect.common.domain import DateRange, GridPoint
-from pv_prospect.data_sources import DataSource
+from pv_prospect.data_sources import (
+    DataSource,
+    build_time_series_csv_file_path,
+    csv_path_to_metadata_path,
+)
 from pv_prospect.data_transformation.core import run_prepare_weather
+from pv_prospect.etl import TIMESERIES_FOLDER
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem
 
 _DATE_RANGE = DateRange(date(2026, 1, 15), date(2026, 1, 16))
+
+_METADATA = {
+    'latitude': 50.5,
+    'longitude': -3.5,
+    'elevation': 120.0,
+}
 
 
 def _make_grid_point() -> GridPoint:
@@ -21,9 +33,8 @@ def _make_grid_point() -> GridPoint:
 def _write_cleaned_csv(
     fs: FakeFileSystem,
     grid_point: GridPoint,
-    date_str: str,
 ) -> None:
-    """Write a cleaned weather CSV with 24h of data to the fake fs."""
+    """Write a cleaned weather CSV and metadata JSON to the fake fs."""
     times = pd.date_range('2026-01-15 00:00:00', periods=24, freq='h')
     rng = np.random.default_rng(42)
     df = pd.DataFrame(
@@ -34,12 +45,11 @@ def _write_cleaned_csv(
             'diffuse_radiation': np.clip(rng.normal(60, 10, 24), 0, None),
         }
     )
-    descriptor = DataSource.OPENMETEO_HISTORICAL
-    source_str = str(descriptor)
-    ts_str = str(grid_point.id)
-    time_series_id = f'{source_str.replace("/", "-")}_{ts_str}_{date_str}'
-    path = f'timeseries/{source_str}/{ts_str}/{time_series_id}.csv'
+    path = build_time_series_csv_file_path(
+        TIMESERIES_FOLDER, DataSource.OPENMETEO_HISTORICAL, grid_point, _DATE_RANGE
+    )
     fs._binary_files[path] = df.to_csv(index=False).encode('utf-8')
+    fs._files[csv_path_to_metadata_path(path)] = json.dumps(_METADATA)
 
 
 @pytest.fixture
@@ -50,7 +60,7 @@ def grid_point() -> GridPoint:
 @pytest.fixture
 def cleaned_fs(grid_point: GridPoint) -> FakeFileSystem:
     fs = FakeFileSystem()
-    _write_cleaned_csv(fs, grid_point, '20260115')
+    _write_cleaned_csv(fs, grid_point)
     return fs
 
 
@@ -96,7 +106,7 @@ def test_batch_has_no_header(
     float(first_field)  # would raise if it were a header
 
 
-def test_batch_includes_latitude_and_longitude(
+def test_batch_includes_metadata_values(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
     grid_point: GridPoint,
@@ -111,8 +121,9 @@ def test_batch_includes_latitude_and_longitude(
 
     content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
     fields = content.strip().split('\n')[0].split(',')
-    assert float(fields[0]) == pytest.approx(50.49)
-    assert float(fields[1]) == pytest.approx(-3.54)
+    assert float(fields[0]) == pytest.approx(_METADATA['latitude'])
+    assert float(fields[1]) == pytest.approx(_METADATA['longitude'])
+    assert float(fields[2]) == pytest.approx(_METADATA['elevation'])
 
 
 def test_batch_has_correct_number_of_fields(
@@ -130,5 +141,5 @@ def test_batch_has_correct_number_of_fields(
 
     content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
     lines = content.strip().split('\n')
-    # latitude, longitude, time, temperature, direct_normal_irradiance, diffuse_radiation
-    assert len(lines[0].split(',')) == 6
+    # latitude, longitude, elevation, time, temperature, direct_normal_irradiance, diffuse_radiation
+    assert len(lines[0].split(',')) == 7

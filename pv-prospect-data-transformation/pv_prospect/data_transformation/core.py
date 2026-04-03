@@ -5,8 +5,9 @@ All parameters are explicit — no environment variable reads.
 """
 
 import io
+import json
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -14,6 +15,7 @@ from pv_prospect.common.domain import DateRange, GridPoint, Period, PVSite
 from pv_prospect.data_sources import (
     DataSource,
     build_time_series_csv_file_path,
+    csv_path_to_metadata_path,
 )
 from pv_prospect.data_transformation.transformations import (
     clean_pv as _clean_pv_transform,
@@ -43,6 +45,7 @@ PV_BATCH_PREFIX = 'pv'
 WEATHER_COLUMNS = [
     'latitude',
     'longitude',
+    'elevation',
     'time',
     'temperature',
     'direct_normal_irradiance',
@@ -66,6 +69,18 @@ def write_csv(fs: FileSystem, df: pd.DataFrame, path: str, header: bool = True) 
     """Write a DataFrame as CSV to a FileSystem."""
     fs.write_text(path, df.to_csv(index=False, header=header))
     logger.info('Written to: %s', path)
+
+
+def read_metadata(fs: FileSystem, csv_path: str) -> dict[str, Any]:
+    """Read the metadata JSON companion to a CSV file."""
+    meta_path = csv_path_to_metadata_path(csv_path)
+    return json.loads(fs.read_text(meta_path))
+
+
+def write_metadata(fs: FileSystem, csv_path: str, metadata: dict[str, Any]) -> None:
+    """Write a metadata JSON companion alongside a CSV file."""
+    meta_path = csv_path_to_metadata_path(csv_path)
+    fs.write_text(meta_path, json.dumps(metadata))
 
 
 def _prepared_pv_path(system_id: int) -> str:
@@ -121,6 +136,7 @@ def _clean_weather_chunk(
     if df.empty:
         raise ValueError(f'CSV is empty: {in_path}')
     cleaned = _clean_weather_transform(df)
+    metadata = read_metadata(raw_fs, in_path)
 
     for day_range in date_range.split_by(Period.DAY):
         day_df = cleaned[cleaned['time'].dt.date == day_range.start]
@@ -131,16 +147,14 @@ def _clean_weather_chunk(
                 in_path,
             )
             continue
-        write_csv(
-            cleaned_fs,
-            day_df,
-            build_time_series_csv_file_path(
-                TIMESERIES_FOLDER,
-                weather_data_source,
-                grid_point,
-                day_range,
-            ),
+        out_path = build_time_series_csv_file_path(
+            TIMESERIES_FOLDER,
+            weather_data_source,
+            grid_point,
+            day_range,
         )
+        write_csv(cleaned_fs, day_df, out_path)
+        write_metadata(cleaned_fs, out_path, metadata)
 
 
 def run_clean_pv(
@@ -174,7 +188,6 @@ def run_prepare_weather(
     date_range: DateRange,
 ) -> None:
     """Prepare cleaned weather CSVs for a date range into headerless batches."""
-    location = grid_point.location
     for day_range in date_range.split_by(Period.DAY):
         date_str = day_range.start.strftime('%Y%m%d')
         path = build_time_series_csv_file_path(
@@ -184,15 +197,18 @@ def run_prepare_weather(
             day_range,
         )
         logger.info('[prepare_weather] Processing %s', path)
+        metadata = read_metadata(cleaned_fs, path)
         cleaned_df = read_csv(cleaned_fs, path)
         prepared_df = _prepare_weather_transform(cleaned_df)
-        prepared_df.insert(0, 'latitude', float(location.latitude))
-        prepared_df.insert(1, 'longitude', float(location.longitude))
+        prepared_df.insert(0, 'latitude', metadata['latitude'])
+        prepared_df.insert(1, 'longitude', metadata['longitude'])
+        prepared_df.insert(2, 'elevation', metadata['elevation'])
         write_csv(
             batches_fs,
             prepared_df,
             _weather_batch_path(
-                location.to_coordinate_string(filename_friendly=True), date_str
+                grid_point.location.to_coordinate_string(filename_friendly=True),
+                date_str,
             ),
             header=False,
         )
