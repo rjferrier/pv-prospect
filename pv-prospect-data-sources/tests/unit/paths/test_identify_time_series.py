@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from pv_prospect.common.domain import (
+    DateRange,
     GridPoint,
     Location,
     PanelGeometry,
@@ -12,16 +13,28 @@ from pv_prospect.common.domain import (
 from pv_prospect.data_sources import DataSource, identify_time_series
 
 
-def test_identify_openmeteo_time_series():
+def test_identify_openmeteo_time_series_single_day():
     grid_point = GridPoint.from_id('526604_07808')
 
     result = identify_time_series(
         DataSource.OPENMETEO_QUARTERHOURLY,
         grid_point,
-        date(2025, 6, 24),
+        DateRange.of_single_day(date(2025, 6, 24)),
     )
 
     assert result == 'openmeteo-quarterhourly_526604_07808_20250624'
+
+
+def test_identify_openmeteo_time_series_multi_day():
+    grid_point = GridPoint.from_id('526604_07808')
+
+    result = identify_time_series(
+        DataSource.OPENMETEO_QUARTERHOURLY,
+        grid_point,
+        DateRange(date(2025, 6, 24), date(2025, 6, 30)),
+    )
+
+    assert result == 'openmeteo-quarterhourly_526604_07808_20250624_20250630'
 
 
 def test_identify_pvoutput_time_series():
@@ -38,7 +51,7 @@ def test_identify_pvoutput_time_series():
     result = identify_time_series(
         DataSource.PVOUTPUT,
         pv_site,
-        date(2025, 6, 1),
+        DateRange.of_single_day(date(2025, 6, 1)),
     )
 
     assert result == 'pvoutput_89665_20250601'

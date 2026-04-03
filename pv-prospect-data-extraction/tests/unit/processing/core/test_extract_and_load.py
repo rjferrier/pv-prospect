@@ -47,7 +47,7 @@ def test_dry_run_does_not_write() -> None:
 
 def test_skips_when_all_files_exist() -> None:
     expected_path = build_time_series_csv_file_path(
-        'timeseries', DataSource.PVOUTPUT, _PV_SITE, date(2025, 6, 1)
+        'timeseries', DataSource.PVOUTPUT, _PV_SITE, _DATE_RANGE
     )
 
     result = extract_and_load(
@@ -89,7 +89,7 @@ def test_overwrites_existing_when_flag_set() -> None:
     mock_extractor.extract.return_value = [TimeSeries(entity=_PV_SITE, rows=[['row']])]
 
     expected_path = build_time_series_csv_file_path(
-        'timeseries', DataSource.PVOUTPUT, _PV_SITE, date(2025, 6, 1)
+        'timeseries', DataSource.PVOUTPUT, _PV_SITE, _DATE_RANGE
     )
 
     staging_fs = FakeFileSystem({expected_path: ''})

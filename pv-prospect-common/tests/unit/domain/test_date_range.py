@@ -10,6 +10,16 @@ def test_str_formats_as_date_range():
     assert str(dr) == 'DateRange(2025-01-01, 2025-01-08)'
 
 
+def test_len_returns_number_of_days():
+    dr = DateRange(date(2025, 1, 1), date(2025, 1, 8))
+    assert len(dr) == 7
+
+
+def test_len_single_day_returns_one():
+    dr = DateRange.of_single_day(date(2025, 6, 1))
+    assert len(dr) == 1
+
+
 def test_of_single_day_creates_range_with_next_day_as_end():
     dr = DateRange.of_single_day(date(2025, 3, 15))
     assert dr.start == date(2025, 3, 15)

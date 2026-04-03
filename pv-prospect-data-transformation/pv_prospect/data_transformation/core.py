@@ -114,7 +114,7 @@ def _clean_weather_chunk(
 ) -> None:
     """Clean a single raw weather file and write per-day cleaned CSVs."""
     in_path = build_time_series_csv_file_path(
-        TIMESERIES_FOLDER, weather_data_source, grid_point, date_range.start
+        TIMESERIES_FOLDER, weather_data_source, grid_point, date_range
     )
     logger.info('[clean_weather] Processing %s', in_path)
     df = read_csv(raw_fs, in_path)
@@ -138,7 +138,7 @@ def _clean_weather_chunk(
                 TIMESERIES_FOLDER,
                 weather_data_source,
                 grid_point,
-                day_range.start,
+                day_range,
             ),
         )
 
@@ -153,7 +153,7 @@ def run_clean_pv(
     """Clean raw PV CSVs for a date range (one file per day)."""
     for day_range in date_range.split_by(Period.DAY):
         path = build_time_series_csv_file_path(
-            TIMESERIES_FOLDER, pv_data_source, pv_site, day_range.start
+            TIMESERIES_FOLDER, pv_data_source, pv_site, day_range
         )
         logger.info('[clean_pv] Processing %s', path)
         df = read_csv(raw_fs, path)
@@ -181,7 +181,7 @@ def run_prepare_weather(
             TIMESERIES_FOLDER,
             weather_data_source,
             grid_point,
-            day_range.start,
+            day_range,
         )
         logger.info('[prepare_weather] Processing %s', path)
         cleaned_df = read_csv(cleaned_fs, path)
@@ -214,7 +214,7 @@ def run_prepare_pv(
     for day_range in date_range.split_by(Period.DAY):
         date_str = day_range.start.strftime('%Y%m%d')
         in_pv_path = build_time_series_csv_file_path(
-            TIMESERIES_FOLDER, pv_data_source, pv_site, day_range.start
+            TIMESERIES_FOLDER, pv_data_source, pv_site, day_range
         )
         if not cleaned_fs.exists(in_pv_path):
             logger.warning('[prepare_pv] Cleaned PV data not found: %s', in_pv_path)
@@ -224,7 +224,7 @@ def run_prepare_pv(
             TIMESERIES_FOLDER,
             weather_data_source,
             grid_point,
-            day_range.start,
+            day_range,
         )
         if not cleaned_fs.exists(weather_path):
             logger.warning(

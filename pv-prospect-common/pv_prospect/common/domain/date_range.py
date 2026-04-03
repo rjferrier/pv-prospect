@@ -34,6 +34,9 @@ class DateRange:
         """
         return cls(date_, date_ + timedelta(days=1))
 
+    def __len__(self) -> int:
+        return (self.end - self.start).days
+
     def split_by(self, period: Period) -> list['DateRange']:
         match period:
             case Period.DAY:

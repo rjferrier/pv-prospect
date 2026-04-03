@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from pv_prospect.common.domain import (
+    DateRange,
     GridPoint,
     Location,
     PanelGeometry,
@@ -22,11 +23,11 @@ def test_builds_path_for_openmeteo_source():
         'timeseries',
         DataSource.OPENMETEO_QUARTERHOURLY,
         grid_point,
-        date(2025, 6, 24),
+        DateRange.of_single_day(date(2025, 6, 24)),
     )
 
     assert result == (
-        'timeseries/openmeteo/quarterhourly/526604_07808/'
+        'timeseries/openmeteo/quarterhourly/weather-grid/52_0/'
         'openmeteo-quarterhourly_526604_07808_20250624.csv'
     )
 
@@ -46,7 +47,7 @@ def test_builds_path_for_pvoutput_source():
         'timeseries',
         DataSource.PVOUTPUT,
         pv_site,
-        date(2025, 6, 1),
+        DateRange.of_single_day(date(2025, 6, 1)),
     )
 
-    assert result == ('timeseries/pvoutput/89665/pvoutput_89665_20250601.csv')
+    assert result == 'timeseries/pvoutput/89665/pvoutput_89665_20250601.csv'

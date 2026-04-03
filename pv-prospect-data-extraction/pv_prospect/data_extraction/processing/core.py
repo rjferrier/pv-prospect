@@ -88,16 +88,16 @@ def extract_and_load(
     staging_extractor = Extractor(staging_fs)
     staging_loader = Loader(staging_fs)
 
-    def get_csv_path(entity: Entity) -> str:
+    def get_csv_path(entity_: Entity) -> str:
         return build_time_series_csv_file_path(
             TIMESERIES_FOLDER,
             data_source,
-            entity,
-            date_range.start,
+            entity_,
+            date_range,
         )
 
-    def is_processable(entity: Entity) -> bool:
-        file_path = get_csv_path(entity)
+    def is_processable(entity_: Entity) -> bool:
+        file_path = get_csv_path(entity_)
         return overwrite or not staging_extractor.file_exists(file_path)
 
     try:

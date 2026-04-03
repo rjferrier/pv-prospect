@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 
 from .location import Location
@@ -7,12 +8,18 @@ from .location import Location
 class GridPoint:
     location: Location
 
+    def __str__(self) -> str:
+        return f'GridPoint(id={self.id})'
+
     @property
     def id(self) -> str:
         return self.location.to_coordinate_string(filename_friendly=True)
 
-    def __str__(self) -> str:
-        return f'GridPoint(id={self.id})'
+    @property
+    def bin(self) -> str:
+        lat = math.floor(self.location.latitude)
+        lon = math.floor(self.location.longitude)
+        return f'{lat}_{lon}'
 
     @classmethod
     def from_id(cls, grid_point_id: str) -> 'GridPoint':
