@@ -108,16 +108,18 @@ def _run_extract_and_load(
 
     # Resolve PV site or weather grid point
     entity: AnyEntity
-    if data_source.type == DataSourceType.WEATHER:
+    if data_source.type == DataSourceType.PV:
+        if not pv_system_id:
+            raise ValueError('PV_SYSTEM_ID must be set for PV sources.')
+        entity = get_pv_site_by_system_id(pv_system_id)
+    elif data_source.type == DataSourceType.WEATHER:
         entity = resolve_grid_point(
             get_location_by_pv_system_id,
             pv_system_id=pv_system_id,
             location_str=location,
         )
-    elif pv_system_id is not None:
-        entity = get_pv_site_by_system_id(pv_system_id)
     else:
-        raise ValueError('PV_SYSTEM_ID must be set for PV sources.')
+        raise ValueError(f'Unknown data source type: {data_source.type}')
 
     logger.info(
         'extract_and_load: %s, %s, %s, split_by=%s',
