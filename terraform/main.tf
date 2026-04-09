@@ -142,6 +142,17 @@ module "extract_scheduler" {
   depends_on = [google_project_service.apis, module.extract_workflow]
 }
 
+module "extract_backfill_workflow" {
+  source = "./modules/extract/backfill_workflow"
+  region = var.region
+
+  service_account_email = google_service_account.pipeline.email
+  cloud_run_job_name    = module.cloud_run_extract.job_name
+  staging_bucket_name   = module.storage.staging_bucket_name
+
+  depends_on = [google_project_service.apis, module.cloud_run_extract]
+}
+
 # ---------------------------------------------------------------------------
 # Transformation pipeline
 # ---------------------------------------------------------------------------
@@ -221,6 +232,11 @@ output "cloud_run_job_name" {
 output "workflow_name" {
   value       = module.extract_workflow.workflow_name
   description = "Extraction workflow name"
+}
+
+output "backfill_workflow_name" {
+  value       = module.extract_backfill_workflow.workflow_name
+  description = "Grid-point backfill workflow name"
 }
 
 output "scheduler_job_name" {

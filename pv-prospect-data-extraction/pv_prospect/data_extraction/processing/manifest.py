@@ -126,7 +126,7 @@ def build_manifest(
     return manifest, updated_cursor
 
 
-CURSOR_PATH = 'resources/backfill_cursor.json'
+CURSOR_PATH = 'backfill_cursor.json'
 
 
 def serialize_cursor(cursor: BackfillCursor) -> str:
@@ -158,3 +158,87 @@ def load_cursor(fs: FileSystem, today: date) -> BackfillCursor:
 def save_cursor(fs: FileSystem, cursor: BackfillCursor) -> None:
     """Persist the backfill cursor to storage."""
     fs.write_text(CURSOR_PATH, serialize_cursor(cursor))
+
+
+MANIFEST_PATH = 'todays_manifest.json'
+
+
+def _serialize_batch(batch: Batch) -> dict[str, str | int]:
+    return {
+        'sample_file_index': batch.sample_file_index,
+        'start_date': batch.start_date.isoformat(),
+        'end_date': batch.end_date.isoformat(),
+    }
+
+
+def _deserialize_batch(data: dict[str, str | int]) -> Batch:
+    return Batch(
+        sample_file_index=int(data['sample_file_index']),
+        start_date=date.fromisoformat(str(data['start_date'])),
+        end_date=date.fromisoformat(str(data['end_date'])),
+    )
+
+
+def serialize_manifest(manifest: Manifest, next_cursor: BackfillCursor) -> str:
+    """Serialize a manifest (plus next cursor) to a JSON string.
+
+    The JSON format is consumed by both the Cloud Workflow dispatcher and
+    the ``commit_grid_point_backfill`` job that promotes ``next_cursor`` to
+    the live cursor after a successful run.
+    """
+    return json.dumps(
+        {
+            'step2_batch': _serialize_batch(manifest.step2_batch),
+            'step3_batches': [_serialize_batch(b) for b in manifest.step3_batches],
+            'next_cursor': {
+                'next_end_date': next_cursor.next_end_date.isoformat(),
+                'next_sample_offset': next_cursor.next_sample_offset,
+            },
+        }
+    )
+
+
+def deserialize_manifest(text: str) -> tuple[Manifest, BackfillCursor]:
+    """Deserialize a manifest (and its next cursor) from a JSON string."""
+    data = json.loads(text)
+    manifest = Manifest(
+        step2_batch=_deserialize_batch(data['step2_batch']),
+        step3_batches=[_deserialize_batch(b) for b in data['step3_batches']],
+    )
+    next_cursor = BackfillCursor(
+        next_end_date=date.fromisoformat(data['next_cursor']['next_end_date']),
+        next_sample_offset=int(data['next_cursor']['next_sample_offset']),
+    )
+    return manifest, next_cursor
+
+
+def plan_backfill(
+    today: date,
+    num_sample_files: int,
+    fs: FileSystem,
+    step3_batch_count: int = 8,
+) -> Manifest:
+    """Compute today's manifest and persist it to storage.
+
+    Reads the current cursor, builds the manifest, and writes both the
+    manifest and the *next* cursor to :data:`MANIFEST_PATH`. The live
+    cursor at :data:`CURSOR_PATH` is **not** advanced — that happens later
+    via :func:`commit_backfill`, after the batches have been dispatched
+    successfully.
+    """
+    cursor = load_cursor(fs, today)
+    manifest, next_cursor = build_manifest(
+        today, num_sample_files, cursor, step3_batch_count=step3_batch_count
+    )
+    fs.write_text(MANIFEST_PATH, serialize_manifest(manifest, next_cursor))
+    return manifest
+
+
+def commit_backfill(fs: FileSystem) -> BackfillCursor:
+    """Promote the manifest's next cursor to the live cursor.
+
+    Called after all batches dispatched by the workflow have completed.
+    """
+    _, next_cursor = deserialize_manifest(fs.read_text(MANIFEST_PATH))
+    save_cursor(fs, next_cursor)
+    return next_cursor
