@@ -183,7 +183,7 @@ def serialize_manifest(manifest: Manifest, next_cursor: BackfillCursor) -> str:
     """Serialize a manifest (plus next cursor) to a JSON string.
 
     The JSON format is consumed by both the Cloud Workflow dispatcher and
-    the ``commit_grid_point_backfill`` job that promotes ``next_cursor`` to
+    the ``commit_weather_grid_backfill`` job that promotes ``next_cursor`` to
     the live cursor after a successful run.
     """
     return json.dumps(
@@ -212,7 +212,7 @@ def deserialize_manifest(text: str) -> tuple[Manifest, BackfillCursor]:
     return manifest, next_cursor
 
 
-def plan_backfill(
+def plan_weather_grid_backfill(
     today: date,
     num_sample_files: int,
     fs: FileSystem,
@@ -223,8 +223,8 @@ def plan_backfill(
     Reads the current cursor, builds the manifest, and writes both the
     manifest and the *next* cursor to :data:`MANIFEST_PATH`. The live
     cursor at :data:`CURSOR_PATH` is **not** advanced — that happens later
-    via :func:`commit_backfill`, after the batches have been dispatched
-    successfully.
+    via :func:`commit_weather_grid_backfill`, after the batches have been
+    dispatched successfully.
     """
     cursor = load_cursor(fs, today)
     manifest, next_cursor = build_manifest(
@@ -234,7 +234,7 @@ def plan_backfill(
     return manifest
 
 
-def commit_backfill(fs: FileSystem) -> BackfillCursor:
+def commit_weather_grid_backfill(fs: FileSystem) -> BackfillCursor:
     """Promote the manifest's next cursor to the live cursor.
 
     Called after all batches dispatched by the workflow have completed.

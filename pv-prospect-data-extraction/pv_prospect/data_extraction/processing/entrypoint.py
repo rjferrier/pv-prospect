@@ -6,8 +6,9 @@ and calls the corresponding core function.
 Environment variables
 ---------------------
 JOB_TYPE
-    ``preprocess``, ``extract_and_load``, ``plan_grid_point_backfill``, or
-    ``commit_grid_point_backfill``
+    ``preprocess``, ``extract_and_load``,
+    ``plan_weather_grid_backfill``, ``commit_weather_grid_backfill``,
+    ``plan_pv_site_backfill``, or ``commit_pv_site_backfill``
 
 For **preprocess**:
     DATA_SOURCE — ``pv`` or ``weather`` (optional; defaults to weather)
@@ -59,8 +60,12 @@ from pv_prospect.data_extraction import (
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import core
 from pv_prospect.data_extraction.processing.manifest import (
-    commit_backfill,
-    plan_backfill,
+    commit_weather_grid_backfill,
+    plan_weather_grid_backfill,
+)
+from pv_prospect.data_extraction.processing.pv_backfill import (
+    commit_pv_site_backfill,
+    plan_pv_site_backfill,
 )
 from pv_prospect.data_extraction.processing.sample_file import (
     count_sample_files,
@@ -196,22 +201,37 @@ def _run_extract_and_load(
             logger.info('%s %s: %s', entity, dr, result.type.value)
 
 
-def _run_plan_grid_point_backfill(resources_fs: FileSystem) -> None:
+def _run_plan_weather_grid_backfill(resources_fs: FileSystem) -> None:
     today = date.today()
     num_sample_files = count_sample_files(resources_fs)
     if num_sample_files == 0:
         raise ValueError('No sample files found on the resources filesystem.')
-    manifest = plan_backfill(today, num_sample_files, resources_fs)
+    manifest = plan_weather_grid_backfill(today, num_sample_files, resources_fs)
     logger.info(
-        'plan_grid_point_backfill: wrote manifest (step2=%s, step3_batches=%d)',
+        'plan_weather_grid_backfill: wrote manifest (step2=%s, step3_batches=%d)',
         manifest.step2_batch,
         len(manifest.step3_batches),
     )
 
 
-def _run_commit_grid_point_backfill(resources_fs: FileSystem) -> None:
-    cursor = commit_backfill(resources_fs)
-    logger.info('commit_grid_point_backfill: advanced cursor to %s', cursor)
+def _run_commit_weather_grid_backfill(resources_fs: FileSystem) -> None:
+    cursor = commit_weather_grid_backfill(resources_fs)
+    logger.info('commit_weather_grid_backfill: advanced cursor to %s', cursor)
+
+
+def _run_plan_pv_site_backfill(resources_fs: FileSystem) -> None:
+    today = date.today()
+    plan = plan_pv_site_backfill(today, resources_fs)
+    logger.info(
+        'plan_pv_site_backfill: wrote manifest (%s to %s)',
+        plan.start_date,
+        plan.end_date,
+    )
+
+
+def _run_commit_pv_site_backfill(resources_fs: FileSystem) -> None:
+    cursor = commit_pv_site_backfill(resources_fs)
+    logger.info('commit_pv_site_backfill: advanced cursor to %s', cursor)
 
 
 def main() -> None:
@@ -239,10 +259,14 @@ def main() -> None:
         _run_preprocess(staging_fs, data_source)
     elif job_type == 'extract_and_load':
         _run_extract_and_load(staging_fs, resources_fs, data_source)
-    elif job_type == 'plan_grid_point_backfill':
-        _run_plan_grid_point_backfill(resources_fs)
-    elif job_type == 'commit_grid_point_backfill':
-        _run_commit_grid_point_backfill(resources_fs)
+    elif job_type == 'plan_weather_grid_backfill':
+        _run_plan_weather_grid_backfill(resources_fs)
+    elif job_type == 'commit_weather_grid_backfill':
+        _run_commit_weather_grid_backfill(resources_fs)
+    elif job_type == 'plan_pv_site_backfill':
+        _run_plan_pv_site_backfill(resources_fs)
+    elif job_type == 'commit_pv_site_backfill':
+        _run_commit_pv_site_backfill(resources_fs)
     else:
         logger.error('unknown JOB_TYPE=%r', job_type)
         sys.exit(1)

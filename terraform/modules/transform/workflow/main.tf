@@ -4,10 +4,11 @@
 # of Cloud Run Jobs to clean and parse the data.
 
 resource "google_workflows_workflow" "data_transformation" {
-  name            = "pv-prospect-transform"
-  region          = var.region
-  service_account = var.service_account_email
-  description     = "Orchestrates PV Prospect data transformation DAG via Cloud Run Jobs"
+  name                = "pv-prospect-transform"
+  region              = var.region
+  service_account     = var.service_account_email
+  deletion_protection = false
+  description         = "Orchestrates PV Prospect data transformation DAG via Cloud Run Jobs"
 
   source_contents = <<-YAML
     main:
@@ -19,9 +20,26 @@ resource "google_workflows_workflow" "data_transformation" {
               - region: "${var.region}"
               - job_name: "${var.cloud_run_job_name}"
               - date: $${default(map.get(args, "date"), text.substring(time.format(sys.now()), 0, 10))}
-              - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
-              - locations: $${default(map.get(args, "locations"), ${jsonencode(var.default_locations)})}
+              - raw_pv_system_ids: $${default(map.get(args, "pv_system_ids"), [])}
+              - raw_locations: $${default(map.get(args, "locations"), [])}
 
+        - parse_all_pvs:
+            switch:
+              - condition: $${json.encode_to_string(raw_pv_system_ids) == "\"all\""}
+                assign:
+                  - pv_system_ids: ${jsonencode(var.default_pv_system_ids)}
+              - condition: true
+                assign:
+                  - pv_system_ids: $${raw_pv_system_ids}
+
+        - parse_all_locations:
+            switch:
+              - condition: $${json.encode_to_string(raw_locations) == "\"all\""}
+                assign:
+                  - locations: ${jsonencode(var.default_locations)}
+              - condition: true
+                assign:
+                  - locations: $${raw_locations}
         - clean_parallel:
             parallel:
               branches:

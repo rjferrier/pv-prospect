@@ -100,7 +100,7 @@ module "cloud_run_extract" {
   job_name              = "data-extraction"
   region                = var.region
   image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
-  image_tag             = var.image_tag
+  image_tag             = var.extractor_image_tag
   timeout               = "600s"
   cpu                   = "1"
   memory                = "512Mi"
@@ -116,7 +116,7 @@ module "cloud_run_extract" {
   depends_on = [google_project_service.apis]
 }
 
-module "extract_workflow" {
+module "extractor_workflow" {
   source = "./modules/extract/workflow"
   region = var.region
 
@@ -131,19 +131,46 @@ module "extract_workflow" {
   depends_on = [google_project_service.apis, module.cloud_run_extract]
 }
 
-module "extract_scheduler" {
+module "extractor_scheduler" {
   source = "./modules/extract/scheduler"
   region = var.region
 
-  workflow_id           = module.extract_workflow.workflow_id
+  workflow_id           = module.extractor_workflow.workflow_id
   service_account_email = google_service_account.pipeline.email
-  schedule              = var.scheduler_cron
+  schedule              = var.extractor_scheduler_cron
+  argument_json = jsonencode({
+    "pv_system_ids" = "all"
+  })
 
-  depends_on = [google_project_service.apis, module.extract_workflow]
+  depends_on = [google_project_service.apis, module.extractor_workflow]
 }
 
-module "extract_backfill_workflow" {
-  source = "./modules/extract/backfill_workflow"
+module "extractor_pv_site_backfill_workflow" {
+  source = "./modules/extract/pv_site_backfill_workflow"
+  region = var.region
+
+  service_account_email = google_service_account.pipeline.email
+  cloud_run_job_name    = module.cloud_run_extract.job_name
+  staging_bucket_name   = module.storage.staging_bucket_name
+  default_pv_system_ids = var.default_pv_system_ids
+
+  depends_on = [google_project_service.apis, module.cloud_run_extract]
+}
+
+module "extractor_pv_site_backfill_scheduler" {
+  source = "./modules/extract/scheduler"
+  region = var.region
+
+  scheduler_job_name    = "pv-prospect-daily-pv-site-backfill"
+  workflow_id           = module.extractor_pv_site_backfill_workflow.workflow_id
+  service_account_email = google_service_account.pipeline.email
+  schedule              = var.extractor_pv_site_backfill_scheduler_cron
+
+  depends_on = [google_project_service.apis, module.extractor_pv_site_backfill_workflow]
+}
+
+module "extractor_weather_grid_backfill_workflow" {
+  source = "./modules/extract/weather_grid_backfill_workflow"
   region = var.region
 
   service_account_email = google_service_account.pipeline.email
@@ -151,6 +178,18 @@ module "extract_backfill_workflow" {
   staging_bucket_name   = module.storage.staging_bucket_name
 
   depends_on = [google_project_service.apis, module.cloud_run_extract]
+}
+
+module "extractor_weather_grid_backfill_scheduler" {
+  source = "./modules/extract/scheduler"
+  region = var.region
+
+  scheduler_job_name    = "pv-prospect-daily-weather-grid-backfill"
+  workflow_id           = module.extractor_weather_grid_backfill_workflow.workflow_id
+  service_account_email = google_service_account.pipeline.email
+  schedule              = var.extractor_weather_grid_backfill_scheduler_cron
+
+  depends_on = [google_project_service.apis, module.extractor_weather_grid_backfill_workflow]
 }
 
 # ---------------------------------------------------------------------------
@@ -183,7 +222,7 @@ module "cloud_run_transform" {
   depends_on = [google_project_service.apis, module.artifact_registry_transform]
 }
 
-module "transform_workflow" {
+module "transformer_workflow" {
   source = "./modules/transform/workflow"
   region = var.region
 
@@ -193,6 +232,21 @@ module "transform_workflow" {
   default_locations     = var.default_locations
 
   depends_on = [google_project_service.apis, module.cloud_run_transform]
+}
+
+module "transformer_scheduler" {
+  source = "./modules/extract/scheduler"
+  region = var.region
+
+  scheduler_job_name    = "pv-prospect-daily-transform"
+  workflow_id           = module.transformer_workflow.workflow_id
+  service_account_email = google_service_account.pipeline.email
+  schedule              = var.transformer_scheduler_cron
+  argument_json = jsonencode({
+    "pv_system_ids" = "all"
+  })
+
+  depends_on = [google_project_service.apis, module.transformer_workflow]
 }
 
 # ---------------------------------------------------------------------------
@@ -275,7 +329,7 @@ output "staging_bucket_name" {
   description = "Name of the staging bucket"
 }
 
-output "artifact_registry_url" {
+output "artifact_registry_extractor_url" {
   value       = module.artifact_registry_extract.repository_url
   description = "Docker registry URL for data extraction"
 }
@@ -285,24 +339,44 @@ output "artifact_registry_transformer_url" {
   description = "Docker registry URL for data transformation"
 }
 
-output "cloud_run_job_name" {
+output "extractor_cloud_run_job_name" {
   value       = module.cloud_run_extract.job_name
   description = "Extraction Cloud Run Job name"
 }
 
-output "workflow_name" {
-  value       = module.extract_workflow.workflow_name
+output "extractor_workflow_name" {
+  value       = module.extractor_workflow.workflow_name
   description = "Extraction workflow name"
 }
 
-output "backfill_workflow_name" {
-  value       = module.extract_backfill_workflow.workflow_name
-  description = "Grid-point backfill workflow name"
+output "transformer_scheduler_job_name" {
+  value       = module.transformer_scheduler.scheduler_job_name
+  description = "Transform Cloud Scheduler job name"
 }
 
-output "scheduler_job_name" {
-  value       = module.extract_scheduler.scheduler_job_name
-  description = "Cloud Scheduler job name"
+output "extractor_pv_site_backfill_workflow_name" {
+  value       = module.extractor_pv_site_backfill_workflow.workflow_name
+  description = "PV-site backfill workflow name"
+}
+
+output "extractor_pv_site_backfill_scheduler_job_name" {
+  value       = module.extractor_pv_site_backfill_scheduler.scheduler_job_name
+  description = "PV-site backfill Cloud Scheduler job name"
+}
+
+output "extractor_weather_grid_backfill_workflow_name" {
+  value       = module.extractor_weather_grid_backfill_workflow.workflow_name
+  description = "Weather grid backfill workflow name"
+}
+
+output "extractor_weather_grid_backfill_scheduler_job_name" {
+  value       = module.extractor_weather_grid_backfill_scheduler.scheduler_job_name
+  description = "Weather grid backfill Cloud Scheduler job name"
+}
+
+output "extractor_scheduler_job_name" {
+  value       = module.extractor_scheduler.scheduler_job_name
+  description = "Cloud Scheduler job name for daily extraction"
 }
 
 output "artifact_registry_versioner_url" {

@@ -18,12 +18,13 @@ usage() {
   echo "    registry              — provision Artifact Registries and required APIs"
   echo "    build-extraction      — build and push extraction Docker image"
   echo "    build-transformation  — build and push transformation Docker image"
-  echo "    terraform-extraction  — apply extraction infrastructure (Cloud Run, Workflow, Scheduler)"
+  echo "    build-versioner       — build and push data-versioner Docker image"
+  echo "    terraform-extraction  — apply extraction infrastructure (Cloud Run, Workflows, Schedulers)"
   echo "    terraform-transform   — apply transformation infrastructure (Cloud Run, Workflow)"
   echo "    terraform             — apply all infrastructure (full apply)"
   echo ""
   echo "  Shorthand aliases:"
-  echo "    build   = build-extraction,build-transformation"
+  echo "    build   = build-extraction,build-transformation,build-versioner"
   echo "    all     = registry,build,terraform  (the default)"
   echo ""
   echo "Examples:"
@@ -55,8 +56,8 @@ fi
 expand_stages() {
   echo "$1" | tr ',' '\n' | while read -r stage; do
     case "$stage" in
-      all)      echo "registry"; echo "build-extraction"; echo "build-transformation"; echo "terraform" ;;
-      build)    echo "build-extraction"; echo "build-transformation" ;;
+      all)      echo "registry"; echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "terraform" ;;
+      build)    echo "build-extraction"; echo "build-transformation"; echo "build-versioner" ;;
       *)        echo "$stage" ;;
     esac
   done
@@ -89,6 +90,7 @@ resolve_image_urls() {
   REGION=$(terraform output -raw region 2>/dev/null || echo "europe-west2")
   IMAGE_URL_EXTRACT=$(terraform output -raw artifact_registry_url)/data-extraction
   IMAGE_URL_TRANSFORM=$(terraform output -raw artifact_registry_transformer_url)/data-transformation
+  IMAGE_URL_VERSION=$(terraform output -raw artifact_registry_versioner_url)/data-versioner
   gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 }
 
@@ -97,8 +99,9 @@ if run_stage registry; then
   echo ""
   echo "[registry] Provisioning Artifact Registry and required APIs..."
   terraform apply \
-    -target=module.artifact_registry \
-    -target=module.artifact_registry_transformer \
+    -target=module.artifact_registry_extract \
+    -target=module.artifact_registry_transform \
+    -target=module.artifact_registry_version \
     -auto-approve
 fi
 
@@ -122,14 +125,28 @@ if run_stage build-transformation; then
   docker push "$IMAGE_URL_TRANSFORM:latest"
 fi
 
+# 2c. Build and push versioner image
+if run_stage build-versioner; then
+  echo ""
+  echo "[build-versioner] Building and pushing data-versioner Docker image..."
+  resolve_image_urls
+  echo "Building: $IMAGE_URL_VERSION:latest"
+  docker build -t "$IMAGE_URL_VERSION:latest" --target entrypoint -f ../pv-prospect-data-versioner/Dockerfile ..
+  docker push "$IMAGE_URL_VERSION:latest"
+fi
+
 # 3a. Apply extraction infrastructure
 if run_stage terraform-extraction; then
   echo ""
-  echo "[terraform-extraction] Provisioning extraction Cloud Run, Workflow, and Scheduler..."
+  echo "[terraform-extraction] Provisioning extraction Cloud Run, Workflows, and Schedulers..."
   terraform apply \
-    -target=module.cloud_run \
-    -target=module.workflows \
-    -target=module.scheduler \
+    -target=module.cloud_run_extract \
+    -target=module.extract_workflow \
+    -target=module.extract_scheduler \
+    -target=module.extract_pv_site_backfill_workflow \
+    -target=module.extract_pv_site_backfill_scheduler \
+    -target=module.extract_weather_grid_backfill_workflow \
+    -target=module.extract_weather_grid_backfill_scheduler \
     -auto-approve
 fi
 
@@ -156,12 +173,25 @@ echo " Deployment Complete!"
 echo "=========================================================="
 echo ""
 REGION=$(terraform output -raw region 2>/dev/null || echo "europe-west2")
-echo "To test extraction:"
+echo "To test extraction by system:"
 echo "  gcloud workflows run pv-prospect-extract \\"
 echo "    --location=$REGION \\"
 echo "    --data='{\"pv_system_ids\": [12345], \"start_date\": \"2025-06-24\", \"end_date\": \"2025-06-25\"}'"
+echo ""
+echo "To test extraction by location (weather grid):"
+echo "  gcloud workflows run pv-prospect-extract \\"
+echo "    --location=$REGION \\"
+echo "    --data='{\"locations\": [\"50.49,-3.54\"], \"start_date\": \"2025-06-24\"}'"
+echo ""
+echo "To manually trigger backfills:"
+echo "  gcloud workflows run pv-prospect-extract-pv-site-backfill --location=$REGION"
+echo "  gcloud workflows run pv-prospect-extract-weather-grid-backfill --location=$REGION"
 echo ""
 echo "To test transformation:"
 echo "  gcloud workflows run pv-prospect-transform \\"
 echo "    --location=$REGION \\"
 echo "    --data='{\"pv_system_ids\": [12345], \"date\": \"2025-06-24\"}'"
+echo "  # or by location:"
+echo "  gcloud workflows run pv-prospect-transform \\"
+echo "    --location=$REGION \\"
+echo "    --data='{\"locations\": [\"50.49,-3.54\"], \"date\": \"2025-06-24\"}'"

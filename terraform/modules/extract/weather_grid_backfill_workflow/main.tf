@@ -1,24 +1,25 @@
-# Cloud Workflows orchestration for the daily grid-point weather backfill.
+# Cloud Workflows orchestration for the daily weather grid backfill.
 #
 # This workflow is manifest-driven:
 #
-#   1. It invokes the Cloud Run Job with JOB_TYPE=plan_grid_point_backfill,
+#   1. It invokes the Cloud Run Job with JOB_TYPE=plan_weather_grid_backfill,
 #      which writes a JSON manifest to GCS describing the day's work.
 #   2. It reads the manifest from GCS, then dispatches one extract_and_load
 #      Cloud Run Job per batch, sleeping between dispatches to stay under
 #      OpenMeteo's per-hour rate limit.
 #   3. After all batches succeed, it invokes the Cloud Run Job with
-#      JOB_TYPE=commit_grid_point_backfill, which advances the live cursor
+#      JOB_TYPE=commit_weather_grid_backfill, which advances the live cursor
 #      so that tomorrow's run picks up from the next point in the backfill.
 #
 # If any batch fails, the workflow aborts without committing the cursor, so
 # tomorrow's plan job will re-derive the same manifest and retry.
 
-resource "google_workflows_workflow" "backfill" {
-  name            = "pv-prospect-extract-backfill"
-  region          = var.region
-  service_account = var.service_account_email
-  description     = "Orchestrates the daily grid-point weather backfill via a manifest + paced Cloud Run Job dispatch"
+resource "google_workflows_workflow" "weather_grid_backfill" {
+  name                = "pv-prospect-extract-weather-grid-backfill"
+  region              = var.region
+  service_account     = var.service_account_email
+  deletion_protection = false
+  description         = "Orchestrates the daily grid-point weather backfill via a manifest + paced Cloud Run Job dispatch"
 
   source_contents = <<-YAML
     main:
@@ -45,7 +46,7 @@ resource "google_workflows_workflow" "backfill" {
                   containerOverrides:
                     - env:
                         - name: JOB_TYPE
-                          value: plan_grid_point_backfill
+                          value: plan_weather_grid_backfill
             result: plan_result
 
         - fetch_manifest:
@@ -107,7 +108,7 @@ resource "google_workflows_workflow" "backfill" {
                   containerOverrides:
                     - env:
                         - name: JOB_TYPE
-                          value: commit_grid_point_backfill
+                          value: commit_weather_grid_backfill
             result: commit_result
 
         - done:

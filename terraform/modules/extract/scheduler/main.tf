@@ -1,7 +1,7 @@
 # Cloud Scheduler job that triggers the extraction workflow daily
 
 resource "google_cloud_scheduler_job" "daily_extraction" {
-  name        = "pv-prospect-daily-extract"
+  name        = var.scheduler_job_name
   region      = var.region
   schedule    = var.schedule
   time_zone   = var.time_zone
@@ -12,7 +12,7 @@ resource "google_cloud_scheduler_job" "daily_extraction" {
     uri         = "https://workflowexecutions.googleapis.com/v1/${var.workflow_id}/executions"
 
     body = base64encode(jsonencode({
-      argument = jsonencode({})
+      argument = var.argument_json
     }))
 
     headers = {

@@ -4,10 +4,11 @@
 # and fans out Cloud Run Job executions — one per site/date combination.
 
 resource "google_workflows_workflow" "data_extraction" {
-  name            = "pv-prospect-extract"
-  region          = var.region
-  service_account = var.service_account_email
-  description     = "Orchestrates daily PV Prospect data extraction via Cloud Run Jobs"
+  name                = "pv-prospect-extract"
+  region              = var.region
+  service_account     = var.service_account_email
+  deletion_protection = false
+  description         = "Orchestrates daily PV Prospect data extraction via Cloud Run Jobs"
 
   source_contents = <<-YAML
     main:
@@ -20,12 +21,30 @@ resource "google_workflows_workflow" "data_extraction" {
               - job_name: "${var.cloud_run_job_name}"
               - pv_model_data_sources: $${default(map.get(args, "pv_model_data_sources"), ${jsonencode(var.default_pv_model_data_sources)})}
               - weather_model_data_sources: $${default(map.get(args, "weather_model_data_sources"), ${jsonencode(var.default_weather_model_data_sources)})}
-              - start_date: $${default(map.get(args, "start_date"), text.substring(time.format(sys.now()), 0, 10))}
-              - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
-              - locations: $${default(map.get(args, "locations"), ${jsonencode(var.default_locations)})}
+              - date: $${default(map.get(args, "date"), default(map.get(args, "start_date"), text.substring(time.format(sys.now()), 0, 10)))}
+              - raw_pv_system_ids: $${default(map.get(args, "pv_system_ids"), [])}
+              - raw_locations: $${default(map.get(args, "locations"), [])}
               - overwrite: $${default(map.get(args, "overwrite"), "false")}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
               - split_by: $${default(map.get(args, "split_by"), "${var.default_split_by}")}
+
+        - parse_all_pvs:
+            switch:
+              - condition: $${json.encode_to_string(raw_pv_system_ids) == "\"all\""}
+                assign:
+                  - pv_system_ids: ${jsonencode(var.default_pv_system_ids)}
+              - condition: true
+                assign:
+                  - pv_system_ids: $${raw_pv_system_ids}
+
+        - parse_all_locations:
+            switch:
+              - condition: $${json.encode_to_string(raw_locations) == "\"all\""}
+                assign:
+                  - locations: ${jsonencode(var.default_locations)}
+              - condition: true
+                assign:
+                  - locations: $${raw_locations}
 
         - preprocess:
             parallel:
@@ -77,8 +96,10 @@ resource "google_workflows_workflow" "data_extraction" {
                                                           value: $${ds}
                                                         - name: PV_SYSTEM_ID
                                                           value: $${string(pv_system_id)}
+                                                        - name: DATE
+                                                          value: $${date}
                                                         - name: START_DATE
-                                                          value: $${start_date}
+                                                          value: $${date}
                                                         - name: OVERWRITE
                                                           value: $${overwrite}
                                                         - name: DRY_RUN
@@ -113,8 +134,10 @@ resource "google_workflows_workflow" "data_extraction" {
                                                           value: $${ds}
                                                         - name: LOCATION
                                                           value: $${location}
+                                                        - name: DATE
+                                                          value: $${date}
                                                         - name: START_DATE
-                                                          value: $${start_date}
+                                                          value: $${date}
                                                         - name: OVERWRITE
                                                           value: $${overwrite}
                                                         - name: DRY_RUN
