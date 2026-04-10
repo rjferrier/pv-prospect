@@ -2,11 +2,14 @@ from functools import lru_cache
 from typing import Callable
 
 from pv_prospect.common import get_location_by_pv_system_id
-from pv_prospect.common.domain import Location, PVSite
+from pv_prospect.common.domain import Location, Period, PVSite
 from pv_prospect.data_extraction import TimeSeriesDataExtractor
 from pv_prospect.data_extraction.extractors import (
     OpenMeteoWeatherDataExtractor,
     PVOutputExtractor,
+)
+from pv_prospect.data_extraction.extractors.openmeteo import (
+    DEFAULT_SPLIT_PERIOD as _OPENMETEO_DEFAULT_SPLIT_PERIOD,
 )
 from pv_prospect.data_extraction.extractors.openmeteo import (
     APISelector,
@@ -15,6 +18,9 @@ from pv_prospect.data_extraction.extractors.openmeteo import (
     TimeResolution,
 )
 from pv_prospect.data_extraction.extractors.openmeteo import Mode as OMMode
+from pv_prospect.data_extraction.extractors.pvoutput import (
+    DEFAULT_SPLIT_PERIOD as _PVOUTPUT_DEFAULT_SPLIT_PERIOD,
+)
 from pv_prospect.data_sources import DataSource
 
 
@@ -47,6 +53,21 @@ _MULTI_DATE_EXTRACTORS = {
 
 def supports_multi_date(data_source: DataSource) -> bool:
     return data_source in _MULTI_DATE_EXTRACTORS
+
+
+_DEFAULT_SPLIT_PERIODS: dict[DataSource, Period | None] = {
+    DataSource.PVOUTPUT: _PVOUTPUT_DEFAULT_SPLIT_PERIOD,
+    DataSource.OPENMETEO_QUARTERHOURLY: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
+    DataSource.OPENMETEO_HOURLY: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
+    DataSource.OPENMETEO_SATELLITE: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
+    DataSource.OPENMETEO_HISTORICAL: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
+    DataSource.OPENMETEO_V0_QUARTERHOURLY: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
+    DataSource.OPENMETEO_V0_HOURLY: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
+}
+
+
+def default_split_period(data_source: DataSource) -> Period | None:
+    return _DEFAULT_SPLIT_PERIODS[data_source]
 
 
 _EXTRACTOR_FACTORIES: dict[DataSource, Callable[[], TimeSeriesDataExtractor]] = {

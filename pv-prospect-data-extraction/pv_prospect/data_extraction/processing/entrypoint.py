@@ -30,7 +30,7 @@ For **extract_and_load**:
     OVERWRITE         — ``true`` or ``false`` (default ``false``)
     DRY_RUN           — ``true`` or ``false`` (default ``false``)
     SPLIT_BY          — ``day`` or ``week`` (chunking hint; omit to use the
-                        full date range as a single chunk)
+                        data source default: day for PV, unsplit for weather)
 """
 
 import logging
@@ -52,6 +52,7 @@ from pv_prospect.common.domain import (
 )
 from pv_prospect.data_extraction import (
     DataSource,
+    default_split_period,
     get_extractor,
     supports_multi_date,
 )
@@ -159,16 +160,17 @@ def _run_extract_and_load(
         split_by,
     )
 
-    if split_by == 'week':
-        sub_date_ranges = complete_date_range.split_by(Period.WEEK)
-        if not supports_multi_date(data_source):
+    split_period = (
+        Period[split_by.upper()] if split_by else default_split_period(data_source)
+    )
+    if split_period:
+        sub_date_ranges = complete_date_range.split_by(split_period)
+        if split_period == Period.WEEK and not supports_multi_date(data_source):
             final_ranges = []
             for dr in sub_date_ranges:
                 final_ranges.extend(dr.split_by(Period.DAY))
         else:
             final_ranges = sub_date_ranges
-    elif split_by == 'day':
-        final_ranges = complete_date_range.split_by(Period.DAY)
     else:
         final_ranges = [complete_date_range]
 

@@ -34,6 +34,7 @@ from pv_prospect.common.domain import (
 )
 from pv_prospect.data_extraction import (
     DataSource,
+    default_split_period,
     get_extractor,
     supports_multi_date,
 )
@@ -106,11 +107,12 @@ def _parse_args() -> 'Any':
         help='show what would be done without writing',
     )
     parser.add_argument(
+        '-s',
         '--split-by',
         choices=['day', 'week'],
         default=None,
         dest='split_by',
-        help='split date range by day or week (omit to use the full range as a single chunk)',
+        help='split date range by day or week (default: day for PV, unsplit for weather)',
     )
     parser.add_argument(
         '-l',
@@ -226,28 +228,29 @@ def _main() -> None:
         print(str(e))
         sys.exit(1)
 
-    if args.split_by == 'week':
-        sub_date_ranges = complete_date_range.split_by(Period.WEEK)
-    elif args.split_by == 'day':
-        sub_date_ranges = complete_date_range.split_by(Period.DAY)
-    else:
-        sub_date_ranges = [complete_date_range]
-    if args.reverse:
-        sub_date_ranges.reverse()
+    explicit_split_period = Period[args.split_by.upper()] if args.split_by else None
 
     work_items: list[tuple[DataSource, AnyEntity, DateRange]] = []
-    for dr in sub_date_ranges:
-        for sd in data_sources:
-            if args.split_by == 'week' and not supports_multi_date(sd):
-                day_ranges = dr.split_by(Period.DAY)
+    for sd in data_sources:
+        split_period = explicit_split_period or default_split_period(sd)
+        if split_period:
+            sub_date_ranges = complete_date_range.split_by(split_period)
+            if split_period == Period.WEEK and not supports_multi_date(sd):
+                final_ranges = []
+                for dr in sub_date_ranges:
+                    final_ranges.extend(dr.split_by(Period.DAY))
             else:
-                day_ranges = [dr]
-            entities: list[AnyEntity] = (
-                grid_points if sd.type == DataSourceType.WEATHER else pv_sites
-            )
-            for day_dr in day_ranges:
-                for ent in entities:
-                    work_items.append((sd, ent, day_dr))
+                final_ranges = sub_date_ranges
+        else:
+            final_ranges = [complete_date_range]
+        if args.reverse:
+            final_ranges.reverse()
+        entities: list[AnyEntity] = (
+            grid_points if sd.type == DataSourceType.WEATHER else pv_sites
+        )
+        for dr in final_ranges:
+            for ent in entities:
+                work_items.append((sd, ent, dr))
 
     if not work_items:
         print('No tasks to process.')

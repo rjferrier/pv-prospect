@@ -122,6 +122,7 @@ def _parse_args() -> Any:
         help="end date (exclusive): 'today', 'yesterday', YYYY-MM-DD, or YYYY-MM (default: start date + 1 day)",
     )
     parser.add_argument(
+        '-s',
         '--split-by',
         choices=['day', 'week'],
         default=None,

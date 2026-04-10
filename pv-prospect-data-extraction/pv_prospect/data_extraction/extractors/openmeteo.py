@@ -7,9 +7,11 @@ from typing import Any, Callable, Collection, Optional
 import requests  # type: ignore[import-untyped]
 from typing_extensions import deprecated
 
-from pv_prospect.common.domain import GridPoint, Location, PVSite
+from pv_prospect.common.domain import GridPoint, Location, Period, PVSite
 from pv_prospect.data_extraction import TimeSeries
 from pv_prospect.data_extraction.util import retry_on_429
+
+DEFAULT_SPLIT_PERIOD: Period | None = None
 
 MIN_TIME = time(4, 0)
 MAX_TIME = time(22, 0)

@@ -5,7 +5,7 @@ from typing import Collection, Optional
 import requests  # type: ignore[import-untyped]
 
 from pv_prospect.common import VarMapping, map_from_env
-from pv_prospect.common.domain import PVSite
+from pv_prospect.common.domain import Period, PVSite
 from pv_prospect.data_extraction import TimeSeries
 from pv_prospect.data_extraction.util import retry_on_429
 
@@ -17,6 +17,9 @@ OWN_SYSTEM_ID_HEADER_NAME = 'X-Pvoutput-SystemId'
 RATE_LIMIT_HEADER = 'X-Rate-Limit-Limit'
 RATE_LIMIT_REMAINING_HEADER = 'X-Rate-Limit-Remaining'
 RATE_LIMIT_RESET_HEADER = 'X-Rate-Limit-Reset'
+
+
+DEFAULT_SPLIT_PERIOD: Period | None = Period.DAY
 
 
 CONSTANT_QUERY_PARAMS = {
