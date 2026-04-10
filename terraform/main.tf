@@ -196,6 +196,67 @@ module "transform_workflow" {
 }
 
 # ---------------------------------------------------------------------------
+# Versioning pipeline
+# ---------------------------------------------------------------------------
+
+module "artifact_registry_version" {
+  source        = "./modules/artifact_registry"
+  region        = var.region
+  repository_id = "data-versioner"
+}
+
+# The pipeline SA needs write access to the versioned-feature bucket
+resource "google_storage_bucket_iam_member" "pipeline_versioned_feature" {
+  bucket = module.storage.versioned_feature_bucket_name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
+module "cloud_run_version" {
+  source                = "./modules/cloud_run_job"
+  job_name              = "data-versioner"
+  region                = var.region
+  image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-versioner/data-versioner"
+  image_tag             = var.versioner_image_tag
+  timeout               = "1800s"
+  cpu                   = "1"
+  memory                = "2Gi"
+  service_account_email = google_service_account.pipeline.email
+  env_vars = {
+    GOOGLE_CLOUD_PROJECT = var.project_id
+    LOG_LEVEL            = "INFO"
+  }
+  secret_env_vars = [{
+    name      = "GITHUB_DEPLOY_KEY"
+    secret_id = "github-deploy-key"
+    version   = "latest"
+  }]
+
+  depends_on = [google_project_service.apis, module.artifact_registry_version]
+}
+
+module "version_workflow" {
+  source = "./modules/version/workflow"
+  region = var.region
+
+  service_account_email = google_service_account.pipeline.email
+  cloud_run_job_name    = module.cloud_run_version.job_name
+
+  depends_on = [google_project_service.apis, module.cloud_run_version]
+}
+
+module "version_scheduler" {
+  source = "./modules/version/scheduler"
+  region = var.region
+
+  workflow_id           = module.version_workflow.workflow_id
+  service_account_email = google_service_account.pipeline.email
+  schedule              = var.versioner_scheduler_cron
+
+  depends_on = [google_project_service.apis, module.version_workflow]
+}
+
+# ---------------------------------------------------------------------------
 # Outputs
 # ---------------------------------------------------------------------------
 
@@ -242,4 +303,19 @@ output "backfill_workflow_name" {
 output "scheduler_job_name" {
   value       = module.extract_scheduler.scheduler_job_name
   description = "Cloud Scheduler job name"
+}
+
+output "artifact_registry_versioner_url" {
+  value       = module.artifact_registry_version.repository_url
+  description = "Docker registry URL for data versioner"
+}
+
+output "version_workflow_name" {
+  value       = module.version_workflow.workflow_name
+  description = "Versioning workflow name"
+}
+
+output "version_scheduler_job_name" {
+  value       = module.version_scheduler.scheduler_job_name
+  description = "Versioning Cloud Scheduler job name"
 }

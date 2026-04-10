@@ -62,6 +62,18 @@ variable "default_split_by" {
   description = "Default SPLIT_BY value passed to extract jobs: 'day', 'week', or '' (full range)"
 }
 
+variable "versioner_image_tag" {
+  type        = string
+  default     = "latest"
+  description = "Docker image tag for the data versioner container"
+}
+
+variable "versioner_scheduler_cron" {
+  type        = string
+  default     = "0 6 * * 1"
+  description = "Cron schedule for weekly versioning (default: Monday 06:00 UTC)"
+}
+
 variable "secret_env_vars" {
   type = list(object({
     name      = string

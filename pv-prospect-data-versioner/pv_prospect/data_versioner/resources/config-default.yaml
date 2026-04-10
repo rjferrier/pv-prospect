@@ -1,0 +1,4 @@
+instance_repo_url: 'git@github.com:rjferrier/pv-prospect-instance.git'
+instance_repo_branch: 'main'
+dvc_remote_name: 'feature'
+prepared_data_dir: 'data/prepared'

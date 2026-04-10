@@ -15,6 +15,7 @@ jobs:
           - pv-prospect-data-sources
           - pv-prospect-data-extraction
           - pv-prospect-data-transformation
+          - pv-prospect-data-versioner
 
     defaults:
       run:
