@@ -202,11 +202,15 @@ def _main() -> None:
 
     pv_sites = [get_pv_site_by_system_id(sid) for sid in pv_system_ids]
 
-    # Grid points = those resolved from PV sites + any explicit --location values
-    grid_points: list[GridPoint] = [
-        GridPoint(get_location_by_pv_system_id(site.pvo_sys_id)) for site in pv_sites
-    ]
-    if args.locations:
+    # Grid points = those resolved from PV sites + any explicit --location values.
+    # Only needed when at least one weather source is requested.
+    has_weather_source = any(sd.type == DataSourceType.WEATHER for sd in data_sources)
+    grid_points: list[GridPoint] = (
+        [GridPoint(get_location_by_pv_system_id(site.pvo_sys_id)) for site in pv_sites]
+        if has_weather_source
+        else []
+    )
+    if has_weather_source and args.locations:
         grid_points += _parse_locations(args.locations)
 
     if pv_sites:
