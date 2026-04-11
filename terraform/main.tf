@@ -85,6 +85,13 @@ module "storage" {
   region        = var.region
 }
 
+module "seed_resources" {
+  source = "./modules/seed_resources"
+
+  staging_bucket_name = module.storage.staging_bucket_name
+  point_samples_dir   = "${path.root}/../uk-geo/point_samples"
+}
+
 # ---------------------------------------------------------------------------
 # Extraction pipeline
 # ---------------------------------------------------------------------------
