@@ -88,7 +88,7 @@ terraform init -backend-config=backend.hcl -upgrade
 # Helper: resolve region and image URLs from terraform outputs
 resolve_image_urls() {
   REGION=$(terraform output -raw region 2>/dev/null || echo "europe-west2")
-  IMAGE_URL_EXTRACT=$(terraform output -raw artifact_registry_url)/data-extraction
+  IMAGE_URL_EXTRACT=$(terraform output -raw artifact_registry_extractor_url)/data-extraction
   IMAGE_URL_TRANSFORM=$(terraform output -raw artifact_registry_transformer_url)/data-transformation
   IMAGE_URL_VERSION=$(terraform output -raw artifact_registry_versioner_url)/data-versioner
   gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
