@@ -4,7 +4,7 @@ from typing import Callable
 
 from celery.result import AsyncResult, ResultSet
 
-from pv_prospect.common.domain import AnyEntity, DateRange
+from pv_prospect.common.domain import AnySite, DateRange
 from pv_prospect.data_extraction import DataSource
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing.tasks import extract_and_load, preprocess
@@ -64,7 +64,7 @@ class TaskQueuer:
     def extract_and_load(
         self,
         data_source: DataSource,
-        entity: AnyEntity,
+        site: AnySite,
         date_range: DateRange,
         local_dir: str | None,
         overwrite: bool,
@@ -74,7 +74,7 @@ class TaskQueuer:
         extract_and_load.apply_async(
             args=(
                 data_source,
-                entity,
+                site,
                 date_range,
                 local_dir,
                 overwrite,

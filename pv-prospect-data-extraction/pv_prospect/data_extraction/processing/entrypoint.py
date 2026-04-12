@@ -40,15 +40,13 @@ import sys
 from datetime import date
 
 from pv_prospect.common import (
-    build_location_mapping_repo,
     build_pv_site_repo,
     configure_logging,
     get_config,
-    get_location_by_pv_system_id,
     get_pv_site_by_system_id,
 )
 from pv_prospect.common.domain import (
-    AnyEntity,
+    AnySite,
     Period,
 )
 from pv_prospect.data_extraction import (
@@ -73,8 +71,14 @@ from pv_prospect.data_extraction.processing.sample_file import (
     sample_file_path,
 )
 from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
-from pv_prospect.data_sources import DataSourceType, resolve_grid_point
-from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
+from pv_prospect.data_sources import (
+    DataSourceType,
+    resolve_location_strings,
+    resolve_site,
+)
+from pv_prospect.data_sources import (
+    get_config_dir as get_ds_config_dir,
+)
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
@@ -108,31 +112,42 @@ def _run_preprocess(
 def _resolve_entities(
     data_source: DataSource,
     resources_fs: FileSystem,
-) -> list[AnyEntity]:
+) -> list[AnySite]:
     pv_system_id = _env_int('PV_SYSTEM_ID')
     location = os.environ.get('LOCATION')
     sample_file_index = _env_int('SAMPLE_FILE_INDEX')
 
-    if sample_file_index is not None:
-        if data_source.type != DataSourceType.WEATHER:
-            raise ValueError('SAMPLE_FILE_INDEX is only valid for weather sources.')
-        path = sample_file_path(sample_file_index)
-        grid_points = read_sample_file(resources_fs, path)
-        return list(grid_points)
+    def _resolve_sample_file(idx: int) -> list[str]:
+        path = sample_file_path(idx)
+        return read_sample_file(resources_fs, path)
 
-    if data_source.type == DataSourceType.PV:
-        if not pv_system_id:
-            raise ValueError('PV_SYSTEM_ID must be set for PV sources.')
-        return [get_pv_site_by_system_id(pv_system_id)]
-    if data_source.type == DataSourceType.WEATHER:
-        return [
-            resolve_grid_point(
-                get_location_by_pv_system_id,
-                pv_system_id=pv_system_id,
-                location_str=location,
+    sites: list[AnySite] = []
+
+    location_strings = resolve_location_strings(
+        resolve_sample_file=_resolve_sample_file,
+        location_strings=location,
+        sample_file_index=sample_file_index,
+    )
+
+    if location_strings:
+        for loc in location_strings:
+            sites.append(
+                resolve_site(
+                    data_source.type, get_pv_site_by_system_id, location_str=loc
+                )
             )
-        ]
-    raise ValueError(f'Unknown data source type: {data_source.type}')
+    elif pv_system_id is not None:
+        sites.append(
+            resolve_site(
+                data_source.type, get_pv_site_by_system_id, pv_system_id=pv_system_id
+            )
+        )
+    else:
+        raise ValueError(
+            'Could not resolve any targets (need PV_SYSTEM_ID, LOCATION, or SAMPLE_FILE_INDEX).'
+        )
+
+    return sites
 
 
 def _run_extract_and_load(
@@ -157,9 +172,6 @@ def _run_extract_and_load(
 
     resources_extractor = Extractor(resources_fs)
     build_pv_site_repo(resources_extractor.read_file(core.PV_SITES_CSV_FILE))
-    build_location_mapping_repo(
-        resources_extractor.read_file(core.LOCATION_MAPPING_CSV_FILE)
-    )
 
     entities = _resolve_entities(data_source, resources_fs)
 

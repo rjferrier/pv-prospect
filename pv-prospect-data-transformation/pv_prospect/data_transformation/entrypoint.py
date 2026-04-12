@@ -34,15 +34,13 @@ import sys
 from datetime import date
 
 from pv_prospect.common import (
-    build_location_mapping_repo,
     build_pv_site_repo,
     configure_logging,
     get_config,
-    get_location_by_pv_system_id,
     get_pv_site_by_system_id,
 )
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
-from pv_prospect.data_sources import resolve_grid_point
+from pv_prospect.data_sources import resolve_site
 from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.core import (
     assemble_prepared_pv,
@@ -87,9 +85,6 @@ def _load_resources(resources_fs: FileSystem) -> None:
 
     if extractor.file_exists('pv_sites.csv'):
         build_pv_site_repo(extractor.read_file('pv_sites.csv'))
-
-    if extractor.file_exists('location_mapping.csv'):
-        build_location_mapping_repo(extractor.read_file('location_mapping.csv'))
 
 
 def _get_logging_filesystem(
@@ -175,8 +170,9 @@ def main() -> None:
     logger.info('Starting %s for %s, split_by=%s', transformation, date_range, split_by)
 
     if transformation is Transformation.CLEAN_WEATHER:
-        grid_point = resolve_grid_point(
-            get_location_by_pv_system_id,
+        site = resolve_site(
+            config.data_sources.weather.type,
+            get_pv_site_by_system_id,
             pv_system_id=pv_system_id,
             location_str=location_str,
         )
@@ -184,7 +180,7 @@ def main() -> None:
             raw_fs,
             cleaned_fs,
             config.data_sources.weather,
-            grid_point,
+            site,
             date_range,
             split_by == 'week',
         )
@@ -200,8 +196,9 @@ def main() -> None:
         )
 
     elif transformation is Transformation.PREPARE_WEATHER:
-        grid_point = resolve_grid_point(
-            get_location_by_pv_system_id,
+        site = resolve_site(
+            config.data_sources.weather.type,
+            get_pv_site_by_system_id,
             pv_system_id=pv_system_id,
             location_str=location_str,
         )
@@ -209,24 +206,18 @@ def main() -> None:
             cleaned_fs,
             batches_fs,
             config.data_sources.weather,
-            grid_point,
+            site,
             date_range,
         )
 
     elif transformation is Transformation.PREPARE_PV:
         pv_site = get_pv_site_by_system_id(pv_system_id)  # type: ignore[arg-type]
-        grid_point = resolve_grid_point(
-            get_location_by_pv_system_id,
-            pv_system_id=pv_system_id,
-            location_str=location_str,
-        )
         run_prepare_pv(
             cleaned_fs,
             batches_fs,
             config.data_sources.pv,
             config.data_sources.weather,
             pv_site,
-            grid_point,
             date_range,
             get_pv_site_by_system_id,
         )

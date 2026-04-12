@@ -84,11 +84,11 @@ class ProcessingStats:
 
         # Write to log file immediately
         if self.failure_log_path:
-            entity = task.entity
+            site = task.site
             target_label = (
-                f'{entity.name} ({entity.pvo_sys_id})'
-                if isinstance(entity, PVSite)
-                else entity.id
+                f'{site.name} ({site.pvo_sys_id})'
+                if isinstance(site, PVSite)
+                else site.id
             )
             with open(self.failure_log_path, 'a') as f:
                 f.write(

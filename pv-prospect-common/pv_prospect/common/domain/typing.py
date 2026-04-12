@@ -1,7 +1,7 @@
 from typing import TypeAlias
 
-from . import Entity
-from .grid_point import GridPoint
+from . import Site
+from .arbitrary_site import ArbitrarySite
 from .pv_site import PVSite
 
-AnyEntity: TypeAlias = Entity | GridPoint | PVSite
+AnySite: TypeAlias = Site | ArbitrarySite | PVSite

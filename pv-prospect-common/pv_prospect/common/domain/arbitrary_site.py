@@ -5,11 +5,11 @@ from .location import Location
 
 
 @dataclass(frozen=True)
-class GridPoint:
+class ArbitrarySite:
     location: Location
 
     def __str__(self) -> str:
-        return f'GridPoint(id={self.id})'
+        return f'ArbitrarySite(id={self.id})'
 
     @property
     def id(self) -> str:
@@ -22,7 +22,5 @@ class GridPoint:
         return f'{lat}_{lon}'
 
     @classmethod
-    def from_id(cls, grid_point_id: str) -> 'GridPoint':
-        return cls(
-            Location.from_coordinate_string(grid_point_id, filename_friendly=True)
-        )
+    def from_id(cls, site_id: str) -> 'ArbitrarySite':
+        return cls(Location.from_coordinate_string(site_id, filename_friendly=True))

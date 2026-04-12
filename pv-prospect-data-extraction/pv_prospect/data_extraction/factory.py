@@ -1,8 +1,7 @@
 from functools import lru_cache
 from typing import Callable
 
-from pv_prospect.common import get_location_by_pv_system_id
-from pv_prospect.common.domain import Location, Period, PVSite
+from pv_prospect.common.domain import Period
 from pv_prospect.data_extraction import TimeSeriesDataExtractor
 from pv_prospect.data_extraction.extractors import (
     OpenMeteoWeatherDataExtractor,
@@ -22,11 +21,6 @@ from pv_prospect.data_extraction.extractors.pvoutput import (
     DEFAULT_SPLIT_PERIOD as _PVOUTPUT_DEFAULT_SPLIT_PERIOD,
 )
 from pv_prospect.data_sources import DataSource
-
-
-@lru_cache(maxsize=None)
-def _location_getter(pv_site: PVSite) -> list[Location]:
-    return [get_location_by_pv_system_id(pv_site.pvo_sys_id)]
 
 
 @lru_cache(maxsize=None)
@@ -74,7 +68,6 @@ _EXTRACTOR_FACTORIES: dict[DataSource, Callable[[], TimeSeriesDataExtractor]] = 
     DataSource.PVOUTPUT: lambda: PVOutputExtractor.from_env(),
     DataSource.OPENMETEO_QUARTERHOURLY: lambda: (
         OpenMeteoWeatherDataExtractor.from_components(
-            location_getter=_location_getter,
             api_selector=APISelector.FORECAST,
             time_resolution=TimeResolution.QUARTERHOURLY,
             fields=Fields.FORECAST,
@@ -82,7 +75,6 @@ _EXTRACTOR_FACTORIES: dict[DataSource, Callable[[], TimeSeriesDataExtractor]] = 
         )
     ),
     DataSource.OPENMETEO_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_components(
-        location_getter=_location_getter,
         api_selector=APISelector.FORECAST,
         time_resolution=TimeResolution.HOURLY,
         fields=Fields.FORECAST,
@@ -90,7 +82,6 @@ _EXTRACTOR_FACTORIES: dict[DataSource, Callable[[], TimeSeriesDataExtractor]] = 
     ),
     DataSource.OPENMETEO_SATELLITE: lambda: (
         OpenMeteoWeatherDataExtractor.from_components(
-            location_getter=_location_getter,
             api_selector=APISelector.SATELLITE,
             time_resolution=TimeResolution.HOURLY,
             fields=Fields.SOLAR_RADIATION,
@@ -99,7 +90,6 @@ _EXTRACTOR_FACTORIES: dict[DataSource, Callable[[], TimeSeriesDataExtractor]] = 
     ),
     DataSource.OPENMETEO_HISTORICAL: lambda: (
         OpenMeteoWeatherDataExtractor.from_components(
-            location_getter=_location_getter,
             api_selector=APISelector.HISTORICAL,
             time_resolution=TimeResolution.HOURLY,
             fields=Fields.FORECAST,
@@ -107,11 +97,9 @@ _EXTRACTOR_FACTORIES: dict[DataSource, Callable[[], TimeSeriesDataExtractor]] = 
         )
     ),
     DataSource.OPENMETEO_V0_QUARTERHOURLY: lambda: (
-        OpenMeteoWeatherDataExtractor.from_mode(
-            location_getter=_location_getter, mode=OMMode.QUARTERHOURLY
-        )
+        OpenMeteoWeatherDataExtractor.from_mode(mode=OMMode.QUARTERHOURLY)
     ),
     DataSource.OPENMETEO_V0_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_mode(
-        location_getter=_location_getter, mode=OMMode.HOURLY
+        mode=OMMode.HOURLY
     ),
 }

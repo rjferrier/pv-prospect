@@ -7,7 +7,7 @@ from typing import Any, Callable, Collection, Optional
 import requests  # type: ignore[import-untyped]
 from typing_extensions import deprecated
 
-from pv_prospect.common.domain import GridPoint, Location, Period, PVSite
+from pv_prospect.common.domain import AnySite, Location, Period
 from pv_prospect.data_extraction import TimeSeries
 from pv_prospect.data_extraction.util import retry_on_429
 
@@ -238,30 +238,23 @@ API_HELPERS_BY_MODE = {
 
 
 class OpenMeteoWeatherDataExtractor:
-    def __init__(
-        self, location_getter: Callable[[PVSite], list[Location]], api_helper: APIHelper
-    ) -> None:
-        self.location_getter = location_getter
+    def __init__(self, api_helper: APIHelper) -> None:
         self.api_helper = api_helper
 
     @classmethod
-    def from_mode(
-        cls, location_getter: Callable[[PVSite], list[Location]], mode: Mode
-    ) -> 'OpenMeteoWeatherDataExtractor':
+    def from_mode(cls, mode: Mode) -> 'OpenMeteoWeatherDataExtractor':
         api_helper = API_HELPERS_BY_MODE[mode]
-        return cls(location_getter=location_getter, api_helper=api_helper)
+        return cls(api_helper=api_helper)
 
     @classmethod
     def from_components(
         cls,
-        location_getter: Callable[[PVSite], list[Location]],
         api_selector: APISelector,
         time_resolution: TimeResolution,
         models: Models,
         fields: Fields,
     ) -> 'OpenMeteoWeatherDataExtractor':
         return cls(
-            location_getter=location_getter,
             api_helper=APIHelper(
                 api_selector=api_selector,
                 time_resolution=time_resolution,
@@ -273,18 +266,18 @@ class OpenMeteoWeatherDataExtractor:
     @retry_on_429
     def extract(
         self,
-        entities: Collection[GridPoint],
+        sites: Collection[AnySite],
         date_: date,
         end_date: Optional[date] = None,
     ) -> list[TimeSeries]:
-        grid_points = list(entities)
+        sites_list = list(sites)
 
         start_datetime = datetime.combine(date_, MIN_TIME)
 
         # For multi-date extraction, use end_date if provided; otherwise use same day
         end_datetime = datetime.combine(end_date if end_date else date_, MAX_TIME)
 
-        locations = [gp.location for gp in grid_points]
+        locations = [s.location for s in sites_list]
 
         url = self.api_helper.get_url()
         params = self.api_helper.get_query_params(
@@ -296,10 +289,9 @@ class OpenMeteoWeatherDataExtractor:
         # Parse JSON response and convert to CSV rows
         json_data = json.loads(response.text)
 
-        if len(grid_points) == 1:
+        if len(sites_list) == 1:
             return [
                 TimeSeries(
-                    entity=grid_points[0],
                     rows=self._process_time_series_data(json_data),
                     metadata=_metadata_from_response(json_data),
                 )
@@ -307,11 +299,10 @@ class OpenMeteoWeatherDataExtractor:
         else:
             return [
                 TimeSeries(
-                    entity=grid_point,
                     rows=self._process_time_series_data(entry),
                     metadata=_metadata_from_response(entry),
                 )
-                for grid_point, entry in zip(grid_points, json_data, strict=True)
+                for entry in json_data
             ]
 
     def _process_time_series_data(self, json_data: dict[str, Any]) -> list[list[str]]:

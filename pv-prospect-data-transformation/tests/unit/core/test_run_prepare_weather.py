@@ -6,7 +6,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 import pytest
-from pv_prospect.common.domain import DateRange, GridPoint
+from pv_prospect.common.domain import ArbitrarySite, DateRange
 from pv_prospect.data_sources import (
     DataSource,
     build_time_series_csv_file_path,
@@ -26,13 +26,13 @@ _METADATA = {
 }
 
 
-def _make_grid_point() -> GridPoint:
-    return GridPoint.from_id('504900_-35400')
+def _make_grid_point() -> ArbitrarySite:
+    return ArbitrarySite.from_id('504900_-35400')
 
 
 def _write_cleaned_csv(
     fs: FakeFileSystem,
-    grid_point: GridPoint,
+    grid_point: ArbitrarySite,
 ) -> None:
     """Write a cleaned weather CSV and metadata JSON to the fake fs."""
     times = pd.date_range('2026-01-15 00:00:00', periods=24, freq='h')
@@ -53,12 +53,12 @@ def _write_cleaned_csv(
 
 
 @pytest.fixture
-def grid_point() -> GridPoint:
+def grid_point() -> ArbitrarySite:
     return _make_grid_point()
 
 
 @pytest.fixture
-def cleaned_fs(grid_point: GridPoint) -> FakeFileSystem:
+def cleaned_fs(grid_point: ArbitrarySite) -> FakeFileSystem:
     fs = FakeFileSystem()
     _write_cleaned_csv(fs, grid_point)
     return fs
@@ -72,7 +72,7 @@ def batches_fs() -> FakeFileSystem:
 def test_writes_batch_at_expected_path(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
-    grid_point: GridPoint,
+    grid_point: ArbitrarySite,
 ) -> None:
     run_prepare_weather(
         cleaned_fs,
@@ -89,7 +89,7 @@ def test_writes_batch_at_expected_path(
 def test_batch_has_no_header(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
-    grid_point: GridPoint,
+    grid_point: ArbitrarySite,
 ) -> None:
     run_prepare_weather(
         cleaned_fs,
@@ -109,7 +109,7 @@ def test_batch_has_no_header(
 def test_batch_includes_metadata_values(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
-    grid_point: GridPoint,
+    grid_point: ArbitrarySite,
 ) -> None:
     run_prepare_weather(
         cleaned_fs,
@@ -129,7 +129,7 @@ def test_batch_includes_metadata_values(
 def test_batch_has_correct_number_of_fields(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
-    grid_point: GridPoint,
+    grid_point: ArbitrarySite,
 ) -> None:
     run_prepare_weather(
         cleaned_fs,

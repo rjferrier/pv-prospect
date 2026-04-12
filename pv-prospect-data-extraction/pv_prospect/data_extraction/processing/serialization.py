@@ -5,7 +5,13 @@ from decimal import Decimal
 
 from kombu.utils.json import register_type
 
-from pv_prospect.common.domain import AnyEntity, DateRange, GridPoint, Location, PVSite
+from pv_prospect.common.domain import (
+    AnySite,
+    ArbitrarySite,
+    DateRange,
+    Location,
+    PVSite,
+)
 from pv_prospect.data_extraction import DataSource
 from pv_prospect.data_extraction.processing.value_objects import (
     FailureDetails,
@@ -61,24 +67,24 @@ def _decode_result_type(obj: dict[str, str]) -> ResultType:
     return ResultType(obj['value'])
 
 
-def _encode_target(entity: AnyEntity) -> dict:
-    """Encode a PVSite or GridPoint to a dict."""
-    if isinstance(entity, PVSite):
+def _encode_target(site: AnySite) -> dict:
+    """Encode a PVSite or ArbitrarySite to a dict."""
+    if isinstance(site, PVSite):
         return {
             '__target_type__': 'pv_site',
-            'pvo_sys_id': entity.pvo_sys_id,
+            'pvo_sys_id': site.pvo_sys_id,
         }
     return {
-        '__target_type__': 'grid_point',
-        'latitude': str(entity.location.latitude),
-        'longitude': str(entity.location.longitude),
+        '__target_type__': 'arbitrary_site',
+        'latitude': str(site.location.latitude),
+        'longitude': str(site.location.longitude),
     }
 
 
-def _decode_target(obj: dict) -> AnyEntity:
-    """Decode a PVSite or GridPoint from a dict."""
-    if obj['__target_type__'] in ('grid_point', 'location'):
-        return GridPoint(
+def _decode_target(obj: dict) -> AnySite:
+    """Decode a PVSite or ArbitrarySite from a dict."""
+    if obj['__target_type__'] in ('arbitrary_site', 'grid_point', 'location'):
+        return ArbitrarySite(
             Location(
                 latitude=Decimal(obj['latitude']),
                 longitude=Decimal(obj['longitude']),
@@ -97,7 +103,7 @@ def _encode_task(obj: Task) -> dict:
         'data_source': obj.data_source.value
         if hasattr(obj.data_source, 'value')
         else obj.data_source,
-        'target': _encode_target(obj.entity),
+        'target': _encode_target(obj.site),
         'date_range': {
             'start': obj.date_range.start.isoformat(),
             'end': obj.date_range.end.isoformat(),
@@ -119,7 +125,7 @@ def _decode_task(obj: dict) -> Task:
     )
     return Task(
         data_source=data_source,
-        entity=_decode_target(obj['target']),
+        site=_decode_target(obj['target']),
         date_range=date_range,
     )
 
@@ -150,7 +156,7 @@ def _encode_result(obj: Result) -> dict:
         '__type__': 'Result',
         'task': {
             'data_source': source_desc_value,
-            'target': _encode_target(obj.task.entity),
+            'target': _encode_target(obj.task.site),
             'date_range': {
                 'start': obj.task.date_range.start.isoformat(),
                 'end': obj.task.date_range.end.isoformat(),
@@ -167,7 +173,7 @@ def _decode_result(obj: dict) -> Result:
     """Decode a Result from a dict."""
     task = Task(
         data_source=DataSource(obj['task']['data_source']),
-        entity=_decode_target(obj['task']['target']),
+        site=_decode_target(obj['task']['target']),
         date_range=DateRange(
             date.fromisoformat(obj['task']['date_range']['start']),
             date.fromisoformat(obj['task']['date_range']['end']),

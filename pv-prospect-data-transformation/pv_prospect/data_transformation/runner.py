@@ -23,23 +23,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
 from pv_prospect.common import (
-    build_location_mapping_repo,
     build_pv_site_repo,
     get_all_pv_system_ids,
     get_config,
-    get_location_by_pv_system_id,
     get_pv_site_by_system_id,
 )
 from pv_prospect.common.domain import (
+    AnySite,
     DateRange,
-    GridPoint,
-    Location,
     PVSite,
 )
 from pv_prospect.data_sources import (
-    LOCATION_MAPPING_CSV_FILE,
-    PV_SITES_CSV_FILE,
     DataSource,
+    DataSourceType,
+    resolve_location_strings,
+    resolve_pv_system_ids,
+    resolve_site,
 )
 from pv_prospect.data_sources import (
     get_config_dir as get_ds_config_dir,
@@ -146,20 +145,9 @@ def _parse_args() -> Any:
     return parser.parse_args()
 
 
-def _parse_pv_system_ids(s: str) -> list[int]:
-    return [int(x.strip()) for x in s.split(',') if x.strip()]
-
-
-def _parse_locations(s: str) -> list[GridPoint]:
-    parts = [x.strip() for x in s.split(',') if x.strip()]
-    if len(parts) % 2 != 0:
-        raise ValueError(
-            f'Expected pairs of lat,lon values but got {len(parts)} values.'
-        )
-    return [
-        GridPoint(Location.from_coordinates(parts[i], parts[i + 1]))
-        for i in range(0, len(parts), 2)
-    ]
+def _parse_locations(s: str) -> list[str]:
+    locations = resolve_location_strings(location_strings=s)
+    return locations
 
 
 # ---------------------------------------------------------------------------
@@ -176,57 +164,56 @@ def _make_step_fn(
     weather_data_source: DataSource,
     date_range: DateRange,
     split_by: str | None,
-) -> Callable[[GridPoint, PVSite | None], None]:
+) -> Callable[[AnySite], None]:
     """Return a callable that runs *step* for a single entity."""
     if step == Transformation.CLEAN_WEATHER:
 
-        def fn_clean_weather(grid_point: GridPoint, _: PVSite | None) -> None:
+        def fn_clean_weather(site: AnySite) -> None:
             run_clean_weather(
                 raw_fs,
                 cleaned_fs,
                 weather_data_source,
-                grid_point,
+                site,
                 date_range,
                 split_by == 'week',
             )
 
-        return fn_clean_weather  # type: ignore[return-value]
+        return fn_clean_weather
 
     if step == Transformation.PREPARE_WEATHER:
 
-        def fn_prepare_weather(grid_point: GridPoint, _: PVSite | None) -> None:
+        def fn_prepare_weather(site: AnySite) -> None:
             run_prepare_weather(
-                cleaned_fs, batches_fs, weather_data_source, grid_point, date_range
+                cleaned_fs, batches_fs, weather_data_source, site, date_range
             )
 
-        return fn_prepare_weather  # type: ignore[return-value]
+        return fn_prepare_weather
 
     if step == Transformation.CLEAN_PV:
 
-        def fn_clean_pv(_: GridPoint, pv_site: PVSite | None) -> None:
-            if pv_site is None:
-                raise ValueError('pv_site must be set for clean_pv')
-            run_clean_pv(raw_fs, cleaned_fs, pv_data_source, pv_site, date_range)
+        def fn_clean_pv(site: AnySite) -> None:
+            if not isinstance(site, PVSite):
+                raise ValueError('site must be PVSite for clean_pv')
+            run_clean_pv(raw_fs, cleaned_fs, pv_data_source, site, date_range)
 
-        return fn_clean_pv  # type: ignore[return-value]
+        return fn_clean_pv
 
     if step == Transformation.PREPARE_PV:
 
-        def fn_prepare_pv(grid_point: GridPoint, pv_site: PVSite | None) -> None:
-            if pv_site is None:
-                raise ValueError('pv_site must be set for prepare_pv')
+        def fn_prepare_pv(site: AnySite) -> None:
+            if not isinstance(site, PVSite):
+                raise ValueError('site must be PVSite for prepare_pv')
             run_prepare_pv(
                 cleaned_fs,
                 batches_fs,
                 pv_data_source,
                 weather_data_source,
-                pv_site,
-                grid_point,
+                site,
                 date_range,
                 get_pv_site_by_system_id,
             )
 
-        return fn_prepare_pv  # type: ignore[return-value]
+        return fn_prepare_pv
 
     raise ValueError(f'Unknown step: {step}')
 
@@ -238,18 +225,18 @@ def _make_step_fn(
 
 def _build_work_items(
     steps: list[Transformation],
-    grid_points: list[GridPoint],
-    pv_sites: list[PVSite],
-) -> list[tuple[Transformation, GridPoint, PVSite | None]]:
-    work_items: list[tuple[Transformation, GridPoint, PVSite | None]] = []
+    pv_sites: list[AnySite],
+    arbitrary_sites: list[AnySite],
+) -> list[tuple[Transformation, AnySite]]:
+    work_items: list[tuple[Transformation, AnySite]] = []
     for step in steps:
         if step in TRANSFORMATIONS_NEEDING_PV_SITE:
-            for pv_site in pv_sites:
-                grid_point = GridPoint(get_location_by_pv_system_id(pv_site.pvo_sys_id))
-                work_items.append((step, grid_point, pv_site))
+            for site in pv_sites:
+                if isinstance(site, PVSite):
+                    work_items.append((step, site))
         elif step in TRANSFORMATIONS_NEEDING_GRID_POINT:
-            for grid_point in grid_points:
-                work_items.append((step, grid_point, None))
+            for site in pv_sites + arbitrary_sites:
+                work_items.append((step, site))
     return work_items
 
 
@@ -292,10 +279,7 @@ def _main() -> None:
     # --- initialise in-memory repos ---------------------------------------
     resources_fs = get_filesystem(config.resources_storage)
     resources_extractor = Extractor(resources_fs)
-    build_pv_site_repo(resources_extractor.read_file(PV_SITES_CSV_FILE))
-    build_location_mapping_repo(
-        resources_extractor.read_file(LOCATION_MAPPING_CSV_FILE)
-    )
+    build_pv_site_repo(resources_extractor.read_file('pv_sites.csv'))
 
     # --- resolve date range -----------------------------------------------
     try:
@@ -310,20 +294,27 @@ def _main() -> None:
         s in TRANSFORMATIONS_NEEDING_GRID_POINT for s in all_transformations
     )
 
-    pv_system_ids = (
-        get_all_pv_system_ids()
-        if args.pv_system_ids == 'all'
-        else _parse_pv_system_ids(args.pv_system_ids)
-        if args.pv_system_ids
-        else []
-    )
-    pv_sites = [get_pv_site_by_system_id(sid) for sid in pv_system_ids]
-    grid_points = _parse_locations(args.locations) if args.locations else []
+    pv_system_ids = resolve_pv_system_ids(get_all_pv_system_ids, args.pv_system_ids)
+
+    pv_sites = [
+        resolve_site(DataSourceType.PV, get_pv_site_by_system_id, pv_system_id=sid)  # type: ignore[misc]
+        for sid in pv_system_ids
+    ]
+
+    arbitrary_sites = []
+    if args.locations:
+        loc_strs = resolve_location_strings(location_strings=args.locations)
+        arbitrary_sites = [
+            resolve_site(
+                DataSourceType.WEATHER, get_pv_site_by_system_id, location_str=loc
+            )
+            for loc in loc_strs
+        ]
 
     if needs_pv_id:
-        print(f'Processing {len(pv_system_ids)} PV site(s).')
+        print(f'Processing {len(pv_sites)} PV site(s).')
     if needs_grid_point:
-        print(f'Processing {len(grid_points)} weather location(s).')
+        print(f'Processing {len(arbitrary_sites)} arbitrary site(s).')
     print()
 
     def run(transformations_filter: frozenset[Transformation]) -> None:
@@ -331,7 +322,8 @@ def _main() -> None:
             t for t in all_transformations if t in transformations_filter
         ]
 
-        work_items = _build_work_items(transformations, grid_points, pv_sites)
+        pv_sites_any: list[AnySite] = list(pv_sites)
+        work_items = _build_work_items(transformations, pv_sites_any, arbitrary_sites)
 
         if not work_items:
             return
@@ -341,7 +333,7 @@ def _main() -> None:
         errors = 0
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             futures = {}
-            for step, grid_point, pv_site in work_items:
+            for step, site in work_items:
                 step_fn = _make_step_fn(
                     step,
                     raw_fs,
@@ -352,20 +344,17 @@ def _main() -> None:
                     date_range,
                     args.split_by,
                 )
-                futures[pool.submit(step_fn, grid_point, pv_site)] = (
+                futures[pool.submit(step_fn, site)] = (
                     step,
-                    grid_point,
-                    pv_site,
+                    site,
                 )
 
             for future in as_completed(futures):
                 try:
                     future.result()
                 except Exception as exc:
-                    step, grid_point, pv_site = futures[future]
-                    print(
-                        f'    UNHANDLED ERROR for {step}/{grid_point or pv_site}: {exc}'
-                    )
+                    step, site = futures[future]
+                    print(f'    UNHANDLED ERROR for {step}/{site}: {exc}')
                     errors += 1
 
             print(

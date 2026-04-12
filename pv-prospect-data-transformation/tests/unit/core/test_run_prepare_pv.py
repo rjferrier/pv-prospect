@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 from pv_prospect.common.domain import (
+    ArbitrarySite,
     DateRange,
-    GridPoint,
     Location,
     PanelGeometry,
     PVSite,
@@ -28,8 +28,8 @@ _PV_DESCRIPTOR = DataSource.PVOUTPUT
 _WEATHER_DESCRIPTOR = DataSource.OPENMETEO_HISTORICAL
 
 
-def _make_grid_point() -> GridPoint:
-    return GridPoint.from_id('504900_-35400')
+def _make_arbitrary_site() -> ArbitrarySite:
+    return ArbitrarySite.from_id('504900_-35400')
 
 
 @pytest.fixture
@@ -46,14 +46,13 @@ def pv_site() -> PVSite:
 
 
 @pytest.fixture
-def grid_point() -> GridPoint:
-    return _make_grid_point()
+def arbitrary_site() -> ArbitrarySite:
+    return _make_arbitrary_site()
 
 
 @pytest.fixture
 def cleaned_fs(
     pv_site: PVSite,
-    grid_point: GridPoint,
 ) -> FakeFileSystem:
     times = pd.date_range('2026-06-21 00:00:00', periods=24, freq='h')
     rng = np.random.default_rng(42)
@@ -78,7 +77,7 @@ def cleaned_fs(
         }
     )
     weather_path = build_time_series_csv_file_path(
-        TIMESERIES_FOLDER, _WEATHER_DESCRIPTOR, grid_point, _DATE_RANGE
+        TIMESERIES_FOLDER, _WEATHER_DESCRIPTOR, pv_site, _DATE_RANGE
     )
     pv_path = build_time_series_csv_file_path(
         TIMESERIES_FOLDER, _PV_DESCRIPTOR, pv_site, _DATE_RANGE
@@ -101,7 +100,6 @@ def test_writes_batch_at_expected_path(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
     pv_site: PVSite,
-    grid_point: GridPoint,
 ) -> None:
     run_prepare_pv(
         cleaned_fs,
@@ -109,7 +107,6 @@ def test_writes_batch_at_expected_path(
         _PV_DESCRIPTOR,
         _WEATHER_DESCRIPTOR,
         pv_site,
-        grid_point,
         _DATE_RANGE,
         lambda _: pv_site,
     )
@@ -122,7 +119,6 @@ def test_batch_has_no_header(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
     pv_site: PVSite,
-    grid_point: GridPoint,
 ) -> None:
     run_prepare_pv(
         cleaned_fs,
@@ -130,7 +126,6 @@ def test_batch_has_no_header(
         _PV_DESCRIPTOR,
         _WEATHER_DESCRIPTOR,
         pv_site,
-        grid_point,
         _DATE_RANGE,
         lambda _: pv_site,
     )
@@ -145,7 +140,6 @@ def test_batch_has_no_header(
 def test_skips_when_cleaned_pv_missing(
     batches_fs: FakeFileSystem,
     pv_site: PVSite,
-    grid_point: GridPoint,
 ) -> None:
     empty_cleaned_fs = FakeFileSystem()
     run_prepare_pv(
@@ -154,7 +148,6 @@ def test_skips_when_cleaned_pv_missing(
         _PV_DESCRIPTOR,
         _WEATHER_DESCRIPTOR,
         pv_site,
-        grid_point,
         _DATE_RANGE,
         lambda _: pv_site,
     )

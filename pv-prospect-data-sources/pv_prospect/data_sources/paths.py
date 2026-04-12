@@ -1,6 +1,6 @@
 from datetime import date
 
-from pv_prospect.common.domain import AnyEntity, DateRange, Entity
+from pv_prospect.common.domain import AnySite, DateRange, Site
 
 from .data_source import DataSource
 from .resolvers import resolve_subfolder
@@ -13,12 +13,12 @@ def format_date(date_: date) -> str:
 
 def identify_time_series(
     data_source: DataSource,
-    entity: Entity,
+    site: Site,
     date_range: DateRange,
 ) -> str:
     substrings = [
         str(data_source).replace('/', '-'),
-        str(entity.id),
+        str(site.id),
         format_date(date_range.start),
     ]
     if len(date_range) > 1:
@@ -29,12 +29,12 @@ def identify_time_series(
 def build_time_series_csv_file_path(
     time_series_folder: str,
     data_source: DataSource,
-    entity: AnyEntity,
+    site: AnySite,
     date_range: DateRange,
 ) -> str:
     """Build the CSV file path for a time series extraction."""
-    subfolder = resolve_subfolder(data_source.type, entity)
-    filename = identify_time_series(data_source, entity, date_range) + '.csv'
+    subfolder = resolve_subfolder(data_source.type, site)
+    filename = identify_time_series(data_source, site, date_range) + '.csv'
     return _build_path(time_series_folder, data_source, subfolder, filename)
 
 

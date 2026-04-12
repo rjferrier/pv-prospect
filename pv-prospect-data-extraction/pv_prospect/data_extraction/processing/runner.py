@@ -18,18 +18,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from pv_prospect.common import (
-    build_location_mapping_repo,
     build_pv_site_repo,
     get_all_pv_system_ids,
     get_config,
-    get_location_by_pv_system_id,
     get_pv_site_by_system_id,
 )
 from pv_prospect.common.domain import (
-    AnyEntity,
+    AnySite,
     DateRange,
-    GridPoint,
-    Location,
     Period,
 )
 from pv_prospect.data_extraction import (
@@ -41,7 +37,13 @@ from pv_prospect.data_extraction import (
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import ProcessingStats, Result, core
 from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
-from pv_prospect.data_sources import DataSourceType
+from pv_prospect.data_sources import (
+    PV_SITES_CSV_FILE,
+    DataSourceType,
+    resolve_location_strings,
+    resolve_pv_system_ids,
+    resolve_site,
+)
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
@@ -133,26 +135,15 @@ def _parse_args() -> 'Any':
     return parser.parse_args()
 
 
-def _parse_pv_system_ids(s: str) -> list[int]:
-    return [int(x.strip()) for x in s.split(',') if x.strip()]
+def _parse_locations(s: str) -> list[str]:
+    locations = resolve_location_strings(location_strings=s)
+    return locations
 
 
-def _parse_locations(s: str) -> list[GridPoint]:
-    parts = [x.strip() for x in s.split(',') if x.strip()]
-    if len(parts) % 2 != 0:
-        raise ValueError(
-            f'Expected pairs of lat,lon values but got {len(parts)} values.'
-        )
-    return [
-        GridPoint(Location.from_coordinates(parts[i], parts[i + 1]))
-        for i in range(0, len(parts), 2)
-    ]
-
-
-def _init_repos(staging_fs: FileSystem) -> None:
-    extractor = Extractor(staging_fs)
-    build_pv_site_repo(extractor.read_file(core.PV_SITES_CSV_FILE))
-    build_location_mapping_repo(extractor.read_file(core.LOCATION_MAPPING_CSV_FILE))
+def _init_repos(resources_fs: FileSystem) -> None:
+    """Initialize in-memory repositories."""
+    resources_extractor = Extractor(resources_fs)
+    build_pv_site_repo(resources_extractor.read_file(PV_SITES_CSV_FILE))
 
 
 # ---------------------------------------------------------------------------
@@ -195,30 +186,31 @@ def _main() -> None:
     _init_repos(resources_fs)
 
     # --- resolve targets ----------------------------------------------------
-    if args.pv_system_ids == 'all':
-        pv_system_ids = get_all_pv_system_ids()
-    elif args.pv_system_ids:
-        pv_system_ids = _parse_pv_system_ids(args.pv_system_ids)
-    else:
-        pv_system_ids = []
+    pv_system_ids = resolve_pv_system_ids(get_all_pv_system_ids, args.pv_system_ids)
 
-    pv_sites = [get_pv_site_by_system_id(sid) for sid in pv_system_ids]
+    pv_sites = [
+        resolve_site(DataSourceType.PV, get_pv_site_by_system_id, pv_system_id=sid)
+        for sid in pv_system_ids
+    ]
 
     # Grid points = those resolved from PV sites + any explicit --location values.
     # Only needed when at least one weather source is requested.
     has_weather_source = any(sd.type == DataSourceType.WEATHER for sd in data_sources)
-    grid_points: list[GridPoint] = (
-        [GridPoint(get_location_by_pv_system_id(site.pvo_sys_id)) for site in pv_sites]
-        if has_weather_source
-        else []
-    )
+    arbitrary_sites: list[AnySite] = []
+
     if has_weather_source and args.locations:
-        grid_points += _parse_locations(args.locations)
+        loc_strs = resolve_location_strings(location_strings=args.locations)
+        arbitrary_sites.extend(
+            resolve_site(
+                DataSourceType.WEATHER, get_pv_site_by_system_id, location_str=loc
+            )
+            for loc in loc_strs
+        )
 
     if pv_sites:
         print(f'Processing {len(pv_sites)} PV site(s).')
-    if grid_points:
-        print(f'Processing {len(grid_points)} weather location(s).')
+    if arbitrary_sites:
+        print(f'Processing {len(arbitrary_sites)} arbitrary site(s).')
     print()
 
     # --- build work items ---------------------------------------------------
@@ -230,7 +222,7 @@ def _main() -> None:
 
     explicit_split_period = Period[args.split_by.upper()] if args.split_by else None
 
-    work_items: list[tuple[DataSource, AnyEntity, DateRange]] = []
+    work_items: list[tuple[DataSource, AnySite, DateRange]] = []
     for sd in data_sources:
         split_period = explicit_split_period or default_split_period(sd)
         if split_period:
@@ -245,8 +237,10 @@ def _main() -> None:
             final_ranges = [complete_date_range]
         if args.reverse:
             final_ranges.reverse()
-        entities: list[AnyEntity] = (
-            grid_points if sd.type == DataSourceType.WEATHER else pv_sites
+        entities: list[AnySite] = (
+            pv_sites + arbitrary_sites
+            if sd.type == DataSourceType.WEATHER
+            else pv_sites
         )
         for dr in final_ranges:
             for ent in entities:

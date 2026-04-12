@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from pv_prospect.common.domain import DateRange, Entity
+from pv_prospect.common.domain import DateRange, Site
 from pv_prospect.data_extraction import DataSource
 
 
@@ -10,14 +10,14 @@ class Task:
     """Represents a data extraction task for a specific locatable, source, and date range."""
 
     data_source: DataSource
-    entity: Entity
+    site: Site
     date_range: DateRange
 
     def __str__(self) -> str:
         return (
             'Task('
             f'data_source={self.data_source}, '
-            f'entity={self.entity}, '
+            f'site={self.site}, '
             f'date_range={self.date_range}'
             ')'
         )

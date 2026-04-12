@@ -2,8 +2,8 @@ from datetime import date
 from decimal import Decimal
 
 from pv_prospect.common.domain import (
+    ArbitrarySite,
     DateRange,
-    GridPoint,
     Location,
     PanelGeometry,
     PVSite,
@@ -17,7 +17,7 @@ from pv_prospect.data_sources import (
 
 
 def test_builds_path_for_openmeteo_source():
-    grid_point = GridPoint.from_id('526604_07808')
+    grid_point = ArbitrarySite.from_id('526604_07808')
 
     result = build_time_series_csv_file_path(
         'timeseries',

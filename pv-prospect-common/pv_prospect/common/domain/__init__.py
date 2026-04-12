@@ -1,19 +1,19 @@
-from .base import Entity
+from .arbitrary_site import ArbitrarySite
+from .base import Site
 from .date_range import DateRange, Period
-from .grid_point import GridPoint
 from .location import Location
 from .pv_site import PanelGeometry, PVSite, Shading, System
-from .typing import AnyEntity
+from .typing import AnySite
 
 __all__ = [
     'DateRange',
     'Period',
     'Location',
-    'Entity',
-    'GridPoint',
+    'Site',
+    'ArbitrarySite',
     'Shading',
     'PVSite',
     'PanelGeometry',
     'System',
-    'AnyEntity',
+    'AnySite',
 ]

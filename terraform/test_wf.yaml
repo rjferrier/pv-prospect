@@ -1,0 +1,14 @@
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - raw_pv_system_ids: ${default(map.get(args, "pv_system_ids"), [])}
+          - t: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+    - check:
+        switch:
+          - condition: ${type(raw_pv_system_ids) == "string" and raw_pv_system_ids == "all"}
+            return: "It was all"
+        next: return_val
+    - return_val:
+        return: ${raw_pv_system_ids}

@@ -1,0 +1,1179 @@
+ ▐▛███▜▌   Claude Code v2.1.101
+▝▜█████▛▘  Sonnet 4.6 · Claude Pro
+  ▘▘ ▝▝    ~/Projects/pv-prospect/pv-prospect-etl
+
+❯ /model
+  ⎿  Set model to Sonnet 4.6 (default)
+
+❯ /model
+  ⎿  Set model to Opus 4.6
+
+❯ For the extraction and transformation workflows, every time a file is written
+   to the staging bucket, can we add a log line to some text file in the
+  bucket? Ideally the files would live under the prefix `logs/` and have a
+  filename of the form `<YYYY-MM-DD>.txt`, indicating the date. Each log line
+  would contain the time and the full path of the written file. How can we
+  avoid race conditions? We could have each worker write a file with path and
+  name `logs/<YYYY-MM-DD>/<HHMMSS>.txt`, which would contain a single line
+  indicating the written file path, where <HHMMSS> indicates the time. Then we
+  could have a log consolidation workflow at the end that turns all those files
+   into a single `logs/<YYYY-MM-DD>.txt` file. What do you think?
+
+● The approach is sound — GCS object creation is atomic so individual files per
+  write avoids races entirely. One concern: <HHMMSS>.txt could collide if two
+  workers write in the same second. You'd want sub-second granularity or a
+  unique suffix.
+
+  Let me look at how writes currently happen so I can suggest where to hook this
+   in.
+
+● Explore(Explore storage write paths)
+  ⎿  Done (28 tool uses · 46.3k tokens · 9m 50s)
+  (ctrl+o to expand)
+
+● Good exploration. Here's my assessment of your proposal:
+
+  The individual-files-then-consolidate approach is the right call. GCS doesn't
+  support append, so a shared log file would require read-modify-write which is
+  inherently racy. Individual files with atomic creates is the correct pattern.
+
+  Refinements I'd suggest:
+
+  1. Filename collisions — <HHMMSS> is too coarse. Two workers can easily write
+  in the same second. I'd use <HHMMSS.ffffff> (microsecond timestamp) or
+  <HHMMSS>-<short-uuid>. The former keeps files naturally sorted by time.
+  2. Where to hook it — All writes flow through FileSystem.write_text() /
+  write_bytes() (in pv-prospect-etl). A decorator wrapping FileSystem is the
+  cleanest approach: every write through the decorated filesystem also emits a
+  log entry. This captures both Loader-mediated writes and direct
+  fs.write_text() calls (like the transformation module's write_csv helper).
+  You'd wire it up at the factory level.
+  3. What the decorator should NOT log — The log entries themselves. The
+  decorator needs to skip writes under the logs/ prefix to avoid infinite
+  recursion.
+  4. Consolidation — A simple step at the end: list all files under
+  logs/<YYYY-MM-DD>/, read each one, concatenate, write to
+  logs/<YYYY-MM-DD>.txt, delete the individual files. This could be a small
+  Cloud Run job or an extra step in the workflow.
+  5. Scope — Should manifest/cursor writes (backfill state) also be logged, or
+  only data files? Those feel like internal bookkeeping rather than pipeline
+  outputs.
+
+  Want me to implement this? The plan would be:
+  - Add a LoggingFileSystem decorator in pv-prospect-etl that wraps any
+  FileSystem
+  - Wire it into the factory
+  - Add a consolidation function
+  - Add the consolidation as a workflow step in Terraform
+
+✻ Churned for 1m 45s
+
+❯ 1. Fine
+  2. Good, do that
+  3. Agreed
+  4. What would be cheaper? I'm guessing it would be an extra step in the
+  workflow. In that case, given there are multiple workflows, we should somehow
+   namespace these logs according to workflow. In the intermediate stage we
+  could have workers writing to
+  `logs/<YYYY-MM-DD>/<workflow-name>/<HHMMSS.ffffff>`, and in the consolidation
+   step, `logs/<YYYY-MM-DD>/<YYYY-MM-DD-HHMM>-<workflow-name>.txt`.
+  5. Only data files.
+
+● Good, the namespacing by workflow name makes sense. Let me plan this out
+  properly.
+
+● Entered plan mode
+  Claude is now exploring and designing an implementation approach.
+
+  Read 3 files (ctrl+o to expand)
+
+● Interesting — there's already a tracking field on StorageConfig. Let me
+  understand how that's used, and look at the workflow structure.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Explore(Explore workflow names and config)
+  ⎿  Done (47 tool uses · 61.8k tokens · 1m 55s)
+  (ctrl+o to expand)
+
+  Searched for 3 patterns, read 7 files (ctrl+o to expand)
+
+● Now let me look at the Terraform workflow templates to understand how to add
+  the consolidation step and WORKFLOW_NAME env var.
+
+  Searched for 4 patterns, read 12 files (ctrl+o to expand)
+
+● I have a thorough understanding now. Let me write the plan.
+
+● Updated plan
+  ⎿  /plan to preview
+● User approved Claude's plan
+  ⎿  Plan saved to: ~/.claude/plans/rippling-juggling-rocket.md · /plan to edit
+     Plan: Write-logging for extraction and transformation workflows
+
+     Context
+
+     We want to track every data file written to the staging bucket during
+     workflow runs. Each concurrent worker writes an individual log entry file
+     to avoid race conditions (GCS doesn't support append). A consolidation step
+      at the end of each workflow merges entries into a single log file per
+     workflow run.
+
+     Log entry path (intermediate):
+     logs/<YYYY-MM-DD>/<workflow-name>/<HHMMSS.ffffff>.txt
+     Consolidated log path:
+     logs/<YYYY-MM-DD>/<YYYY-MM-DD-HHMM>-<workflow-name>.txt
+
+     Only data file writes are logged (not manifest/cursor writes to
+     resources_fs).
+
+     Approach
+
+     1. New LoggingFileSystem decorator (pv-prospect-etl)
+
+     New file: pv_prospect/etl/storage/logging_fs.py
+
+     LoggingFileSystem wraps a FileSystem and holds a reference to a separate
+     log FileSystem. On write_text/write_bytes, it delegates to the inner FS
+     then writes a single-line log entry to the log FS.
+
+     Constructor: __init__(self, inner: FileSystem, log_fs: FileSystem,
+     workflow_name: str, label: str)
+
+     - label is the storage prefix (e.g. 'raw', 'cleaned') so the logged path is
+      fully qualified within the bucket.
+     - All other FileSystem methods delegate to inner without logging.
+     - Log entry content: <ISO-timestamp> <label>/<relative-path>
+
+     Same file also contains consolidate_logs(log_fs, workflow_name, date)
+     which:
+     1. Lists files under <YYYY-MM-DD>/<workflow-name>/
+     2. Reads and sorts by timestamp
+     3. Writes <YYYY-MM-DD>/<YYYY-MM-DD-HHMM>-<workflow-name>.txt
+     4. Deletes the individual entry files
+
+     2. Config changes
+
+     pv-prospect-etl/pv_prospect/etl/resources/config-default.yaml — add:
+     log_storage:
+       backend: 'gcs'
+       bucket_name: 'pv-prospect-staging'
+       prefix: 'logs'
+
+     DataExtractionConfig and DataTransformationConfig — add optional
+     log_storage: AnyStorageConfig | None field. When absent/null, no
+     write-logging occurs (local dev stays unaffected).
+
+     3. Entrypoint changes
+
+     Extraction entrypoint (pv-prospect-data-extraction/.../entrypoint.py):
+     - Read WORKFLOW_NAME env var
+     - If WORKFLOW_NAME is set and config.log_storage is not None, wrap
+     staging_fs with LoggingFileSystem(..., label='raw')
+     - Add consolidate_logs job type that calls the consolidation function
+
+     Transformation entrypoint
+     (pv-prospect-data-transformation/.../entrypoint.py):
+     - Read WORKFLOW_NAME env var
+     - If set and config.log_storage is not None, wrap cleaned_fs
+     (label='cleaned'), batches_fs (label='prepared-batches'), and prepared_fs
+     (label='prepared') with LoggingFileSystem
+     - Add consolidate_logs transform step
+
+     4. Terraform workflow changes
+
+     All four workflows (extract, transform, pv-site-backfill,
+     weather-grid-backfill):
+     - Assign workflow_name in the init step
+     - Add WORKFLOW_NAME env var to every containerOverrides block
+     - Add a consolidate_logs step before done (calls the same Cloud Run job
+     with JOB_TYPE=consolidate_logs or TRANSFORM_STEP=consolidate_logs)
+
+     5. Exports
+
+     Update pv_prospect/etl/storage/__init__.py to export LoggingFileSystem and
+     consolidate_logs.
+
+     6. Tests
+
+     New test directory: tests/unit/storage/logging_fs/
+     - test_logging_file_system.py — verify writes are logged, reads/deletes are
+      not, label is prepended
+     - test_consolidate_logs.py — verify entries are merged, sorted, and
+     individual files deleted
+
+     Uses existing FakeFileSystem from tests/unit/helpers.py.
+
+     Files to create
+
+     - pv-prospect-etl/pv_prospect/etl/storage/logging_fs.py
+     - pv-prospect-etl/tests/unit/storage/logging_fs/__init__.py
+     - pv-prospect-etl/tests/unit/storage/logging_fs/test_logging_file_system.py
+     - pv-prospect-etl/tests/unit/storage/logging_fs/test_consolidate_logs.py
+
+     Files to modify
+
+     - pv-prospect-etl/pv_prospect/etl/storage/__init__.py
+     - pv-prospect-etl/pv_prospect/etl/resources/config-default.yaml
+     - pv-prospect-data-extraction/pv_prospect/data_extraction/config.py
+     - pv-prospect-data-extraction/pv_prospect/data_extraction/processing/entryp
+     oint.py
+     - pv-prospect-data-transformation/pv_prospect/data_transformation/config.py
+     - pv-prospect-data-transformation/pv_prospect/data_transformation/entrypoin
+     t.py
+     - terraform/modules/extract/workflow/main.tf
+     - terraform/modules/extract/pv_site_backfill_workflow/main.tf
+     - terraform/modules/extract/weather_grid_backfill_workflow/main.tf
+     - terraform/modules/transform/workflow/main.tf
+
+     Verification
+
+     1. cd pv-prospect-etl && poetry run pytest tests/unit/storage/logging_fs/
+     2. cd pv-prospect-etl && poetry run ruff check . && poetry run mypy .
+     --ignore-missing-imports --disallow-untyped-defs --explicit-package-bases
+     --namespace-packages
+     3. Same lint/type-check for pv-prospect-data-extraction and
+     pv-prospect-data-transformation
+     4. terraform plan to validate workflow changes
+
+● Write(pv_prospect/etl/storage/logging_fs.py)
+  ⎿  Wrote 111 lines to pv_prospect/etl/storage/logging_fs.py
+      1 """FileSystem decorator that logs write operations to a separate
+        filesystem."""
+      2
+      3 import logging
+      4 from datetime import date, datetime, timezone
+      5
+      6 from pv_prospect.etl.storage.base import FileEntry, FileSystem
+      7
+      8 logger = logging.getLogger(__name__)
+      9
+     … +101 lines (ctrl+o to expand)
+
+● Update(pv_prospect/etl/storage/__init__.py)
+  ⎿  Added 3 lines
+       4      get_filesystem,
+       5      parse_storage_config,
+       6  )
+       7 +from .logging_fs import LoggingFileSystem, consolidate_logs
+       8
+       9  __all__ = [
+      10      'FileEntry',
+      11      'FileSystem',
+      12      'StorageConfig',
+      13      'AnyStorageConfig',
+      14 +    'LoggingFileSystem',
+      15 +    'consolidate_logs',
+      16      'get_filesystem',
+      17      'parse_storage_config',
+      18  ]
+
+● Write(tests/unit/storage/logging_fs/__init__.py)
+  ⎿  User rejected write to tests/unit/storage/logging_fs/__init__.py
+      1 (No content)
+
+❯ Are you still working? If not, continue
+
+● Yes, continuing. Let me create the test files.
+
+● Bash(mkdir -p /home/rjf/Projects/pv-prospect/pv-prospect-etl/tests/unit/storag
+      e/logging_fs && touch
+      /home/rjf/Projects/pv-prospect/pv-prospect-etl/tests/unit/storage…)
+  ⎿  Done
+
+● Write(tests/unit/storage/logging_fs/test_logging_file_system.py)
+  ⎿  Wrote 190 lines to
+     tests/unit/storage/logging_fs/test_logging_file_system.py
+       1 """Tests for LoggingFileSystem."""
+       2
+       3 from unittest.mock import patch
+       4
+       5 from pv_prospect.etl.storage.logging_fs import LoggingFileSystem
+       6
+       7 from ...helpers import FakeFileSystem
+       8
+       9
+      10 def test_write_text_delegates_to_inner() -> None:
+     … +180 lines (ctrl+o to expand)
+
+● Write(tests/unit/storage/logging_fs/test_consolidate_logs.py)
+  ⎿  Tool use rejected
+
+● Good point. The tests should assert the exact consolidated path rather than
+  filtering by "not in workflow subdir".
+● Write(tests/unit/storage/logging_fs/test_consolidate_logs.py)
+  ⎿  Tool use rejected
+
+  Read 1 file (ctrl+o to expand)
+
+● I'll inject a now callable into both LoggingFileSystem and consolidate_logs.
+
+● Update(pv_prospect/etl/storage/logging_fs.py)
+  ⎿  Added 9 lines
+       2
+       3  import logging
+       4  from datetime import date, datetime, timezone
+       5 +from typing import Callable
+       6
+       7  from pv_prospect.etl.storage.base import FileEntry, FileSystem
+       8
+       9  logger = logging.getLogger(__name__)
+      10
+      11 +NowFn = Callable[[], datetime]
+      12
+      13 +
+      14 +def _utc_now() -> datetime:
+      15 +    return datetime.now(timezone.utc)
+      16 +
+      17 +
+      18  class LoggingFileSystem:
+      19      """FileSystem decorator that records every write to a separ
+          ate log filesystem.
+      20
+     ...
+      30          log_fs: FileSystem,
+      31          workflow_name: str,
+      32          label: str,
+      33 +        now: NowFn = _utc_now,
+      34      ) -> None:
+      35          self._inner = inner
+      36          self._log_fs = log_fs
+      37          self._workflow_name = workflow_name
+      38          self._label = label
+      39 +        self._now = now
+      40
+      41      def __str__(self) -> str:
+      42          return str(self._inner)
+
+● Update(pv_prospect/etl/storage/logging_fs.py)
+  ⎿  Added 1 line, removed 1 line
+      42          return str(self._inner)
+      43
+      44      def _log_write(self, path: str) -> None:
+      45 -        now = datetime.now(timezone.utc)
+      45 +        now = self._now()
+      46          date_str = now.strftime('%Y-%m-%d')
+      47          time_str = now.strftime('%H%M%S.%f')
+      48          full_path = f'{self._label}/{path}' if self._label else
+           path
+
+● Update(pv_prospect/etl/storage/logging_fs.py)
+  ⎿  Added 1 line
+      86      log_fs: FileSystem,
+      87      workflow_name: str,
+      88      log_date: date,
+      89 +    now: NowFn = _utc_now,
+      90  ) -> None:
+      91      """Merge individual log entry files into a single consolida
+          ted log.
+      92
+
+● Update(pv_prospect/etl/storage/logging_fs.py)
+  ⎿  Added 1 line, removed 2 lines
+      109
+      110      lines.sort()
+      111
+      112 -    now = datetime.now(timezone.utc)
+      113 -    consolidated_name = f'{date_str}-{now.strftime("%H%M")}-{w
+          -orkflow_name}.txt'
+      112 +    consolidated_name = f'{date_str}-{now().strftime("%H%M")}-
+          +{workflow_name}.txt'
+      113      consolidated_path = f'{date_str}/{consolidated_name}'
+      114      log_fs.write_text(consolidated_path, '\n'.join(lines) + '\
+           n')
+      115      logger.info(
+
+● Now write the tests without any mocking/patching.
+
+● Write(tests/unit/storage/logging_fs/test_logging_file_system.py)
+  ⎿  Added 47 lines, removed 59 lines
+       1  """Tests for LoggingFileSystem."""
+       2
+       3 -from unittest.mock import patch
+       3 +from datetime import datetime, timezone
+       4
+       5  from pv_prospect.etl.storage.logging_fs import LoggingFileSyste
+          m
+       6
+       7  from ...helpers import FakeFileSystem
+       8
+       9 +FIXED_TIME = datetime(2025, 6, 24, 10, 30, 15, 123456, tzinfo=t
+         +imezone.utc)
+      10
+      11 +
+      12 +def _fixed_now() -> datetime:
+      13 +    return FIXED_TIME
+      14 +
+      15 +
+      16  def test_write_text_delegates_to_inner() -> None:
+      17      inner = FakeFileSystem()
+      18      log_fs = FakeFileSystem()
+      13 -    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw')
+      19 +    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw',
+         + now=_fixed_now)
+      20
+      21      fs.write_text('data/file.csv', 'content')
+      22
+     ...
+      26  def test_write_text_creates_log_entry() -> None:
+      27      inner = FakeFileSystem()
+      28      log_fs = FakeFileSystem()
+      23 -    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw')
+      29 +    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw',
+         + now=_fixed_now)
+      30
+      31      fs.write_text('data/file.csv', 'content')
+      32
+      27 -    assert len(log_fs._files) == 1
+      28 -    log_path = next(iter(log_fs._files))
+      29 -    assert '/my-workflow/' in log_path
+      30 -    assert log_path.endswith('.txt')
+      33 +    expected_path = '2025-06-24/my-workflow/103015.123456.txt'
+      34 +    assert expected_path in log_fs._files
+      35 +    assert log_fs._files[expected_path] == (
+      36 +        '2025-06-24T10:30:15.123456+00:00 raw/data/file.csv\n'
+      37 +    )
+      38
+      32 -    log_content = log_fs._files[log_path]
+      33 -    assert 'raw/data/file.csv' in log_content
+      39
+      35 -
+      40  def test_write_bytes_delegates_to_inner() -> None:
+      41      inner = FakeFileSystem()
+      42      log_fs = FakeFileSystem()
+      39 -    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw')
+      43 +    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw',
+         + now=_fixed_now)
+      44
+      45      fs.write_bytes('data/file.bin', b'\x00\x01')
+      46
+     ...
+      50  def test_write_bytes_creates_log_entry() -> None:
+      51      inner = FakeFileSystem()
+      52      log_fs = FakeFileSystem()
+      49 -    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw')
+      53 +    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw',
+         + now=_fixed_now)
+      54
+      55      fs.write_bytes('data/file.bin', b'\x00\x01')
+      56
+      53 -    assert len(log_fs._files) == 1
+      54 -    log_content = next(iter(log_fs._files.values()))
+      55 -    assert 'raw/data/file.bin' in log_content
+      57 +    expected_path = '2025-06-24/my-workflow/103015.123456.txt'
+      58 +    assert expected_path in log_fs._files
+      59 +    assert 'raw/data/file.bin' in log_fs._files[expected_path]
+      60
+      61
+      62  def test_read_operations_do_not_create_log_entries() -> None:
+      63      inner = FakeFileSystem({'existing.txt': 'hello'})
+      64      log_fs = FakeFileSystem()
+      61 -    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw')
+      65 +    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw',
+         + now=_fixed_now)
+      66
+      67      fs.read_text('existing.txt')
+      68      fs.exists('existing.txt')
+     ...
+      73  def test_delete_does_not_create_log_entry() -> None:
+      74      inner = FakeFileSystem({'file.txt': 'data'})
+      75      log_fs = FakeFileSystem()
+      72 -    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw')
+      76 +    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw',
+         + now=_fixed_now)
+      77
+      78      fs.delete('file.txt')
+      79
+     ...
+      83  def test_mkdir_does_not_create_log_entry() -> None:
+      84      inner = FakeFileSystem()
+      85      log_fs = FakeFileSystem()
+      82 -    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw')
+      86 +    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw',
+         + now=_fixed_now)
+      87
+      88      fs.mkdir('some/dir')
+      89
+     ...
+       93  def test_label_is_prepended_to_logged_path() -> None:
+       94      inner = FakeFileSystem()
+       95      log_fs = FakeFileSystem()
+       92 -    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'clea
+          -ned')
+       96 +    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'clea
+          +ned', now=_fixed_now)
+       97
+       98      fs.write_text('timeseries/data.csv', 'content')
+       99
+       96 -    log_content = next(iter(log_fs._files.values()))
+       97 -    assert 'cleaned/timeseries/data.csv' in log_content
+      100 +    expected_path = '2025-06-24/my-workflow/103015.123456.txt'
+      101 +    assert 'cleaned/timeseries/data.csv' in log_fs._files[expe
+          +cted_path]
+      102
+      103
+      104  def test_empty_label_logs_path_without_prefix() -> None:
+      105      inner = FakeFileSystem()
+      106      log_fs = FakeFileSystem()
+      103 -    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', '')
+      107 +    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', '', n
+          +ow=_fixed_now)
+      108
+      109      fs.write_text('data.csv', 'content')
+      110
+      107 -    log_content = next(iter(log_fs._files.values()))
+      108 -    assert ' data.csv\n' in log_content
+      111 +    expected_path = '2025-06-24/my-workflow/103015.123456.txt'
+      112 +    assert log_fs._files[expected_path] == (
+      113 +        '2025-06-24T10:30:15.123456+00:00 data.csv\n'
+      114 +    )
+      115
+      116
+      111 -def test_log_entry_path_contains_date_and_workflow() -> None:
+      112 -    inner = FakeFileSystem()
+      113 -    log_fs = FakeFileSystem()
+      114 -    fs = LoggingFileSystem(inner, log_fs, 'pv-prospect-extract
+          -', 'raw')
+      115 -
+      116 -    fs.write_text('file.csv', 'content')
+      117 -
+      118 -    log_path = next(iter(log_fs._files))
+      119 -    parts = log_path.split('/')
+      120 -    assert len(parts) == 3
+      121 -    assert parts[1] == 'pv-prospect-extract'
+      122 -    assert parts[2].endswith('.txt')
+      123 -
+      124 -
+      117  def test_log_entry_contains_iso_timestamp() -> None:
+      118      inner = FakeFileSystem()
+      119      log_fs = FakeFileSystem()
+      128 -    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw')
+      120 +    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw', now=_fi
+          +xed_now)
+      121
+      122      fs.write_text('file.csv', 'content')
+      123
+      124      log_content = next(iter(log_fs._files.values()))
+      125      timestamp_part = log_content.split(' ')[0]
+      134 -    assert 'T' in timestamp_part
+      135 -    assert '+00:00' in timestamp_part
+      126 +    assert timestamp_part == '2025-06-24T10:30:15.123456+00:00
+          +'
+      127
+      128
+      129  def test_log_failure_does_not_prevent_write() -> None:
+      130      inner = FakeFileSystem()
+      131      log_fs = FakeFileSystem()
+      141 -    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw')
+      132 +    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw', now=_fi
+          +xed_now)
+      133
+      143 -    # Make log_fs.write_text raise
+      134      def failing_write(path: str, content: str) -> None:
+      135          raise RuntimeError('log write failed')
+      136
+     ...
+      144  def test_str_delegates_to_inner() -> None:
+      145      inner = FakeFileSystem()
+      146      log_fs = FakeFileSystem()
+      157 -    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw')
+      147 +    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw', now=_fi
+          +xed_now)
+      148
+      149      assert str(fs) == str(inner)
+      150
+     ...
+      152  def test_list_files_delegates_to_inner() -> None:
+      153      inner = FakeFileSystem({'dir/a.csv': 'a', 'dir/b.csv': 'b'
+           })
+      154      log_fs = FakeFileSystem()
+      165 -    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw')
+      155 +    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw', now=_fi
+          +xed_now)
+      156
+      157      result = fs.list_files('dir', '*.csv')
+      158
+      159      assert len(result) == 2
+      160
+      161
+      172 -def test_multiple_writes_create_separate_log_entries() -> None
+          -:
+      162 +def test_multiple_writes_with_different_timestamps() -> None:
+      163      inner = FakeFileSystem()
+      164      log_fs = FakeFileSystem()
+      175 -    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw')
+      165
+      177 -    with patch('pv_prospect.etl.storage.logging_fs.datetime')
+          -as mock_dt:
+      178 -        from datetime import datetime, timezone
+      166 +    times = iter([
+      167 +        datetime(2025, 6, 24, 10, 30, 15, 0, tzinfo=timezone.u
+          +tc),
+      168 +        datetime(2025, 6, 24, 10, 30, 15, 500000, tzinfo=timez
+          +one.utc),
+      169 +    ])
+      170 +    fs = LoggingFileSystem(
+      171 +        inner, log_fs, 'wf', 'raw', now=lambda: next(times)
+      172 +    )
+      173
+      180 -        times = [
+      181 -            datetime(2025, 6, 24, 10, 30, 15, 0, tzinfo=timezo
+          -ne.utc),
+      182 -            datetime(2025, 6, 24, 10, 30, 15, 500000, tzinfo=t
+          -imezone.utc),
+      183 -        ]
+      184 -        mock_dt.now.side_effect = times
+      185 -        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **
+          -kw)
+      174 +    fs.write_text('a.csv', 'a')
+      175 +    fs.write_text('b.csv', 'b')
+      176
+      187 -        fs.write_text('a.csv', 'a')
+      188 -        fs.write_text('b.csv', 'b')
+      189 -
+      190 -    assert len(log_fs._files) == 2
+      177   No newline at end of file
+      178 +    assert '2025-06-24/wf/103015.000000.txt' in log_fs._files
+      179 +    assert '2025-06-24/wf/103015.500000.txt' in log_fs._files
+      180   No newline at end of file
+
+● Write(tests/unit/storage/logging_fs/test_consolidate_logs.py)
+  ⎿  Tool use rejected
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(pv_prospect/etl/storage/logging_fs.py)
+  ⎿  Added 1 line, removed 1 line
+      19      """FileSystem decorator that records every write to a separ
+          ate log filesystem.
+      20
+      21      Each write produces a single-line log entry file at
+      22 -    ``<YYYY-MM-DD>/<workflow_name>/<HHMMSS.ffffff>.txt`` on the
+         - *log_fs*.
+      22 +    ``<YYYY-MM-DD>/<workflow_name>/<HHMMSSffffff>.txt`` on the
+         +*log_fs*.
+      23      The entry contains the UTC timestamp and the fully-qualifie
+          d path
+      24      (``<label>/<relative_path>``) of the written file.
+      25      """
+
+● Update(pv_prospect/etl/storage/logging_fs.py)
+  ⎿  Added 1 line, removed 1 line
+      44      def _log_write(self, path: str) -> None:
+      45          now = self._now()
+      46          date_str = now.strftime('%Y-%m-%d')
+      47 -        time_str = now.strftime('%H%M%S.%f')
+      47 +        time_str = now.strftime('%H%M%S%f')
+      48          full_path = f'{self._label}/{path}' if self._label else
+           path
+      49          log_path = f'{date_str}/{self._workflow_name}/{time_str
+          }.txt'
+      50          log_content = f'{now.isoformat()} {full_path}\n'
+
+● Update(pv_prospect/etl/storage/logging_fs.py)
+  ⎿  Added 1 line, removed 1 line
+      92
+      93      Reads all files under ``<YYYY-MM-DD>/<workflow_name>/``, so
+          rts them
+      94      by content (which starts with an ISO timestamp), writes a c
+          onsolidated
+      95 -    file at ``<YYYY-MM-DD>/<YYYY-MM-DD-HHMM>-<workflow_name>.tx
+         -t``, and
+      95 +    file at ``<YYYY-MM-DD>/<YYYY-MM-DD-HHMMSS>-<workflow_name>.
+         +txt``, and
+      96      deletes the individual entry files.
+      97      """
+      98      date_str = log_date.strftime('%Y-%m-%d')
+
+● Update(pv_prospect/etl/storage/logging_fs.py)
+  ⎿  Added 1 line, removed 1 line
+      109
+      110      lines.sort()
+      111
+      112 -    consolidated_name = f'{date_str}-{now().strftime("%H%M")}-
+          -{workflow_name}.txt'
+      112 +    consolidated_name = f'{date_str}-{now().strftime("%H%M%S")
+          +}-{workflow_name}.txt'
+      113      consolidated_path = f'{date_str}/{consolidated_name}'
+      114      log_fs.write_text(consolidated_path, '\n'.join(lines) + '\
+           n')
+      115      logger.info(
+
+● Now update the test files with the corrected filenames.
+
+  Read 1 file (ctrl+o to expand)
+
+● I need to update the expected filenames in the tests (remove the dot between
+  seconds and microseconds).
+
+● Update(tests/unit/storage/logging_fs/test_logging_file_system.py)
+  ⎿  Added 4 lines, removed 4 lines
+      30
+      31      fs.write_text('data/file.csv', 'content')
+      32
+      33 -    expected_path = '2025-06-24/my-workflow/103015.123456.txt'
+      33 +    expected_path = '2025-06-24/my-workflow/103015123456.txt'
+      34      assert expected_path in log_fs._files
+      35      assert log_fs._files[expected_path] == (
+      36          '2025-06-24T10:30:15.123456+00:00 raw/data/file.csv\n'
+     ...
+      54
+      55      fs.write_bytes('data/file.bin', b'\x00\x01')
+      56
+      57 -    expected_path = '2025-06-24/my-workflow/103015.123456.txt'
+      57 +    expected_path = '2025-06-24/my-workflow/103015123456.txt'
+      58      assert expected_path in log_fs._files
+      59      assert 'raw/data/file.bin' in log_fs._files[expected_path]
+      60
+     ...
+       97
+       98      fs.write_text('timeseries/data.csv', 'content')
+       99
+      100 -    expected_path = '2025-06-24/my-workflow/103015.123456.txt'
+      100 +    expected_path = '2025-06-24/my-workflow/103015123456.txt'
+      101      assert 'cleaned/timeseries/data.csv' in log_fs._files[expe
+           cted_path]
+      102
+      103
+     ...
+      108
+      109      fs.write_text('data.csv', 'content')
+      110
+      111 -    expected_path = '2025-06-24/my-workflow/103015.123456.txt'
+      111 +    expected_path = '2025-06-24/my-workflow/103015123456.txt'
+      112      assert log_fs._files[expected_path] == (
+      113          '2025-06-24T10:30:15.123456+00:00 data.csv\n'
+      114      )
+
+● Update(tests/unit/storage/logging_fs/test_logging_file_system.py)
+  ⎿  Added 1 line, removed 1 line
+      174      fs.write_text('a.csv', 'a')
+      175      fs.write_text('b.csv', 'b')
+      176
+      177 -    assert '2025-06-24/wf/103015.000000.txt' in log_fs._files
+      177 +    assert '2025-06-24/wf/103015000000.txt' in log_fs._files
+      178      assert '2025-06-24/wf/103015.500000.txt' in log_fs._files
+      179   No newline at end of file
+
+● Update(tests/unit/storage/logging_fs/test_logging_file_system.py)
+  ⎿  Added 1 line, removed 1 line
+      175      fs.write_text('b.csv', 'b')
+      176
+      177      assert '2025-06-24/wf/103015000000.txt' in log_fs._files
+      178 -    assert '2025-06-24/wf/103015.500000.txt' in log_fs._files
+      178   No newline at end of file
+      179 +    assert '2025-06-24/wf/103015500000.txt' in log_fs._files
+      180   No newline at end of file
+
+● Now write the consolidation tests with the corrected format.
+
+● Write(tests/unit/storage/logging_fs/test_consolidate_logs.py)
+  ⎿  Wrote 74 lines to
+     tests/unit/storage/logging_fs/test_consolidate_logs.py
+      1 """Tests for consolidate_logs."""
+      2
+      3 from datetime import date, datetime, timezone
+      4
+      5 from pv_prospect.etl.storage.logging_fs import consolidate_logs
+      6
+      7 from ...helpers import FakeFileSystem
+      8
+      9 CONSOLIDATION_TIME = datetime(2025, 6, 24, 11, 0, 0, tzinfo=timez
+        one.utc)
+     … +64 lines (ctrl+o to expand)
+
+● Bash(cd /home/rjf/Projects/pv-prospect/pv-prospect-etl && poetry run pytest
+      tests/unit/storage/logging_fs/ -v 2>&1)
+  ⎿  ============================= test session starts ====================
+     ==========
+     platform linux -- Python 3.12.3, pytest-9.0.2, pluggy-1.6.0 -- /home/r
+     … +34 lines (ctrl+o to expand)
+● All 19 tests pass.
+
+● Update(pv_prospect/etl/resources/config-default.yaml)
+  ⎿  Added 5 lines
+      23    bucket_name: 'pv-prospect-staging'
+      24    prefix: 'prepared'
+      25
+      26 +log_storage:
+      27 +  backend: 'gcs'
+      28 +  bucket_name: 'pv-prospect-staging'
+      29 +  prefix: 'logs'
+      30 +
+      31  versioned_raw_data_storage:
+      32    backend: 'gcs'
+      33    bucket_name: 'pv-prospect-versioned-raw'
+
+● Now add log_storage to both config classes.
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-extraction/pv_prospect/data_ext
+        raction/config.py)
+  ⎿  Added 3 lines
+      32      staged_raw_data_storage: AnyStorageConfig
+      33      task_queue: TaskQueueConfig
+      34      data_sources: DataSourcesConfig
+      35 +    log_storage: AnyStorageConfig | None = None
+      36
+      37      @classmethod
+      38      def from_dict(cls, data: Dict[str, Any]) -> 'DataExtraction
+          Config':
+      39          task_queue_config = TaskQueueConfig.from_dict(data.get(
+          'task_queue', {}))
+      40 +        log_data = data.get('log_storage')
+      41          return cls(
+      42              task_queue=task_queue_config,
+      43              resources_storage=parse_storage_config(data['resour
+          ces_storage']),
+     ...
+      45                  data['staged_raw_data_storage']
+      46              ),
+      47              data_sources=DataSourcesConfig.from_dict(data),
+      48 +            log_storage=parse_storage_config(log_data) if log_d
+         +ata else None,
+      49          )
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-transformation/pv_prospect/data
+        _transformation/config.py)
+  ⎿  Added 3 lines
+      17      staged_prepared_batches_data_storage: AnyStorageConfig
+      18      staged_prepared_data_storage: AnyStorageConfig
+      19      data_sources: DataSourcesConfig
+      20 +    log_storage: AnyStorageConfig | None = None
+      21
+      22      @classmethod
+      23      def from_dict(cls, data: Dict[str, Any]) -> 'DataTransforma
+          tionConfig':
+      24 +        log_data = data.get('log_storage')
+      25          return cls(
+      26              resources_storage=parse_storage_config(data['resour
+          ces_storage']),
+      27              staged_raw_data_storage=parse_storage_config(
+     ...
+      37                  data['staged_prepared_data_storage']
+      38              ),
+      39              data_sources=DataSourcesConfig.from_dict(data),
+      40 +            log_storage=parse_storage_config(log_data) if log_d
+         +ata else None,
+      41          )
+
+● Now update the extraction entrypoint.
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-extraction/pv_prospect/data_ext
+        raction/processing/entrypoint.py)
+  ⎿  Added 1 line, removed 1 line
+      37  import logging
+      38  import os
+      39  import sys
+      40 -from datetime import date
+      40 +from datetime import date, timezone
+      41
+      42  from pv_prospect.common import (
+      43      build_location_mapping_repo,
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-extraction/pv_prospect/data_ext
+        raction/processing/entrypoint.py)
+  ⎿  Added 1 line, removed 1 line
+      77  from pv_prospect.data_sources import get_config_dir as get_ds_c
+          onfig_dir
+      78  from pv_prospect.etl import DegenerateDateRange, Extractor, bui
+          ld_date_range
+      79  from pv_prospect.etl import get_config_dir as get_etl_config_di
+          r
+      80 -from pv_prospect.etl.storage import FileSystem, get_filesystem
+      80 +from pv_prospect.etl.storage import FileSystem, LoggingFileSyst
+         +em, consolidate_logs, get_filesystem
+      81
+      82  logger = logging.getLogger(__name__)
+      83
+
+● Now add the _maybe_wrap_with_logging helper and the consolidate_logs job type,
+   and wire WORKFLOW_NAME into main().
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-extraction/pv_prospect/data_ext
+        raction/processing/entrypoint.py)
+  ⎿  Added 28 lines, removed 1 line
+      234      logger.info('commit_pv_site_backfill: advanced cursor to %
+           s', cursor)
+      235
+      236
+      237 +def _run_consolidate_logs(config: DataExtractionConfig) -> Non
+          +e:
+      238 +    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+      239 +    if not workflow_name or not config.log_storage:
+      240 +        logger.warning('consolidate_logs: WORKFLOW_NAME or log
+          +_storage not configured')
+      241 +        return
+      242 +    log_fs = get_filesystem(config.log_storage)
+      243 +    today = date.today()
+      244 +    consolidate_logs(log_fs, workflow_name, today)
+      245 +
+      246 +
+      247 +def _maybe_wrap_with_logging(
+      248 +    fs: FileSystem,
+      249 +    config: DataExtractionConfig,
+      250 +    workflow_name: str,
+      251 +    label: str,
+      252 +) -> FileSystem:
+      253 +    if not workflow_name or not config.log_storage:
+      254 +        return fs
+      255 +    log_fs = get_filesystem(config.log_storage)
+      256 +    return LoggingFileSystem(fs, log_fs, workflow_name, label)
+      257 +
+      258 +
+      259  def main() -> None:
+      260      job_type = os.environ.get('JOB_TYPE', '')
+      261 +    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+      262      config = get_config(
+      263          DataExtractionConfig,
+      264          base_config_dirs=[
+     ...
+      275      data_source = config.data_sources.get_data_source(data_sou
+           rce_type)
+      276
+      277      # Cloud Run always uses GCS — resolve storage backends onc
+           e.
+      255 -    staging_fs = get_filesystem(config.staged_raw_data_storage
+          -)
+      278 +    staging_fs: FileSystem = get_filesystem(config.staged_raw_
+          +data_storage)
+      279      resources_fs = get_filesystem(config.resources_storage)
+      280
+      281 +    staging_fs = _maybe_wrap_with_logging(staging_fs, config,
+          +workflow_name, 'raw')
+      282 +
+      283      if job_type == 'preprocess':
+      284          _run_preprocess(staging_fs, data_source)
+      285      elif job_type == 'extract_and_load':
+     ...
+      292          _run_plan_pv_site_backfill(resources_fs)
+      293      elif job_type == 'commit_pv_site_backfill':
+      294          _run_commit_pv_site_backfill(resources_fs)
+      295 +    elif job_type == 'consolidate_logs':
+      296 +        _run_consolidate_logs(config)
+      297      else:
+      298          logger.error('unknown JOB_TYPE=%r', job_type)
+      299          sys.exit(1)
+
+● I added an unused timezone import. Let me remove it.
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-extraction/pv_prospect/data_ext
+        raction/processing/entrypoint.py)
+  ⎿  Added 1 line, removed 1 line
+      37  import logging
+      38  import os
+      39  import sys
+      40 -from datetime import date, timezone
+      40 +from datetime import date
+      41
+      42  from pv_prospect.common import (
+      43      build_location_mapping_repo,
+
+● Now update the transformation entrypoint. Let me first check the
+  Transformation enum to see if I need to add a new value.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-transformation/pv_prospect/data
+        _transformation/transformation.py)
+  ⎿  Added 1 line
+       8      PREPARE_PV = 'prepare_pv'
+       9      ASSEMBLE_WEATHER = 'assemble_weather'
+      10      ASSEMBLE_PV = 'assemble_pv'
+      11 +    CONSOLIDATE_LOGS = 'consolidate_logs'
+      12
+      13
+      14  ALL_TRANSFORMATIONS = (
+
+● Now update the transformation entrypoint.
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-transformation/pv_prospect/data
+        _transformation/entrypoint.py)
+  ⎿  Added 1 line
+      31  import logging
+      32  import os
+      33  import sys
+      34 +from datetime import date
+      35
+      36  from pv_prospect.common import (
+      37      build_location_mapping_repo,
+● Update(~/Projects/pv-prospect/pv-prospect-data-transformation/pv_prospect/data
+        _transformation/entrypoint.py)
+  ⎿  Added 1 line, removed 1 line
+      61  )
+      62  from pv_prospect.etl import DegenerateDateRange, Extractor, bui
+          ld_date_range
+      63  from pv_prospect.etl import get_config_dir as get_etl_config_di
+          r
+      64 -from pv_prospect.etl.storage import FileSystem, get_filesystem
+      64 +from pv_prospect.etl.storage import FileSystem, LoggingFileSyst
+         +em, consolidate_logs, get_filesystem
+      65
+      66  logger = logging.getLogger(__name__)
+      67
+
+● Now I need to restructure main() to handle the consolidate_logs step (which
+  doesn't need dates or most of the setup) and to wrap the output filesystems.
+
+  Read 1 file (ctrl+o to expand)
+
+● I need to restructure main() so that consolidate_logs can be handled before
+  the date-range parsing (which would fail since consolidate_logs doesn't need
+  dates).
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-transformation/pv_prospect/data
+        _transformation/entrypoint.py)
+  ⎿  Tool use rejected
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-transformation/pv_prospect/data
+        _transformation/entrypoint.py)
+  ⎿  Tool use rejected
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-transformation/pv_prospect/data
+        _transformation/entrypoint.py)
+  ⎿  Added 51 lines, removed 11 lines
+       86          build_location_mapping_repo(extractor.read_file('locat
+           ion_mapping.csv'))
+       87
+       88
+       89 +def _get_logging_filesystem(
+       90 +    storage_config: 'AnyStorageConfig',
+       91 +    log_storage: 'AnyStorageConfig | None',
+       92 +    workflow_name: str,
+       93 +    label: str,
+       94 +) -> FileSystem:
+       95 +    fs: FileSystem = get_filesystem(storage_config)
+       96 +    if workflow_name and log_storage:
+       97 +        log_fs = get_filesystem(log_storage)
+       98 +        return LoggingFileSystem(fs, log_fs, workflow_name, la
+          +bel)
+       99 +    logger.warning('Write-logging disabled for %s (no WORKFLOW
+          +_NAME or log_storage)', label)
+      100 +    return fs
+      101 +
+      102 +
+      103 +def _run_consolidate_logs(config: DataTransformationConfig) ->
+          + None:
+      104 +    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+      105 +    if not workflow_name or not config.log_storage:
+      106 +        logger.warning('consolidate_logs: WORKFLOW_NAME or log
+          +_storage not configured')
+      107 +        return
+      108 +    log_fs = get_filesystem(config.log_storage)
+      109 +    today = date.today()
+      110 +    consolidate_logs(log_fs, workflow_name, today)
+      111 +
+      112 +
+      113  def main() -> None:
+      114      transformation = Transformation(os.environ.get('TRANSFORM_
+           STEP', ''))
+      115 +    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+      116 +
+      117 +    config = get_config(
+      118 +        DataTransformationConfig,
+      119 +        base_config_dirs=[
+      120 +            get_etl_config_dir(),
+      121 +            get_ds_config_dir(),
+      122 +            get_dt_config_dir(),
+      123 +        ],
+      124 +    )
+      125 +
+      126 +    if transformation is Transformation.CONSOLIDATE_LOGS:
+      127 +        _run_consolidate_logs(config)
+      128 +        return
+      129 +
+      130      split_by = os.environ.get('SPLIT_BY')
+      131      pv_system_id = _env_int('PV_SYSTEM_ID')
+      132      location_str = os.environ.get('LOCATION')
+     ...
+      141          logger.error('%s', e)
+      142          sys.exit(1)
+      143
+      105 -    config = get_config(
+      106 -        DataTransformationConfig,
+      107 -        base_config_dirs=[
+      108 -            get_etl_config_dir(),
+      109 -            get_ds_config_dir(),
+      110 -            get_dt_config_dir(),
+      111 -        ],
+      112 -    )
+      144      resources_fs = get_filesystem(config.resources_storage)
+      145      raw_fs = get_filesystem(config.staged_raw_data_storage)
+      115 -    cleaned_fs = get_filesystem(config.staged_cleaned_data_sto
+          -rage)
+      116 -    batches_fs = get_filesystem(config.staged_prepared_batches
+          -_data_storage)
+      117 -    prepared_fs = get_filesystem(config.staged_prepared_data_s
+          -torage)
+      146 +    cleaned_fs = _get_logging_filesystem(
+      147 +        config.staged_cleaned_data_storage, config.log_storage
+          +, workflow_name, 'cleaned'
+      148 +    )
+      149 +    batches_fs = _get_logging_filesystem(
+      150 +        config.staged_prepared_batches_data_storage,
+      151 +        config.log_storage,
+      152 +        workflow_name,
+      153 +        'prepared-batches',
+      154 +    )
+      155 +    prepared_fs = _get_logging_filesystem(
+      156 +        config.staged_prepared_data_storage, config.log_storag
+          +e, workflow_name, 'prepared'
+      157 +    )
+      158
+      159      _load_resources(resources_fs)
+      160
+
+● I need to add the AnyStorageConfig import to the transformation entrypoint.
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-transformation/pv_prospect/data
+        _transformation/entrypoint.py)
+  ⎿  Added 7 lines, removed 1 line
+      61  )
+      62  from pv_prospect.etl import DegenerateDateRange, Extractor, bui
+          ld_date_range
+      63  from pv_prospect.etl import get_config_dir as get_etl_config_di
+          r
+      64 -from pv_prospect.etl.storage import FileSystem, LoggingFileSyst
+         -em, consolidate_logs, get_filesystem
+      64 +from pv_prospect.etl.storage import (
+      65 +    AnyStorageConfig,
+      66 +    FileSystem,
+      67 +    LoggingFileSystem,
+      68 +    consolidate_logs,
+      69 +    get_filesystem,
+      70 +)
+      71
+      72  logger = logging.getLogger(__name__)
+      73
+
+● Now apply the same _get_logging_filesystem pattern to the extraction
+  entrypoint for consistency.
+
+  Read 1 file (ctrl+o to expand)
+
+● Let me refactor the extraction entrypoint to use _get_logging_filesystem too.
+
+● Update(~/Projects/pv-prospect/pv-prospect-data-extraction/pv_prospect/data_ext
+        raction/processing/entrypoint.py)
+  ⎿  Added 7 lines, removed 1 line
+      77  from pv_prospect.data_sources import get_config_dir as get_ds_c
+          onfig_dir
+      78  from pv_prospect.etl import DegenerateDateRange, Extractor, bui
+          ld_date_range
+      79  from pv_prospect.etl import get_config_dir as get_etl_config_di
+          r
+      80 -from pv_prospect.etl.storage import FileSystem, LoggingFileSyst
+         -em, consolidate_logs, get_filesystem
+      80 +from pv_prospect.etl.storage import (
+      81 +    AnyStorageConfig,
+      82 +    FileSystem,
+      83 +    LoggingFileSystem,
+      84 +    consolidate_logs,
+      85 +    get_filesystem,
+      86 +)
+      87
+      88  logger = logging.getLogger(__name__)
+      89
+  ⎿  You've hit your limit · resets 1pm (Europe/London)
+     /upgrade to increase your usage limit.
+
+✻ Cooked for 13m 9s

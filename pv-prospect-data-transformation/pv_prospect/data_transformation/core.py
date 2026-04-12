@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from pv_prospect.common.domain import DateRange, GridPoint, Period, PVSite
+from pv_prospect.common.domain import AnySite, DateRange, Period, PVSite
 from pv_prospect.data_sources import (
     DataSource,
     build_time_series_csv_file_path,
@@ -104,7 +104,7 @@ def run_clean_weather(
     raw_fs: FileSystem,
     cleaned_fs: FileSystem,
     weather_data_source: DataSource,
-    grid_point: GridPoint,
+    site: AnySite,
     date_range: DateRange,
     by_week: bool = False,
 ) -> None:
@@ -117,19 +117,19 @@ def run_clean_weather(
     """
     split_period = Period.WEEK if by_week else Period.DAY
     for chunk in date_range.split_by(split_period):
-        _clean_weather_chunk(raw_fs, cleaned_fs, weather_data_source, grid_point, chunk)
+        _clean_weather_chunk(raw_fs, cleaned_fs, weather_data_source, site, chunk)
 
 
 def _clean_weather_chunk(
     raw_fs: FileSystem,
     cleaned_fs: FileSystem,
     weather_data_source: DataSource,
-    grid_point: GridPoint,
+    site: AnySite,
     date_range: DateRange,
 ) -> None:
     """Clean a single raw weather file and write per-day cleaned CSVs."""
     in_path = build_time_series_csv_file_path(
-        TIMESERIES_FOLDER, weather_data_source, grid_point, date_range
+        TIMESERIES_FOLDER, weather_data_source, site, date_range
     )
     logger.info('[clean_weather] Processing %s', in_path)
     df = read_csv(raw_fs, in_path)
@@ -150,7 +150,7 @@ def _clean_weather_chunk(
         out_path = build_time_series_csv_file_path(
             TIMESERIES_FOLDER,
             weather_data_source,
-            grid_point,
+            site,
             day_range,
         )
         write_csv(cleaned_fs, day_df, out_path)
@@ -184,7 +184,7 @@ def run_prepare_weather(
     cleaned_fs: FileSystem,
     batches_fs: FileSystem,
     weather_data_source: DataSource,
-    grid_point: GridPoint,
+    site: AnySite,
     date_range: DateRange,
 ) -> None:
     """Prepare cleaned weather CSVs for a date range into headerless batches."""
@@ -193,7 +193,7 @@ def run_prepare_weather(
         path = build_time_series_csv_file_path(
             TIMESERIES_FOLDER,
             weather_data_source,
-            grid_point,
+            site,
             day_range,
         )
         logger.info('[prepare_weather] Processing %s', path)
@@ -207,7 +207,7 @@ def run_prepare_weather(
             batches_fs,
             prepared_df,
             _weather_batch_path(
-                grid_point.location.to_coordinate_string(filename_friendly=True),
+                site.location.to_coordinate_string(filename_friendly=True),
                 date_str,
             ),
             header=False,
@@ -220,7 +220,6 @@ def run_prepare_pv(
     pv_data_source: DataSource,
     weather_data_source: DataSource,
     pv_site: PVSite,
-    grid_point: GridPoint,
     date_range: DateRange,
     get_pv_site: Callable[[int], PVSite],
 ) -> None:
@@ -239,7 +238,7 @@ def run_prepare_pv(
         weather_path = build_time_series_csv_file_path(
             TIMESERIES_FOLDER,
             weather_data_source,
-            grid_point,
+            pv_site,
             day_range,
         )
         if not cleaned_fs.exists(weather_path):

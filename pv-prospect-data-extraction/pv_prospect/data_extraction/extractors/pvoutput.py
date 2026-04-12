@@ -180,7 +180,7 @@ class PVOutputExtractor:
         entries = _to_clean_entries(response.text)
         data = [HEADER] + entries
 
-        return [TimeSeries(entity=pv_site, rows=data)]
+        return [TimeSeries(rows=data)]
 
 
 def _to_clean_entries(text: str) -> list[list[str]]:
