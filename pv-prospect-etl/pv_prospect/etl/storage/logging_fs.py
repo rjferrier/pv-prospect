@@ -47,7 +47,7 @@ class LoggingFileSystem:
         time_str = now.strftime('%H%M%S%f')
         full_path = f'{self._label}/{path}' if self._label else path
         log_path = f'{date_str}/{self._workflow_name}/{time_str}.txt'
-        log_content = f'{now.isoformat()} {full_path}\n'
+        log_content = f'{now.isoformat()} CREATED {full_path}\n'
         try:
             self._log_fs.write_text(log_path, log_content)
         except Exception:

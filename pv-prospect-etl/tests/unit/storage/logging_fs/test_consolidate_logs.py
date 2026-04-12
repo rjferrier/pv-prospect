@@ -16,8 +16,8 @@ def _fixed_now() -> datetime:
 def test_merges_entries_into_consolidated_file() -> None:
     log_fs = FakeFileSystem(
         {
-            '2025-06-24/my-wf/103015000000.txt': '2025-06-24T10:30:15+00:00 raw/a.csv\n',
-            '2025-06-24/my-wf/103016000000.txt': '2025-06-24T10:30:16+00:00 raw/b.csv\n',
+            '2025-06-24/my-wf/103015000000.txt': '2025-06-24T10:30:15+00:00 CREATED raw/a.csv\n',
+            '2025-06-24/my-wf/103016000000.txt': '2025-06-24T10:30:16+00:00 CREATED raw/b.csv\n',
         }
     )
 
@@ -31,8 +31,8 @@ def test_merges_entries_into_consolidated_file() -> None:
 def test_sorts_entries_by_timestamp() -> None:
     log_fs = FakeFileSystem(
         {
-            '2025-06-24/wf/103016000000.txt': '2025-06-24T10:30:16+00:00 raw/b.csv\n',
-            '2025-06-24/wf/103015000000.txt': '2025-06-24T10:30:15+00:00 raw/a.csv\n',
+            '2025-06-24/wf/103016000000.txt': '2025-06-24T10:30:16+00:00 CREATED raw/b.csv\n',
+            '2025-06-24/wf/103015000000.txt': '2025-06-24T10:30:15+00:00 CREATED raw/a.csv\n',
         }
     )
 
@@ -47,8 +47,8 @@ def test_sorts_entries_by_timestamp() -> None:
 def test_deletes_individual_entry_files() -> None:
     log_fs = FakeFileSystem(
         {
-            '2025-06-24/wf/103015000000.txt': '2025-06-24T10:30:15+00:00 raw/a.csv\n',
-            '2025-06-24/wf/103016000000.txt': '2025-06-24T10:30:16+00:00 raw/b.csv\n',
+            '2025-06-24/wf/103015000000.txt': '2025-06-24T10:30:15+00:00 CREATED raw/a.csv\n',
+            '2025-06-24/wf/103016000000.txt': '2025-06-24T10:30:16+00:00 CREATED raw/b.csv\n',
         }
     )
 
@@ -70,8 +70,8 @@ def test_noop_when_no_entries() -> None:
 def test_only_processes_matching_workflow() -> None:
     log_fs = FakeFileSystem(
         {
-            '2025-06-24/wf-a/103015000000.txt': '2025-06-24T10:30:15+00:00 raw/a.csv\n',
-            '2025-06-24/wf-b/103016000000.txt': '2025-06-24T10:30:16+00:00 raw/b.csv\n',
+            '2025-06-24/wf-a/103015000000.txt': '2025-06-24T10:30:15+00:00 CREATED raw/a.csv\n',
+            '2025-06-24/wf-b/103016000000.txt': '2025-06-24T10:30:16+00:00 CREATED raw/b.csv\n',
         }
     )
 

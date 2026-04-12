@@ -33,7 +33,7 @@ def test_write_text_creates_log_entry() -> None:
     expected_path = '2025-06-24/my-workflow/103015123456.txt'
     assert expected_path in log_fs._files
     assert log_fs._files[expected_path] == (
-        '2025-06-24T10:30:15.123456+00:00 raw/data/file.csv\n'
+        '2025-06-24T10:30:15.123456+00:00 CREATED raw/data/file.csv\n'
     )
 
 
@@ -110,7 +110,7 @@ def test_empty_label_logs_path_without_prefix() -> None:
 
     expected_path = '2025-06-24/my-workflow/103015123456.txt'
     assert log_fs._files[expected_path] == (
-        '2025-06-24T10:30:15.123456+00:00 data.csv\n'
+        '2025-06-24T10:30:15.123456+00:00 CREATED data.csv\n'
     )
 
 

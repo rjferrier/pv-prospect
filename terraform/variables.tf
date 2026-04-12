@@ -107,3 +107,8 @@ variable "secret_env_vars" {
   default     = []
   description = "Environment variables sourced from Secret Manager for Cloud Run Jobs"
 }
+
+variable "github_repo" {
+  type        = string
+  description = "The GitHub repository containing the Actions that will authenticate with GCP. Format: 'owner/repo' (e.g., 'rjferrier/pv-prospect-instance')."
+}
