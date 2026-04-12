@@ -77,7 +77,13 @@ from pv_prospect.data_sources import DataSourceType, resolve_grid_point
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
-from pv_prospect.etl.storage import FileSystem, get_filesystem
+from pv_prospect.etl.storage import (
+    AnyStorageConfig,
+    FileSystem,
+    LoggingFileSystem,
+    consolidate_logs,
+    get_filesystem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -234,8 +240,32 @@ def _run_commit_pv_site_backfill(resources_fs: FileSystem) -> None:
     logger.info('commit_pv_site_backfill: advanced cursor to %s', cursor)
 
 
+def _get_logging_filesystem(
+    storage_config: AnyStorageConfig,
+    log_storage: AnyStorageConfig | None,
+    workflow_name: str,
+    label: str,
+) -> FileSystem:
+    fs: FileSystem = get_filesystem(storage_config)
+    if workflow_name and log_storage:
+        log_fs = get_filesystem(log_storage)
+        return LoggingFileSystem(fs, log_fs, workflow_name, label)
+    return fs
+
+
+def _run_consolidate_logs(config: DataExtractionConfig) -> None:
+    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+    if not workflow_name or not config.log_storage:
+        logger.warning('consolidate_logs: WORKFLOW_NAME or log_storage not configured')
+        return
+    log_fs = get_filesystem(config.log_storage)
+    today = date.today()
+    consolidate_logs(log_fs, workflow_name, today)
+
+
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
+    workflow_name = os.environ.get('WORKFLOW_NAME', '')
     config = get_config(
         DataExtractionConfig,
         base_config_dirs=[
@@ -252,7 +282,9 @@ def main() -> None:
     data_source = config.data_sources.get_data_source(data_source_type)
 
     # Cloud Run always uses GCS — resolve storage backends once.
-    staging_fs = get_filesystem(config.staged_raw_data_storage)
+    staging_fs = _get_logging_filesystem(
+        config.staged_raw_data_storage, config.log_storage, workflow_name, 'raw'
+    )
     resources_fs = get_filesystem(config.resources_storage)
 
     if job_type == 'preprocess':
@@ -267,6 +299,8 @@ def main() -> None:
         _run_plan_pv_site_backfill(resources_fs)
     elif job_type == 'commit_pv_site_backfill':
         _run_commit_pv_site_backfill(resources_fs)
+    elif job_type == 'consolidate_logs':
+        _run_consolidate_logs(config)
     else:
         logger.error('unknown JOB_TYPE=%r', job_type)
         sys.exit(1)

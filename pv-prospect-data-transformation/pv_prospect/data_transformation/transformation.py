@@ -8,6 +8,7 @@ class Transformation(Enum):
     PREPARE_PV = 'prepare_pv'
     ASSEMBLE_WEATHER = 'assemble_weather'
     ASSEMBLE_PV = 'assemble_pv'
+    CONSOLIDATE_LOGS = 'consolidate_logs'
 
 
 ALL_TRANSFORMATIONS = (

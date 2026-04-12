@@ -35,6 +35,7 @@ resource "google_workflows_workflow" "pv_site_backfill" {
               - project_id: $${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
               - region: "${var.region}"
               - job_name: "${var.cloud_run_job_name}"
+              - workflow_name: "pv-prospect-extract-pv-site-backfill"
               - bucket: "${var.staging_bucket_name}"
               - manifest_object: "${var.manifest_object_path}"
               - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
@@ -53,6 +54,8 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                     - env:
                         - name: JOB_TYPE
                           value: plan_pv_site_backfill
+                        - name: WORKFLOW_NAME
+                          value: $${workflow_name}
             result: plan_result
 
         - fetch_manifest:
@@ -92,6 +95,8 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                                   value: $${dry_run}
                                 - name: SPLIT_BY
                                   value: day
+                                - name: WORKFLOW_NAME
+                                  value: $${workflow_name}
                     result: pv_extract_result
 
         - extract_weather:
@@ -122,6 +127,8 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                                     value: $${overwrite}
                                   - name: DRY_RUN
                                     value: $${dry_run}
+                                  - name: WORKFLOW_NAME
+                                    value: $${workflow_name}
                       result: weather_extract_result
 
         - commit:
@@ -134,7 +141,23 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                     - env:
                         - name: JOB_TYPE
                           value: commit_pv_site_backfill
+                        - name: WORKFLOW_NAME
+                          value: $${workflow_name}
             result: commit_result
+
+        - consolidate_logs:
+            call: googleapis.run.v2.projects.locations.jobs.run
+            args:
+              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+              body:
+                overrides:
+                  containerOverrides:
+                    - env:
+                        - name: JOB_TYPE
+                          value: consolidate_logs
+                        - name: WORKFLOW_NAME
+                          value: $${workflow_name}
+            result: consolidate_logs_result
 
         - done:
             return: "completed"

@@ -57,6 +57,11 @@ class LocalFileSystem:
     def mkdir(self, path: str) -> None:
         (self._base_dir / path).mkdir(parents=True, exist_ok=True)
 
+    def rmdir(self, path: str) -> None:
+        full_path = self._base_dir / path
+        if full_path.exists() and full_path.is_dir():
+            full_path.rmdir()
+
     def list_files(
         self, prefix: str, pattern: str = '*', recursive: bool = False
     ) -> list[FileEntry]:

@@ -23,6 +23,11 @@ staged_prepared_data_storage:
   bucket_name: 'pv-prospect-staging'
   prefix: 'prepared'
 
+log_storage:
+  backend: 'gcs'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'logs'
+
 versioned_raw_data_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-versioned-raw'

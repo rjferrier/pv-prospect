@@ -64,6 +64,9 @@ class GcsFileSystem:
     def mkdir(self, path: str) -> None:
         pass  # GCS has a flat namespace
 
+    def rmdir(self, path: str) -> None:
+        pass  # GCS has a flat namespace
+
     def list_files(
         self, prefix: str, pattern: str = '*', recursive: bool = False
     ) -> list[FileEntry]:

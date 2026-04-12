@@ -31,6 +31,7 @@ LOCATION
 import logging
 import os
 import sys
+from datetime import date
 
 from pv_prospect.common import (
     build_location_mapping_repo,
@@ -60,7 +61,13 @@ from pv_prospect.data_transformation.transformation import (
 )
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
-from pv_prospect.etl.storage import FileSystem, get_filesystem
+from pv_prospect.etl.storage import (
+    AnyStorageConfig,
+    FileSystem,
+    LoggingFileSystem,
+    consolidate_logs,
+    get_filesystem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +92,49 @@ def _load_resources(resources_fs: FileSystem) -> None:
         build_location_mapping_repo(extractor.read_file('location_mapping.csv'))
 
 
+def _get_logging_filesystem(
+    storage_config: 'AnyStorageConfig',
+    log_storage: 'AnyStorageConfig | None',
+    workflow_name: str,
+    label: str,
+) -> FileSystem:
+    fs: FileSystem = get_filesystem(storage_config)
+    if workflow_name and log_storage:
+        log_fs = get_filesystem(log_storage)
+        return LoggingFileSystem(fs, log_fs, workflow_name, label)
+    logger.warning(
+        'Write-logging disabled for %s (no WORKFLOW_NAME or log_storage)', label
+    )
+    return fs
+
+
+def _run_consolidate_logs(config: DataTransformationConfig) -> None:
+    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+    if not workflow_name or not config.log_storage:
+        logger.warning('consolidate_logs: WORKFLOW_NAME or log_storage not configured')
+        return
+    log_fs = get_filesystem(config.log_storage)
+    today = date.today()
+    consolidate_logs(log_fs, workflow_name, today)
+
+
 def main() -> None:
     transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
+    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+
+    config = get_config(
+        DataTransformationConfig,
+        base_config_dirs=[
+            get_etl_config_dir(),
+            get_ds_config_dir(),
+            get_dt_config_dir(),
+        ],
+    )
+
+    if transformation is Transformation.CONSOLIDATE_LOGS:
+        _run_consolidate_logs(config)
+        return
+
     split_by = os.environ.get('SPLIT_BY')
     pv_system_id = _env_int('PV_SYSTEM_ID')
     location_str = os.environ.get('LOCATION')
@@ -101,19 +149,23 @@ def main() -> None:
         logger.error('%s', e)
         sys.exit(1)
 
-    config = get_config(
-        DataTransformationConfig,
-        base_config_dirs=[
-            get_etl_config_dir(),
-            get_ds_config_dir(),
-            get_dt_config_dir(),
-        ],
-    )
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
-    cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
-    batches_fs = get_filesystem(config.staged_prepared_batches_data_storage)
-    prepared_fs = get_filesystem(config.staged_prepared_data_storage)
+    cleaned_fs = _get_logging_filesystem(
+        config.staged_cleaned_data_storage, config.log_storage, workflow_name, 'cleaned'
+    )
+    batches_fs = _get_logging_filesystem(
+        config.staged_prepared_batches_data_storage,
+        config.log_storage,
+        workflow_name,
+        'prepared-batches',
+    )
+    prepared_fs = _get_logging_filesystem(
+        config.staged_prepared_data_storage,
+        config.log_storage,
+        workflow_name,
+        'prepared',
+    )
 
     _load_resources(resources_fs)
 

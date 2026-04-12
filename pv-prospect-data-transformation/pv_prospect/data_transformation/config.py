@@ -17,9 +17,11 @@ class DataTransformationConfig:
     staged_prepared_batches_data_storage: AnyStorageConfig
     staged_prepared_data_storage: AnyStorageConfig
     data_sources: DataSourcesConfig
+    log_storage: AnyStorageConfig | None = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DataTransformationConfig':
+        log_data = data.get('log_storage')
         return cls(
             resources_storage=parse_storage_config(data['resources_storage']),
             staged_raw_data_storage=parse_storage_config(
@@ -35,4 +37,5 @@ class DataTransformationConfig:
                 data['staged_prepared_data_storage']
             ),
             data_sources=DataSourcesConfig.from_dict(data),
+            log_storage=parse_storage_config(log_data) if log_data else None,
         )

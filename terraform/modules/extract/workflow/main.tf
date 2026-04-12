@@ -19,6 +19,7 @@ resource "google_workflows_workflow" "data_extraction" {
               - project_id: $${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
               - region: "${var.region}"
               - job_name: "${var.cloud_run_job_name}"
+              - workflow_name: "pv-prospect-extract"
               - pv_model_data_sources: $${default(map.get(args, "pv_model_data_sources"), ${jsonencode(var.default_pv_model_data_sources)})}
               - weather_model_data_sources: $${default(map.get(args, "weather_model_data_sources"), ${jsonencode(var.default_weather_model_data_sources)})}
               - date: $${default(map.get(args, "date"), default(map.get(args, "start_date"), text.substring(time.format(sys.now()), 0, 10)))}
@@ -64,6 +65,8 @@ resource "google_workflows_workflow" "data_extraction" {
                                     value: preprocess
                                   - name: DATA_SOURCE
                                     value: $${ds}
+                                  - name: WORKFLOW_NAME
+                                    value: $${workflow_name}
                       result: preprocess_result
 
         - extract:
@@ -106,6 +109,8 @@ resource "google_workflows_workflow" "data_extraction" {
                                                           value: $${dry_run}
                                                         - name: SPLIT_BY
                                                           value: $${split_by}
+                                                        - name: WORKFLOW_NAME
+                                                          value: $${workflow_name}
                                             result: extract_result
                 - extract_for_weather_model:
                     steps:
@@ -144,7 +149,23 @@ resource "google_workflows_workflow" "data_extraction" {
                                                           value: $${dry_run}
                                                         - name: SPLIT_BY
                                                           value: $${split_by}
+                                                        - name: WORKFLOW_NAME
+                                                          value: $${workflow_name}
                                             result: extract_location_result
+
+        - consolidate_logs:
+            call: googleapis.run.v2.projects.locations.jobs.run
+            args:
+              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+              body:
+                overrides:
+                  containerOverrides:
+                    - env:
+                        - name: JOB_TYPE
+                          value: consolidate_logs
+                        - name: WORKFLOW_NAME
+                          value: $${workflow_name}
+            result: consolidate_logs_result
 
         - done:
             return: "completed"

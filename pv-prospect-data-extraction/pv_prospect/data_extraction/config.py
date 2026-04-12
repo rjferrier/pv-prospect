@@ -32,10 +32,12 @@ class DataExtractionConfig:
     staged_raw_data_storage: AnyStorageConfig
     task_queue: TaskQueueConfig
     data_sources: DataSourcesConfig
+    log_storage: AnyStorageConfig | None = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DataExtractionConfig':
         task_queue_config = TaskQueueConfig.from_dict(data.get('task_queue', {}))
+        log_data = data.get('log_storage')
         return cls(
             task_queue=task_queue_config,
             resources_storage=parse_storage_config(data['resources_storage']),
@@ -43,4 +45,5 @@ class DataExtractionConfig:
                 data['staged_raw_data_storage']
             ),
             data_sources=DataSourcesConfig.from_dict(data),
+            log_storage=parse_storage_config(log_data) if log_data else None,
         )

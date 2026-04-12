@@ -19,6 +19,7 @@ resource "google_workflows_workflow" "data_transformation" {
               - project_id: $${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
               - region: "${var.region}"
               - job_name: "${var.cloud_run_job_name}"
+              - workflow_name: "pv-prospect-transform"
               - date: $${default(map.get(args, "date"), text.substring(time.format(sys.now()), 0, 10))}
               - raw_pv_system_ids: $${default(map.get(args, "pv_system_ids"), [])}
               - raw_locations: $${default(map.get(args, "locations"), [])}
@@ -70,6 +71,8 @@ resource "google_workflows_workflow" "data_transformation" {
                                                                 value: $${string(pv_system_id)}
                                                               - name: DATE
                                                                 value: $${date}
+                                                              - name: WORKFLOW_NAME
+                                                                value: $${workflow_name}
                                                   result: clean_weather_result
                               - clean_weather_by_location:
                                   steps:
@@ -93,6 +96,8 @@ resource "google_workflows_workflow" "data_transformation" {
                                                                 value: $${location}
                                                               - name: DATE
                                                                 value: $${date}
+                                                              - name: WORKFLOW_NAME
+                                                                value: $${workflow_name}
                                                   result: clean_weather_location_result
                 - clean_pv_branch:
                     steps:
@@ -116,6 +121,8 @@ resource "google_workflows_workflow" "data_transformation" {
                                                   value: $${string(pv_system_id)}
                                                 - name: DATE
                                                   value: $${date}
+                                                - name: WORKFLOW_NAME
+                                                  value: $${workflow_name}
                                     result: clean_pv_result
 
         - process_parallel:
@@ -148,6 +155,8 @@ resource "google_workflows_workflow" "data_transformation" {
                                                                 value: $${string(pv_system_id)}
                                                               - name: DATE
                                                                 value: $${date}
+                                                              - name: WORKFLOW_NAME
+                                                                value: $${workflow_name}
                                                   result: prepare_weather_result
                               - prepare_weather_by_location:
                                   steps:
@@ -171,6 +180,8 @@ resource "google_workflows_workflow" "data_transformation" {
                                                                 value: $${location}
                                                               - name: DATE
                                                                 value: $${date}
+                                                              - name: WORKFLOW_NAME
+                                                                value: $${workflow_name}
                                                   result: prepare_weather_location_result
                 - prepare_pv_branch:
                     steps:
@@ -194,7 +205,23 @@ resource "google_workflows_workflow" "data_transformation" {
                                                   value: $${string(pv_system_id)}
                                                 - name: DATE
                                                   value: $${date}
+                                                - name: WORKFLOW_NAME
+                                                  value: $${workflow_name}
                                     result: prepare_pv_result
+
+        - consolidate_logs:
+            call: googleapis.run.v2.projects.locations.jobs.run
+            args:
+              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+              body:
+                overrides:
+                  containerOverrides:
+                    - env:
+                        - name: TRANSFORM_STEP
+                          value: consolidate_logs
+                        - name: WORKFLOW_NAME
+                          value: $${workflow_name}
+            result: consolidate_logs_result
 
         - done:
             return: "completed"

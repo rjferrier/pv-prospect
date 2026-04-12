@@ -41,6 +41,10 @@ class FakeFileSystem:
     def mkdir(self, path: str) -> None:
         self.created_dirs.append(path)
 
+    def rmdir(self, path: str) -> None:
+        if path in self.created_dirs:
+            self.created_dirs.remove(path)
+
     def list_files(
         self, prefix: str, pattern: str = '*', recursive: bool = False
     ) -> list[FileEntry]:
