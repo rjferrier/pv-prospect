@@ -378,6 +378,11 @@ resource "google_storage_bucket_iam_member" "github_actions_staging" {
 # Outputs
 # ---------------------------------------------------------------------------
 
+output "region" {
+  value       = var.region
+  description = "GCP region"
+}
+
 output "service_account_email" {
   value       = module.storage.service_account_email
   description = "DVC service account email"
