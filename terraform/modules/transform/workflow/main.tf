@@ -20,7 +20,7 @@ resource "google_workflows_workflow" "data_transformation" {
               - region: "${var.region}"
               - job_name: "${var.cloud_run_job_name}"
               - workflow_name: "pv-prospect-transform"
-              - date: $${default(map.get(args, "date"), text.substring(time.format(sys.now()), 0, 10))}
+              - date: $${default(map.get(args, "date"), text.substring(time.format(sys.now() - 86400), 0, 10))}
               - raw_pv_system_ids: $${default(map.get(args, "pv_system_ids"), [])}
               - raw_locations: $${default(map.get(args, "locations"), [])}
 
