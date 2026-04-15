@@ -22,7 +22,7 @@ resource "google_workflows_workflow" "data_extraction" {
               - workflow_name: "pv-prospect-extract"
               - pv_model_data_sources: $${default(map.get(args, "pv_model_data_sources"), ${jsonencode(var.default_pv_model_data_sources)})}
               - weather_model_data_sources: $${default(map.get(args, "weather_model_data_sources"), ${jsonencode(var.default_weather_model_data_sources)})}
-              - date: $${default(map.get(args, "date"), default(map.get(args, "start_date"), text.substring(time.format(sys.now()), 0, 10)))}
+              - date: $${default(map.get(args, "date"), default(map.get(args, "start_date"), text.substring(time.format(sys.now() - 86400), 0, 10)))}
               - raw_pv_system_ids: $${default(map.get(args, "pv_system_ids"), [])}
               - raw_locations: $${default(map.get(args, "locations"), [])}
               - overwrite: $${default(map.get(args, "overwrite"), "false")}
