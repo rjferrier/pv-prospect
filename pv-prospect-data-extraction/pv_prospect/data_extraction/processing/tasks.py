@@ -62,7 +62,6 @@ def extract_and_load(
     site: AnySite,
     date_range: DateRange,
     local_dir: str | None,
-    overwrite: bool,
     dry_run: bool,
 ) -> Result:
     config, staging_fs = _resolve_storage(local_dir)
@@ -77,6 +76,5 @@ def extract_and_load(
         staging_fs,
         site,
         date_range,
-        overwrite,
         dry_run,
     )

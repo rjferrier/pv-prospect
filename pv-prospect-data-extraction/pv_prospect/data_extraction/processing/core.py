@@ -22,7 +22,7 @@ from pv_prospect.data_sources import (
     build_time_series_csv_file_path,
     csv_path_to_metadata_path,
 )
-from pv_prospect.etl import TIMESERIES_FOLDER, Extractor, Loader
+from pv_prospect.etl import TIMESERIES_FOLDER, Loader
 from pv_prospect.etl.storage import FileSystem
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,6 @@ def extract_and_load(
     staging_fs: FileSystem,
     site: AnySite,
     date_range: DateRange,
-    overwrite: bool,
     dry_run: bool,
 ) -> Result:
     """
@@ -72,7 +71,6 @@ def extract_and_load(
         staging_fs: FileSystem for both reading existing files and writing time series CSVs.
         site: The PV site or weather grid point to extract data for.
         date_range: DateRange containing start date and optional end date.
-        overwrite: If True, overwrite existing files.
         dry_run: If True, preview without writing files.
 
     Returns:
@@ -84,7 +82,6 @@ def extract_and_load(
         logger.info('%s: dry run — not writing', task)
         return Result.skipped_dry_run(task)
 
-    staging_extractor = Extractor(staging_fs)
     staging_loader = Loader(staging_fs)
 
     def get_csv_path(site_: Site) -> str:
@@ -95,16 +92,8 @@ def extract_and_load(
             date_range,
         )
 
-    def is_processable(site_: Site) -> bool:
-        file_path = get_csv_path(site_)
-        return overwrite or not staging_extractor.file_exists(file_path)
-
     try:
         extractor = get_ts_data_extractor(data_source)
-
-        if not is_processable(site):
-            logger.info('%s: output file already exists', task)
-            return Result.skipped_existing(task)
 
         timeseries = extractor.extract(
             [site],
@@ -114,11 +103,12 @@ def extract_and_load(
 
         for ts in timeseries:
             ts_file_path = get_csv_path(site)
-            staging_loader.write_csv(ts_file_path, ts.rows, overwrite=overwrite)
+            # We always overwrite now.
+            staging_loader.write_csv(ts_file_path, ts.rows, overwrite=True)
             if ts.metadata is not None:
                 meta_path = csv_path_to_metadata_path(ts_file_path)
                 staging_loader.write_text(
-                    meta_path, json.dumps(ts.metadata), overwrite=overwrite
+                    meta_path, json.dumps(ts.metadata), overwrite=True
                 )
 
         logger.info('%s: success', task)

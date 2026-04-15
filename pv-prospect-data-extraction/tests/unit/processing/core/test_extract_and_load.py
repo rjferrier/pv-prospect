@@ -22,7 +22,6 @@ def test_dry_run_returns_skipped() -> None:
         FakeFileSystem(),
         _PV_SITE,
         _DATE_RANGE,
-        overwrite=False,
         dry_run=True,
     )
 
@@ -38,29 +37,33 @@ def test_dry_run_does_not_write() -> None:
         staging_fs,
         _PV_SITE,
         _DATE_RANGE,
-        overwrite=False,
         dry_run=True,
     )
 
     assert staging_fs.written_texts == {}
 
 
-def test_skips_when_all_files_exist() -> None:
+def test_overwrites_when_all_files_exist() -> None:
     expected_path = build_time_series_csv_file_path(
         'timeseries', DataSource.PVOUTPUT, _PV_SITE, _DATE_RANGE
     )
 
+    rows = [['2025-06-01', '100']]
+    mock_extractor = MagicMock()
+    mock_extractor.extract.return_value = [TimeSeries(entity=_PV_SITE, rows=rows)]
+
+    staging_fs = FakeFileSystem({expected_path: 'old,data'})
     result = extract_and_load(
-        lambda _: MagicMock(),
+        lambda _: mock_extractor,
         DataSource.PVOUTPUT,
-        FakeFileSystem({expected_path: ''}),
+        staging_fs,
         _PV_SITE,
         _DATE_RANGE,
-        overwrite=False,
         dry_run=False,
     )
 
-    assert result.type == ResultType.SKIPPED_EXISTING
+    assert result.type == ResultType.SUCCESS
+    assert staging_fs.written_csv_rows[expected_path] == rows
 
 
 def test_extracts_and_writes_csv() -> None:
@@ -75,36 +78,12 @@ def test_extracts_and_writes_csv() -> None:
         staging_fs,
         _PV_SITE,
         _DATE_RANGE,
-        overwrite=False,
         dry_run=False,
     )
 
     assert result.type == ResultType.SUCCESS
     assert len(staging_fs.written_texts) == 1
     assert list(staging_fs.written_csv_rows.values())[0] == rows
-
-
-def test_overwrites_existing_when_flag_set() -> None:
-    mock_extractor = MagicMock()
-    mock_extractor.extract.return_value = [TimeSeries(entity=_PV_SITE, rows=[['row']])]
-
-    expected_path = build_time_series_csv_file_path(
-        'timeseries', DataSource.PVOUTPUT, _PV_SITE, _DATE_RANGE
-    )
-
-    staging_fs = FakeFileSystem({expected_path: ''})
-    result = extract_and_load(
-        lambda _: mock_extractor,
-        DataSource.PVOUTPUT,
-        staging_fs,
-        _PV_SITE,
-        _DATE_RANGE,
-        overwrite=True,
-        dry_run=False,
-    )
-
-    assert result.type == ResultType.SUCCESS
-    assert len(staging_fs.written_texts) == 1
 
 
 def test_failure_on_extraction_error() -> None:
@@ -117,7 +96,6 @@ def test_failure_on_extraction_error() -> None:
         FakeFileSystem(),
         _PV_SITE,
         _DATE_RANGE,
-        overwrite=False,
         dry_run=False,
     )
 

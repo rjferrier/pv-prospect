@@ -41,7 +41,6 @@ resource "google_workflows_workflow" "pv_site_backfill" {
               - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
               - pv_data_source: $${default(map.get(args, "pv_data_source"), "${var.pv_data_source}")}
               - weather_data_source: $${default(map.get(args, "weather_data_source"), "${var.weather_data_source}")}
-              - overwrite: $${default(map.get(args, "overwrite"), "false")}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
 
         - plan:
@@ -89,8 +88,6 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                                   value: $${manifest.start_date}
                                 - name: END_DATE
                                   value: $${manifest.end_date}
-                                - name: OVERWRITE
-                                  value: $${overwrite}
                                 - name: DRY_RUN
                                   value: $${dry_run}
                                 - name: SPLIT_BY
@@ -123,8 +120,6 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                                     value: $${manifest.start_date}
                                   - name: END_DATE
                                     value: $${manifest.end_date}
-                                  - name: OVERWRITE
-                                    value: $${overwrite}
                                   - name: DRY_RUN
                                     value: $${dry_run}
                                   - name: WORKFLOW_NAME

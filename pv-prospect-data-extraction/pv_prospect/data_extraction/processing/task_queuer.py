@@ -67,7 +67,6 @@ class TaskQueuer:
         site: AnySite,
         date_range: DateRange,
         local_dir: str | None,
-        overwrite: bool,
         dry_run: bool,
         counter: int,
     ) -> None:
@@ -77,7 +76,6 @@ class TaskQueuer:
                 site,
                 date_range,
                 local_dir,
-                overwrite,
                 dry_run,
             ),
             countdown=self._calculate_delay(counter),

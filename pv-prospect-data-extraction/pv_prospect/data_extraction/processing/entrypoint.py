@@ -28,7 +28,6 @@ For **extract_and_load**:
                         no end date is given).
     END_DATE          — ISO date ``YYYY-MM-DD``, exclusive (optional; defaults
                         to START_DATE + 1 day)
-    OVERWRITE         — ``true`` or ``false`` (default ``false``)
     DRY_RUN           — ``true`` or ``false`` (default ``false``)
     SPLIT_BY          — ``day`` or ``week`` (chunking hint; omit to use the
                         data source default: day for PV, unsplit for weather)
@@ -155,7 +154,6 @@ def _run_extract_and_load(
     resources_fs: FileSystem,
     data_source: DataSource,
 ) -> None:
-    overwrite = _env_bool('OVERWRITE')
     dry_run = _env_bool('DRY_RUN')
     split_by = os.environ.get('SPLIT_BY')
 
@@ -213,7 +211,6 @@ def _run_extract_and_load(
                 staging_fs,
                 entity,
                 dr,
-                overwrite,
                 dry_run,
             )
             logger.info('%s %s: %s', entity, dr, result.type.value)

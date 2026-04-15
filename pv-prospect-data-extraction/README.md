@@ -62,7 +62,6 @@ docker compose run --rm runner openmeteo/hourly 89665 -d 2025-06-24 -n
 | `system_ids` | PV system ID(s) to process (comma-separated, optional) | `89665` |
 | `-d, --start-date` | Start date: YYYY-MM-DD, YYYY-MM, 'today', or 'yesterday' | `-d 2024-01-15` |
 | `-e, --end-date` | End date: YYYY-MM-DD, YYYY-MM, 'today', or 'yesterday' | `-e 2024-01-31` |
-| `-o, --overwrite` | Overwrite existing files (default: skip existing) | `-o` |
 | `-n, --dry-run` | Show what would be done without executing | `-n` |
 | `-p, --parallel` | Number of concurrent threads for local runner (default: 4) | `-p 8` |
 

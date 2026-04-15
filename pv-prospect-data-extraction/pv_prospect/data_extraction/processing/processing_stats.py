@@ -49,8 +49,6 @@ class ProcessingStats:
             if result.failure_details is None:
                 raise ValueError('FAILURE result is missing failure_details')
             self.record_failure(result.task, result.failure_details)
-        elif result.type == ResultType.SKIPPED_EXISTING:
-            self.record_skip_existing()
         elif result.type == ResultType.SKIPPED_DRY_RUN:
             self.record_skip_dry_run()
 

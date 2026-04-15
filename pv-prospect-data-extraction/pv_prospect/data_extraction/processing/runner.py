@@ -124,9 +124,6 @@ def _parse_args() -> 'Any':
         help='local directory instead of GCS',
     )
     parser.add_argument(
-        '-o', '--overwrite', action='store_true', help='overwrite existing CSV files'
-    )
-    parser.add_argument(
         '--workers',
         type=int,
         default=4,
@@ -264,7 +261,6 @@ def _main() -> None:
                 staging_fs,
                 ent,
                 dr,
-                args.overwrite,
                 args.dry_run,
             ): (sd, ent, dr)
             for sd, ent, dr in work_items

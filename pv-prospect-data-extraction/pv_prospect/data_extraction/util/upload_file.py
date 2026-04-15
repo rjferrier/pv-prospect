@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 
-from pv_prospect.etl import Extractor, Loader
+from pv_prospect.etl import Loader
 from pv_prospect.etl.storage.factory import AnyStorageConfig, get_filesystem
 
 
@@ -9,7 +9,6 @@ def upload_file(
     source_file: str,
     destination_path: str,
     local_dir: str | None = None,
-    overwrite: bool = False,
 ) -> None:
     """
     Upload a CSV file to storage (Google Drive or local directory).
@@ -18,7 +17,6 @@ def upload_file(
         source_file: Path to the local file to upload
         destination_path: Destination path in storage (e.g., 'data/pvoutput/file.csv')
         local_dir: If provided, upload to local directory instead of Google Drive
-        overwrite: If True, overwrite existing files
     """
     source_path = Path(source_file)
 
@@ -52,15 +50,7 @@ def upload_file(
         ).staged_raw_data_storage
 
     fs = get_filesystem(storage_config)
-    extractor = Extractor(fs)
     loader = Loader(fs)
-
-    # Check if file already exists
-    if extractor.file_exists(destination_path) and not overwrite:
-        raise FileExistsError(
-            f'File already exists at destination: {destination_path}\n'
-            'Use --overwrite flag to replace it.'
-        )
 
     # Read the source file
     with open(source_path, 'rb') as f:
@@ -79,7 +69,7 @@ def upload_file(
         rows = list(reader)
 
         print(f'Uploading CSV file: {source_file} -> {destination_path}')
-        loader.write_csv(destination_path, rows, overwrite=overwrite)
+        loader.write_csv(destination_path, rows, overwrite=True)
         print(f'✓ Successfully uploaded {len(rows)} rows')
     else:
         # For other files, we'll need to implement a generic write method
@@ -102,16 +92,11 @@ if __name__ == '__main__':
     parser.add_argument(
         '--local-dir', help='Upload to local directory instead of Google Drive'
     )
-    parser.add_argument(
-        '--overwrite', action='store_true', help='Overwrite existing files'
-    )
 
     args = parser.parse_args()
 
     try:
-        upload_file(
-            args.source_file, args.destination_path, args.local_dir, args.overwrite
-        )
+        upload_file(args.source_file, args.destination_path, args.local_dir)
     except Exception as e:
         print(f'Error: {e}')
         exit(1)

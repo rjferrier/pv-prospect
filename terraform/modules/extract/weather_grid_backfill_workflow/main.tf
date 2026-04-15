@@ -35,7 +35,6 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
               - manifest_object: "${var.manifest_object_path}"
               - data_source: $${default(map.get(args, "data_source"), "${var.data_source}")}
               - sleep_seconds: $${default(map.get(args, "sleep_seconds_between_batches"), ${var.sleep_seconds_between_batches})}
-              - overwrite: $${default(map.get(args, "overwrite"), "false")}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
 
         - plan:
@@ -96,8 +95,6 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                                   value: $${batch.start_date}
                                 - name: END_DATE
                                   value: $${batch.end_date}
-                                - name: OVERWRITE
-                                  value: $${overwrite}
                                 - name: DRY_RUN
                                   value: $${dry_run}
                                 - name: WORKFLOW_NAME
