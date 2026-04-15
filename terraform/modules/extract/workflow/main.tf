@@ -52,6 +52,10 @@ resource "google_workflows_workflow" "data_extraction" {
                 value: ds
                 in: $${pv_model_data_sources}
                 steps:
+                  - log_preprocess:
+                      call: sys.log
+                      args:
+                        data: $${"Starting preprocess for data source " + ds}
                   - run_preprocess:
                       call: googleapis.run.v2.projects.locations.jobs.run
                       args:
@@ -67,6 +71,10 @@ resource "google_workflows_workflow" "data_extraction" {
                                   - name: WORKFLOW_NAME
                                     value: $${workflow_name}
                       result: preprocess_result
+                  - wait_preprocess:
+                      call: await_job
+                      args:
+                        execution_name: $${preprocess_result.name}
 
         - extract:
             parallel:
@@ -84,6 +92,10 @@ resource "google_workflows_workflow" "data_extraction" {
                                       value: ds
                                       in: $${pv_model_data_sources}
                                       steps:
+                                        - log_pv_extract:
+                                            call: sys.log
+                                            args:
+                                              data: $${"Extracting PV data for system " + string(pv_system_id) + " (" + ds + ") for " + date}
                                         - run_extract:
                                             call: googleapis.run.v2.projects.locations.jobs.run
                                             args:
@@ -109,6 +121,10 @@ resource "google_workflows_workflow" "data_extraction" {
                                                         - name: WORKFLOW_NAME
                                                           value: $${workflow_name}
                                             result: extract_result
+                                        - wait_pv_extract:
+                                            call: await_job
+                                            args:
+                                              execution_name: $${extract_result.name}
                 - extract_for_weather_model:
                     steps:
                       - extract_location_loop:
@@ -122,6 +138,10 @@ resource "google_workflows_workflow" "data_extraction" {
                                       value: ds
                                       in: $${weather_model_data_sources}
                                       steps:
+                                        - log_weather_extract:
+                                            call: sys.log
+                                            args:
+                                              data: $${"Extracting weather data for location " + location + " (" + ds + ") for " + date}
                                         - run_extract_location:
                                             call: googleapis.run.v2.projects.locations.jobs.run
                                             args:
@@ -147,6 +167,10 @@ resource "google_workflows_workflow" "data_extraction" {
                                                         - name: WORKFLOW_NAME
                                                           value: $${workflow_name}
                                             result: extract_location_result
+                                        - wait_weather_extract:
+                                            call: await_job
+                                            args:
+                                              execution_name: $${extract_location_result.name}
 
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -162,7 +186,37 @@ resource "google_workflows_workflow" "data_extraction" {
                           value: $${workflow_name}
             result: consolidate_logs_result
 
+        - wait_consolidate:
+            call: await_job
+            args:
+              execution_name: $${consolidate_logs_result.name}
+
         - done:
             return: "completed"
+
+    await_job:
+      params: [execution_name]
+      steps:
+        - check_status:
+            call: googleapis.run.v2.projects.locations.jobs.executions.get
+            args:
+              name: $${execution_name}
+            result: exec
+        - evaluate_status:
+            switch:
+              - condition: $${map.get(exec, "completionTime") == null}
+                steps:
+                  - wait:
+                      call: sys.sleep
+                      args:
+                        seconds: 10
+                  - retry:
+                      next: check_status
+              - condition: $${exec.succeededCount == exec.taskCount}
+                return: $${exec}
+              - condition: true
+                raise:
+                  message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ")"}'
+                  data: $${exec}
   YAML
 }

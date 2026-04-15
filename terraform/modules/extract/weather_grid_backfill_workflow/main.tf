@@ -86,6 +86,10 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                               call: sys.sleep
                               args:
                                 seconds: $${sleep_seconds}
+                - log_batch_start:
+                    call: sys.log
+                    args:
+                      data: $${"Starting weather extraction for batch " + string(i+1) + "/" + string(len(batches)) + " (sample_file_index=" + string(batch.sample_file_index) + ")"}
                 - run_batch:
                     call: googleapis.run.v2.projects.locations.jobs.run
                     args:
@@ -166,7 +170,7 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
             result: exec
         - evaluate_status:
             switch:
-              - condition: $${map.get(exec, "terminalCondition") == null}
+              - condition: $${map.get(exec, "completionTime") == null}
                 steps:
                   - wait:
                       call: sys.sleep
@@ -174,11 +178,11 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                         seconds: 10
                   - retry:
                       next: check_status
-              - condition: $${exec.terminalCondition.state == "SUCCEEDED"}
+              - condition: $${exec.succeededCount == exec.taskCount}
                 return: $${exec}
               - condition: true
                 raise:
-                  message: $${"Job execution failed with state " + exec.terminalCondition.state}
+                  message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ")"}'
                   data: $${exec}
   YAML
 }
