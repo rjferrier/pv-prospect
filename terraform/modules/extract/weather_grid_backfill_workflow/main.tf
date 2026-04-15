@@ -51,13 +51,22 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                           value: $${workflow_name}
             result: plan_result
 
+        - wait_for_plan:
+            call: await_job
+            args:
+              execution_name: $${plan_result.name}
+
         - fetch_manifest:
             call: googleapis.storage.v1.objects.get
             args:
               bucket: $${bucket}
               object: $${text.url_encode(manifest_object)}
               alt: media
-            result: manifest
+            result: manifest_raw
+
+        - decode_manifest:
+            assign:
+              - manifest: $${json.decode(manifest_raw)}
 
         - collect_batches:
             assign:
@@ -101,6 +110,11 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                                   value: $${workflow_name}
                     result: batch_result
 
+                - wait_for_batch:
+                    call: await_job
+                    args:
+                      execution_name: $${batch_result.name}
+
         - commit:
             call: googleapis.run.v2.projects.locations.jobs.run
             args:
@@ -114,6 +128,11 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
             result: commit_result
+
+        - wait_for_commit:
+            call: await_job
+            args:
+              execution_name: $${commit_result.name}
 
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -129,7 +148,37 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                           value: $${workflow_name}
             result: consolidate_logs_result
 
+        - wait_for_consolidate:
+            call: await_job
+            args:
+              execution_name: $${consolidate_logs_result.name}
+
         - done:
             return: "completed"
+
+    await_job:
+      params: [execution_name]
+      steps:
+        - check_status:
+            call: googleapis.run.v2.projects.locations.jobs.executions.get
+            args:
+              name: $${execution_name}
+            result: exec
+        - evaluate_status:
+            switch:
+              - condition: $${map.get(exec, "terminalCondition") == null}
+                steps:
+                  - wait:
+                      call: sys.sleep
+                      args:
+                        seconds: 10
+                  - retry:
+                      next: check_status
+              - condition: $${exec.terminalCondition.state == "SUCCEEDED"}
+                return: $${exec}
+              - condition: true
+                raise:
+                  message: $${"Job execution failed with state " + exec.terminalCondition.state}
+                  data: $${exec}
   YAML
 }
