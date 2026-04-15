@@ -141,12 +141,12 @@ if run_stage terraform-extraction; then
   echo "[terraform-extraction] Provisioning extraction Cloud Run, Workflows, and Schedulers..."
   terraform apply \
     -target=module.cloud_run_extract \
-    -target=module.extract_workflow \
-    -target=module.extract_scheduler \
-    -target=module.extract_pv_site_backfill_workflow \
-    -target=module.extract_pv_site_backfill_scheduler \
-    -target=module.extract_weather_grid_backfill_workflow \
-    -target=module.extract_weather_grid_backfill_scheduler \
+    -target=module.extractor_workflow \
+    -target=module.extractor_scheduler \
+    -target=module.extractor_pv_site_backfill_workflow \
+    -target=module.extractor_pv_site_backfill_scheduler \
+    -target=module.extractor_weather_grid_backfill_workflow \
+    -target=module.extractor_weather_grid_backfill_scheduler \
     -auto-approve
 fi
 
@@ -155,8 +155,8 @@ if run_stage terraform-transform; then
   echo ""
   echo "[terraform-transform] Provisioning transformation Cloud Run and Workflow..."
   terraform apply \
-    -target=module.cloud_run_transformer \
-    -target=module.workflows_transform \
+    -target=module.cloud_run_transform \
+    -target=module.transformer_workflow \
     -auto-approve
 fi
 

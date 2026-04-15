@@ -79,6 +79,10 @@ resource "google_workflows_workflow" "pv_site_backfill" {
               value: pv_system_id
               in: $${pv_system_ids}
               steps:
+                - log_pv_start:
+                    call: sys.log
+                    args:
+                      data: $${"Starting PV extraction for system " + string(pv_system_id) + " from " + manifest.start_date + " to " + manifest.end_date}
                 - run_pv_extract:
                     call: googleapis.run.v2.projects.locations.jobs.run
                     args:
@@ -116,6 +120,10 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                 value: pv_system_id
                 in: $${pv_system_ids}
                 steps:
+                  - log_weather_start:
+                      call: sys.log
+                      args:
+                        data: $${"Starting parallel weather extraction for system " + string(pv_system_id) + " from " + manifest.start_date + " to " + manifest.end_date}
                   - run_weather_extract:
                       call: googleapis.run.v2.projects.locations.jobs.run
                       args:
@@ -196,7 +204,7 @@ resource "google_workflows_workflow" "pv_site_backfill" {
             result: exec
         - evaluate_status:
             switch:
-              - condition: $${map.get(exec, "terminalCondition") == null}
+              - condition: $${map.get(exec, "completionTime") == null}
                 steps:
                   - wait:
                       call: sys.sleep
@@ -204,11 +212,11 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                         seconds: 10
                   - retry:
                       next: check_status
-              - condition: $${exec.terminalCondition.state == "SUCCEEDED"}
+              - condition: $${exec.succeededCount == exec.taskCount}
                 return: $${exec}
               - condition: true
                 raise:
-                  message: $${"Job execution failed with state " + exec.terminalCondition.state}
+                  message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ")"}'
                   data: $${exec}
   YAML
 }
