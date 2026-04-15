@@ -1,5 +1,7 @@
 """Shared test helpers for etl tests."""
 
+import fnmatch
+
 from pv_prospect.etl.storage.base import FileEntry
 
 
@@ -53,12 +55,8 @@ class FakeFileSystem:
             if prefix and not path.startswith(prefix + '/') and path != prefix:
                 continue
             name = path.split('/')[-1]
-            if pattern != '*':
-                if pattern.startswith('*.'):
-                    if not name.endswith(f'.{pattern[2:]}'):
-                        continue
-                elif name != pattern:
-                    continue
+            if pattern != '*' and not fnmatch.fnmatch(name, pattern):
+                continue
             parent = '/'.join(path.split('/')[:-1])
             results.append(
                 FileEntry(

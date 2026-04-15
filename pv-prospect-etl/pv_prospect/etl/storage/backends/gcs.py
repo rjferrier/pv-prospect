@@ -1,3 +1,4 @@
+import fnmatch
 from dataclasses import dataclass
 from typing import Any, Dict
 
@@ -83,13 +84,8 @@ class GcsFileSystem:
             if not name:
                 continue
 
-            if pattern != '*':
-                if pattern.startswith('*.'):
-                    ext = pattern[2:]
-                    if not name.endswith(f'.{ext}'):
-                        continue
-                elif name != pattern:
-                    continue
+            if pattern != '*' and not fnmatch.fnmatch(name, pattern):
+                continue
 
             rel = blob.name
             if self._prefix and rel.startswith(self._prefix + '/'):
