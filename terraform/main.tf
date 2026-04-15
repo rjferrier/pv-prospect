@@ -76,6 +76,13 @@ resource "google_project_iam_member" "pipeline_secret_accessor" {
   member  = "serviceAccount:${google_service_account.pipeline.email}"
 }
 
+# The Workflow needs to be able to write logs
+resource "google_project_iam_member" "pipeline_log_writer" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
 # ---------------------------------------------------------------------------
 # Shared infrastructure
 # ---------------------------------------------------------------------------
