@@ -8,6 +8,7 @@ resource "google_workflows_workflow" "data_extraction" {
   region              = var.region
   service_account     = var.service_account_email
   deletion_protection = false
+  call_log_level      = "LOG_ALL_CALLS"
   description         = "Orchestrates daily PV Prospect data extraction via Cloud Run Jobs"
 
   source_contents = <<-YAML
@@ -70,11 +71,16 @@ resource "google_workflows_workflow" "data_extraction" {
                                     value: $${ds}
                                   - name: WORKFLOW_NAME
                                     value: $${workflow_name}
-                      result: preprocess_result
+                      result: preprocess_op
+                  - wait_preprocess_op:
+                      call: wait_for_operation
+                      args:
+                        operation_name: $${preprocess_op.name}
+                      result: preprocess_op_done
                   - wait_preprocess:
                       call: await_job
                       args:
-                        execution_name: $${preprocess_result.name}
+                        execution_name: $${preprocess_op_done.response.name}
 
         - extract:
             parallel:
@@ -120,11 +126,16 @@ resource "google_workflows_workflow" "data_extraction" {
                                                           value: $${split_by}
                                                         - name: WORKFLOW_NAME
                                                           value: $${workflow_name}
-                                            result: extract_result
+                                            result: extract_op
+                                        - wait_extract_op:
+                                            call: wait_for_operation
+                                            args:
+                                              operation_name: $${extract_op.name}
+                                            result: extract_op_done
                                         - wait_pv_extract:
                                             call: await_job
                                             args:
-                                              execution_name: $${extract_result.name}
+                                              execution_name: $${extract_op_done.response.name}
                 - extract_for_weather_model:
                     steps:
                       - extract_location_loop:
@@ -166,11 +177,16 @@ resource "google_workflows_workflow" "data_extraction" {
                                                           value: $${split_by}
                                                         - name: WORKFLOW_NAME
                                                           value: $${workflow_name}
-                                            result: extract_location_result
+                                            result: extract_location_op
+                                        - wait_extract_location_op:
+                                            call: wait_for_operation
+                                            args:
+                                              operation_name: $${extract_location_op.name}
+                                            result: extract_location_op_done
                                         - wait_weather_extract:
                                             call: await_job
                                             args:
-                                              execution_name: $${extract_location_result.name}
+                                              execution_name: $${extract_location_op_done.response.name}
 
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -184,15 +200,40 @@ resource "google_workflows_workflow" "data_extraction" {
                           value: consolidate_logs
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
-            result: consolidate_logs_result
-
+            result: consolidate_logs_op
+        - wait_consolidate_op:
+            call: wait_for_operation
+            args:
+              operation_name: $${consolidate_logs_op.name}
+            result: consolidate_logs_op_done
         - wait_consolidate:
             call: await_job
             args:
-              execution_name: $${consolidate_logs_result.name}
+              execution_name: $${consolidate_logs_op_done.response.name}
 
         - done:
             return: "completed"
+
+    wait_for_operation:
+      params: [operation_name]
+      steps:
+        - check_op:
+            call: googleapis.run.v2.projects.locations.operations.get
+            args:
+              name: $${operation_name}
+            result: op
+        - evaluate_op:
+            switch:
+              - condition: $${default(op.done, false)}
+                return: $${op}
+              - condition: true
+                steps:
+                  - wait:
+                      call: sys.sleep
+                      args:
+                        seconds: 2
+                  - retry_op:
+                      next: check_op
 
     await_job:
       params: [execution_name]

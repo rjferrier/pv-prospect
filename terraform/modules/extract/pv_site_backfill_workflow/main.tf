@@ -24,6 +24,7 @@ resource "google_workflows_workflow" "pv_site_backfill" {
   region              = var.region
   service_account     = var.service_account_email
   deletion_protection = false
+  call_log_level      = "LOG_ALL_CALLS"
   description         = "Orchestrates daily PV-site backfill (PV output + weather) via manifest-driven Cloud Run Job dispatch"
 
   source_contents = <<-YAML
@@ -55,12 +56,18 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                           value: plan_pv_site_backfill
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
-            result: plan_result
+            result: plan_op
+
+        - wait_for_plan_op:
+            call: wait_for_operation
+            args:
+              operation_name: $${plan_op.name}
+            result: plan_op_done
 
         - wait_for_plan:
             call: await_job
             args:
-              execution_name: $${plan_result.name}
+              execution_name: $${plan_op_done.response.name}
 
         - fetch_manifest:
             call: googleapis.storage.v1.objects.get
@@ -79,10 +86,10 @@ resource "google_workflows_workflow" "pv_site_backfill" {
               value: pv_system_id
               in: $${pv_system_ids}
               steps:
-                - log_pv_start:
+                - log_pv_site:
                     call: sys.log
                     args:
-                      data: $${"Starting PV extraction for system " + string(pv_system_id) + " from " + manifest.start_date + " to " + manifest.end_date}
+                      data: $${"Extracting PV system " + string(pv_system_id)}
                 - run_pv_extract:
                     call: googleapis.run.v2.projects.locations.jobs.run
                     args:
@@ -107,51 +114,59 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                                   value: day
                                 - name: WORKFLOW_NAME
                                   value: $${workflow_name}
-                    result: pv_extract_result
-
-                - wait_for_pv_extract:
+                    result: pv_op
+                - wait_for_pv_op:
+                    call: wait_for_operation
+                    args:
+                      operation_name: $${pv_op.name}
+                    result: pv_op_done
+                - wait_for_pv:
                     call: await_job
                     args:
-                      execution_name: $${pv_extract_result.name}
+                      execution_name: $${pv_op_done.response.name}
 
         - extract_weather:
-            parallel:
-              for:
-                value: pv_system_id
-                in: $${pv_system_ids}
-                steps:
-                  - log_weather_start:
-                      call: sys.log
-                      args:
-                        data: $${"Starting parallel weather extraction for system " + string(pv_system_id) + " from " + manifest.start_date + " to " + manifest.end_date}
-                  - run_weather_extract:
-                      call: googleapis.run.v2.projects.locations.jobs.run
-                      args:
-                        name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                        body:
-                          overrides:
-                            containerOverrides:
-                              - env:
-                                  - name: JOB_TYPE
-                                    value: extract_and_load
-                                  - name: DATA_SOURCE
-                                    value: $${weather_data_source}
-                                  - name: PV_SYSTEM_ID
-                                    value: $${string(pv_system_id)}
-                                  - name: START_DATE
-                                    value: $${manifest.start_date}
-                                  - name: END_DATE
-                                    value: $${manifest.end_date}
-                                  - name: DRY_RUN
-                                    value: $${dry_run}
-                                  - name: WORKFLOW_NAME
-                                    value: $${workflow_name}
-                      result: weather_extract_result
-
-                  - wait_for_weather_extract:
-                      call: await_job
-                      args:
-                        execution_name: $${weather_extract_result.name}
+            steps:
+              - log_weather_start:
+                  call: sys.log
+                  args:
+                    data: $${"Starting parallel weather extraction"}
+              - extract_weather_parallel:
+                  parallel:
+                    for:
+                      value: pv_system_id
+                      in: $${pv_system_ids}
+                      steps:
+                        - run_weather_extract:
+                            call: googleapis.run.v2.projects.locations.jobs.run
+                            args:
+                              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                              body:
+                                overrides:
+                                  containerOverrides:
+                                    - env:
+                                        - name: JOB_TYPE
+                                          value: extract_and_load
+                                        - name: DATA_SOURCE
+                                          value: weather
+                                        - name: PV_SYSTEM_ID
+                                          value: $${string(pv_system_id)}
+                                        - name: START_DATE
+                                          value: $${manifest.start_date}
+                                        - name: END_DATE
+                                          value: $${manifest.end_date}
+                                        - name: WORKFLOW_NAME
+                                          value: $${workflow_name}
+                            result: weather_op
+                        - wait_for_weather_op:
+                            call: wait_for_operation
+                            args:
+                              operation_name: $${weather_op.name}
+                            result: weather_op_done
+                        - wait_for_weather:
+                            call: await_job
+                            args:
+                              execution_name: $${weather_op_done.response.name}
 
         - commit:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -165,12 +180,18 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                           value: commit_pv_site_backfill
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
-            result: commit_result
+            result: commit_op
+
+        - wait_for_commit_op:
+            call: wait_for_operation
+            args:
+              operation_name: $${commit_op.name}
+            result: commit_op_done
 
         - wait_for_commit:
             call: await_job
             args:
-              execution_name: $${commit_result.name}
+              execution_name: $${commit_op_done.response.name}
 
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -184,15 +205,42 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                           value: consolidate_logs
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
-            result: consolidate_logs_result
+            result: consolidate_logs_op
+
+        - wait_for_consolidate_op:
+            call: wait_for_operation
+            args:
+              operation_name: $${consolidate_logs_op.name}
+            result: consolidate_logs_op_done
 
         - wait_for_consolidate:
             call: await_job
             args:
-              execution_name: $${consolidate_logs_result.name}
+              execution_name: $${consolidate_logs_op_done.response.name}
 
         - done:
             return: "completed"
+
+    wait_for_operation:
+      params: [operation_name]
+      steps:
+        - check_op:
+            call: googleapis.run.v2.projects.locations.operations.get
+            args:
+              name: $${operation_name}
+            result: op
+        - evaluate_op:
+            switch:
+              - condition: $${default(op.done, false)}
+                return: $${op}
+              - condition: true
+                steps:
+                  - wait:
+                      call: sys.sleep
+                      args:
+                        seconds: 2
+                  - retry_op:
+                      next: check_op
 
     await_job:
       params: [execution_name]
