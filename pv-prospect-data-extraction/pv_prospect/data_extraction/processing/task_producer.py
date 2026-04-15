@@ -87,12 +87,6 @@ def _parse_args() -> 'Any':
         default=None,
         help='Write files to a local directory instead of uploading to Google Drive. Specify the directory path.',
     )
-    parser.add_argument(
-        '-o',
-        '--overwrite',
-        action='store_true',
-        help='Overwrite existing CSV files. By default, existing files are skipped.',
-    )
     return parser.parse_args()
 
 
@@ -177,7 +171,6 @@ def _main(config: DataExtractionConfig, args: 'Any') -> None:
                         pv_site,
                         dr,
                         args.local_dir,
-                        args.overwrite,
                         args.dry_run,
                         counter,
                     )

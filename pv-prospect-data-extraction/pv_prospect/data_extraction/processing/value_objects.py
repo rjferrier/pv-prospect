@@ -28,7 +28,6 @@ class ResultType(Enum):
 
     SUCCESS = 'success'
     FAILURE = 'failure'
-    SKIPPED_EXISTING = 'skipped_existing'
     SKIPPED_DRY_RUN = 'skipped_dry_run'
 
 
@@ -60,11 +59,6 @@ class Result:
             type=ResultType.FAILURE,
             failure_details=FailureDetails(error=error),
         )
-
-    @classmethod
-    def skipped_existing(cls, task: Task) -> 'Result':
-        """Create a skipped (existing file) result."""
-        return cls(task=task, type=ResultType.SKIPPED_EXISTING)
 
     @classmethod
     def skipped_dry_run(cls, task: Task) -> 'Result':
