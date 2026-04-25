@@ -86,3 +86,56 @@ producing a versioned dataset for the next training run.
 Trains two neural networks from versioned CSV data: one to predict weather variables
 (temperature, DNI, DHI) from location and time, and another to predict PV power output from
 POA irradiance and other features. Implemented in `pv-prospect-model`.
+
+## Operational Workflows
+
+The automated pipeline is driven by Cloud Scheduler cron jobs that execute Cloud Workflows on a daily basis:
+
+* **Daily Extraction (`pv-prospect-extract`)**: Runs at **02:00 UTC**. Triggers the data extraction workflow for the previous day.
+* **PV Site Backfill (`pv-prospect-extract-pv-site-backfill`)**: Runs at **02:40 UTC**. Orchestrates daily PV-site backfill for historical data, covering a 28-day window that marches backwards through history. Extracts PV output sequentially (one Cloud Run Job per site) and weather data in parallel. A **GCS checkpoint** (`resources/pv_site_backfill_checkpoint.json`) is written after each successful site extraction, so a manually re-triggered run resumes from where the previous execution stopped rather than starting over.
+* **Weather Grid Backfill (`pv-prospect-extract-weather-grid-backfill`)**: Runs at **03:20 UTC**. Orchestrates the daily grid-point weather backfill via a paced manifest-driven process. Dispatches one Cloud Run Job per batch with a configurable sleep between batches to respect OpenMeteo's 5,000/hour rate limit. A **GCS checkpoint** (`resources/weather_grid_backfill_checkpoint.json`) is written after each successful batch, so a manually re-triggered run resumes from the first incomplete batch.
+* **Data Transformation (`pv-prospect-transform`)**: Runs at **04:00 UTC**. Orchestrates the data cleaning and preparation steps to generate the prepared datasets for all data extracted and backfilled earlier in the day.
+
+> **Scheduling rationale**: The daily extraction and PV site backfill both use the PVOutput API, which rate-limits at 300 requests/hour. With individual Cloud Run Job tasks capped at 30 minutes, a 40-minute gap between each PVOutput-using workflow prevents concurrent API calls that could breach this limit. The weather grid backfill uses OpenMeteo exclusively and does not conflict with PVOutput, but the 40-minute gap from the PV site backfill also gives the prior workflow time to complete cleanly before the transformation step starts.
+
+### Trigger the Pipeline Manually (Optional)
+
+You can trigger an ad-hoc run using the `gcloud` CLI:
+
+```bash
+gcloud workflows run pv-prospect-extract \
+  --location=europe-west2 \
+  --data='{"pv_system_ids": [12345], "date": "2025-06-24"}'
+```
+
+#### Resuming the PV Site Backfill after a timeout
+
+If `pv-prospect-extract-pv-site-backfill` is interrupted (e.g. the Cloud Workflows execution times out or is cancelled), simply re-trigger it:
+
+```bash
+gcloud workflows run pv-prospect-extract-pv-site-backfill \
+  --location=europe-west2
+```
+
+The workflow will read the checkpoint file at
+`gs://<staging-bucket>/resources/pv_site_backfill_checkpoint.json` and
+skip any PV systems that already completed successfully, logging
+`"Resuming from checkpoint — N sites already done"`. No duplicate
+extraction occurs. The checkpoint is deleted automatically once the full
+run completes so the next scheduled run starts from scratch.
+
+#### Resuming the Weather Grid Backfill after a timeout
+
+The same pattern applies to `pv-prospect-extract-weather-grid-backfill`:
+
+```bash
+gcloud workflows run pv-prospect-extract-weather-grid-backfill \
+  --location=europe-west2
+```
+
+The workflow reads
+`gs://<staging-bucket>/resources/weather_grid_backfill_checkpoint.json`,
+skips any batches (indexed by position in the manifest) that already
+completed, and resumes from the first outstanding batch — including
+honouring the configured inter-batch sleep so the rate limit is
+respected. The checkpoint is deleted on success.

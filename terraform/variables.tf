@@ -29,14 +29,14 @@ variable "transformer_image_tag" {
 
 variable "extractor_scheduler_cron" {
   type        = string
-  default     = "0 3 * * *"
-  description = "Cron schedule for daily data extraction (default: 03:00 UTC)"
+  default     = "0 2 * * *"
+  description = "Cron schedule for daily data extraction (default: 02:00 UTC)"
 }
 
 variable "transformer_scheduler_cron" {
   type        = string
-  default     = "0 5 * * *"
-  description = "Cron schedule for daily data transformation (default: 05:00 UTC)"
+  default     = "0 4 * * *"
+  description = "Cron schedule for daily data transformation (default: 04:00 UTC)"
 }
 
 variable "default_pv_model_data_sources" {
@@ -76,14 +76,14 @@ variable "default_by_week" {
 
 variable "extractor_pv_site_backfill_scheduler_cron" {
   type        = string
-  default     = "15 3 * * *"
-  description = "Cron schedule for daily PV-site backfill (default: 03:15 UTC, after main extraction)"
+  default     = "40 2 * * *"
+  description = "Cron schedule for daily PV-site backfill (default: 02:40 UTC, 40 min after main extraction)"
 }
 
 variable "extractor_weather_grid_backfill_scheduler_cron" {
   type        = string
-  default     = "30 3 * * *"
-  description = "Cron schedule for daily weather grid backfill (default: 03:30 UTC, after PV-site backfill)"
+  default     = "20 3 * * *"
+  description = "Cron schedule for daily weather grid backfill (default: 03:20 UTC, 40 min after PV-site backfill)"
 }
 
 variable "versioner_image_tag" {
