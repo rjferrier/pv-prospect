@@ -9,15 +9,20 @@
 #   1. Invoke the Cloud Run Job with JOB_TYPE=plan_pv_site_backfill, which
 #      writes a JSON manifest to GCS containing the 28-day window to process.
 #   2. Read the manifest from GCS to obtain start_date and end_date.
-#   3. Dispatch PV extraction jobs *sequentially* per PV system (PVOutput
+#   3. Load the GCS checkpoint (if any) so a re-triggered run skips sites
+#      that already completed in a previous execution.
+#   4. Dispatch PV extraction jobs *sequentially* per PV system (PVOutput
 #      rate-limits at 300 requests/hour; 10 sites × 28 days = 280 calls).
-#   4. Dispatch weather extraction jobs in *parallel* per PV system (OpenMeteo
+#      After each site succeeds the checkpoint is updated in GCS.
+#   5. Dispatch weather extraction jobs in *parallel* per PV system (OpenMeteo
 #      rate limits are generous enough for 10–20 concurrent calls).
-#   5. Invoke the Cloud Run Job with JOB_TYPE=commit_pv_site_backfill, which
+#   6. Invoke the Cloud Run Job with JOB_TYPE=commit_pv_site_backfill, which
 #      advances the cursor so tomorrow's run picks up from the next window.
+#   7. Delete the checkpoint (successful run) and consolidate logs.
 #
 # If any extraction job fails, the workflow aborts without committing the
 # cursor, so tomorrow's plan job will re-derive the same manifest and retry.
+# Re-triggering today's run manually will skip already-processed sites.
 
 resource "google_workflows_workflow" "pv_site_backfill" {
   name                = "pv-prospect-extract-pv-site-backfill"
@@ -39,10 +44,12 @@ resource "google_workflows_workflow" "pv_site_backfill" {
               - workflow_name: "pv-prospect-extract-pv-site-backfill"
               - bucket: "${var.staging_bucket_name}"
               - manifest_object: "${var.manifest_object_path}"
+              - checkpoint_object: "${var.checkpoint_object_path}"
               - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
               - pv_data_source: $${default(map.get(args, "pv_data_source"), "${var.pv_data_source}")}
               - weather_data_source: $${default(map.get(args, "weather_data_source"), "${var.weather_data_source}")}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
+              - completed: {}
 
         - plan:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -81,11 +88,43 @@ resource "google_workflows_workflow" "pv_site_backfill" {
             assign:
               - manifest: $${json.decode(manifest_raw)}
 
+        # Load any existing checkpoint so a re-triggered run skips already-done
+        # sites.  If no checkpoint exists the try block raises a 404 and we
+        # fall through to init_completed, which leaves `completed` as {}.
+        - load_checkpoint:
+            try:
+              steps:
+                - fetch_checkpoint:
+                    call: googleapis.storage.v1.objects.get
+                    args:
+                      bucket: $${bucket}
+                      object: $${text.url_encode(checkpoint_object)}
+                      alt: media
+                    result: checkpoint_raw
+                - decode_checkpoint:
+                    assign:
+                      - completed: $${json.decode(checkpoint_raw)}
+                - log_resuming:
+                    call: sys.log
+                    args:
+                      data: $${"Resuming from checkpoint — " + string(len(keys(completed))) + " sites already done"}
+            except:
+              as: checkpoint_err
+              steps:
+                - init_completed:
+                    assign:
+                      - completed: {}
+
         - extract_pv:
             for:
               value: pv_system_id
               in: $${pv_system_ids}
               steps:
+                # Skip sites that already succeeded in a previous execution.
+                - check_already_done:
+                    switch:
+                      - condition: $${map.get(completed, string(pv_system_id)) == true}
+                        next: next_pv_site
                 - log_pv_site:
                     call: sys.log
                     args:
@@ -124,6 +163,23 @@ resource "google_workflows_workflow" "pv_site_backfill" {
                     call: await_job
                     args:
                       execution_name: $${pv_op_done.response.name}
+                # Mark this site done and persist the checkpoint so a re-run
+                # can skip it without re-extracting.
+                - mark_done:
+                    assign:
+                      - completed[string(pv_system_id)]: true
+                - write_checkpoint:
+                    call: http.post
+                    args:
+                      url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
+                      auth:
+                        type: OAuth2
+                      headers:
+                        Content-Type: application/json
+                      body: $${json.encode_to_string(completed)}
+                - next_pv_site:
+                    assign:
+                      - _: null
 
         - extract_weather:
             steps:
@@ -192,6 +248,22 @@ resource "google_workflows_workflow" "pv_site_backfill" {
             call: await_job
             args:
               execution_name: $${commit_op_done.response.name}
+
+        # Delete the checkpoint on success so tomorrow's scheduled run starts
+        # fresh.  Silently ignore errors (e.g. 404 if the checkpoint was never
+        # written because all sites were already skipped).
+        - delete_checkpoint:
+            try:
+              call: googleapis.storage.v1.objects.delete
+              args:
+                bucket: $${bucket}
+                object: $${text.url_encode(checkpoint_object)}
+            except:
+              as: delete_err
+              steps:
+                - ignore_delete_error:
+                    assign:
+                      - _: null
 
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run

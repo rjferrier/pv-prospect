@@ -116,7 +116,7 @@ module "cloud_run_extract" {
   region                = var.region
   image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-extraction/data-extraction"
   image_tag             = var.extractor_image_tag
-  timeout               = "600s"
+  timeout               = "1800s"
   cpu                   = "1"
   memory                = "512Mi"
   service_account_email = google_service_account.pipeline.email

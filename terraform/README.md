@@ -141,16 +141,6 @@ bash deploy.sh <your-project-id>
 
 Bootstrap only needs to be re-applied if foundational resources change (e.g., adding a new Artifact Registry repository).
 
-### Trigger the Pipeline Manually (Optional)
-
-You can trigger an ad-hoc run (e.g., a backfill) using the `gcloud` CLI:
-
-```bash
-gcloud workflows run pv-prospect-extract \
-  --location=europe-west2 \
-  --data='{"pv_system_ids": [12345], "start_date": "2025-06-24", "end_date": "2025-06-25"}'
-```
-
 ## Cost Estimation
 
 This architecture is entirely serverless (scale-to-zero). You only pay for what you use.
@@ -163,6 +153,50 @@ Approximate monthly costs (varies by usage volume):
 - **GCS Storage**: Standard GCS pricing
 
 > **Note**: This is significantly cheaper than a continuously running orchestrator like Cloud Composer or keeping GKE/VM nodes running.
+
+## Operational Tuning
+
+### Cloud Run Job timeout
+
+The extraction Cloud Run Job (`module.cloud_run_extract`) has a task timeout of **1800s (30 minutes)**. This was set to accommodate the sequential PV-site backfill which makes up to ~1,066 API calls per job execution. The earlier value of 600s caused executions to be cut off mid-run when API latency spiked.
+
+The transformation and versioner jobs have their own, independently configured timeouts (`900s` and `1800s` respectively).
+
+### Scheduler spacing
+
+Because individual Cloud Run Job tasks can now run for up to 30 minutes, the three extraction workflows are spaced **40 minutes apart** to prevent concurrent executions from combining to breach PVOutput's 300 requests/hour rate limit:
+
+| Workflow | Trigger time (UTC) | API used |
+|---|---|---|
+| Daily extraction | 02:00 | PVOutput |
+| PV site backfill | 02:40 | PVOutput |
+| Weather grid backfill | 03:20 | OpenMeteo only |
+| Data transformation | 04:00 | — |
+
+The weather grid backfill uses OpenMeteo exclusively, so it does not conflict with PVOutput. The 40-minute gap to transformation ensures both backfills have time to commit before cleaning begins.
+
+The default cron expressions are defined as Terraform variables (`extractor_scheduler_cron`, `extractor_pv_site_backfill_scheduler_cron`, `extractor_weather_grid_backfill_scheduler_cron`, `transformer_scheduler_cron`) and can be overridden in `terraform.tfvars` without touching module code.
+
+### Checkpoint-based resume
+
+Both backfill workflows maintain a GCS checkpoint so that a re-triggered execution resumes from where the previous one stopped rather than starting over.
+
+| Workflow | GCS checkpoint object | Checkpoint key |
+|---|---|---|
+| `pv-prospect-extract-pv-site-backfill` | `resources/pv_site_backfill_checkpoint.json` | PV system ID (string) |
+| `pv-prospect-extract-weather-grid-backfill` | `resources/weather_grid_backfill_checkpoint.json` | Batch index (string) |
+
+The checkpoint is a JSON map `{"<key>": true}` written to GCS after each item (site or batch) completes successfully.
+
+**Behaviour in all cases:**
+
+- **Normal run** — no checkpoint exists; the workflow processes all items and deletes the checkpoint on success.
+- **Interrupted run** — checkpoint records whatever completed. Re-triggering manually loads the checkpoint, logs `"Resuming from checkpoint — N <items> already done"`, and skips those items.
+- **Next scheduled run** — because the checkpoint was deleted on the previous successful run (or never created), the scheduled run starts fresh.
+
+If a run is interrupted *before* any item completes (e.g. the `plan` step fails), no checkpoint exists and a re-run starts from the beginning.
+
+The weather grid backfill also honours the configured inter-batch sleep (`sleep_seconds_between_batches`, default 720 s) when resuming, so the OpenMeteo 5,000/hour rate limit is respected even across re-runs.
 
 ## Security Considerations
 

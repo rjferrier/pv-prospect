@@ -4,15 +4,20 @@
 #
 #   1. It invokes the Cloud Run Job with JOB_TYPE=plan_weather_grid_backfill,
 #      which writes a JSON manifest to GCS describing the day's work.
-#   2. It reads the manifest from GCS, then dispatches one extract_and_load
-#      Cloud Run Job per batch, sleeping between dispatches to stay under
-#      OpenMeteo's per-hour rate limit.
-#   3. After all batches succeed, it invokes the Cloud Run Job with
+#   2. It reads the manifest from GCS to obtain the ordered list of batches.
+#   3. It loads a GCS checkpoint (if any) so that a re-triggered run skips
+#      batches that already completed in a previous execution.
+#   4. It dispatches one extract_and_load Cloud Run Job per batch, sleeping
+#      between dispatches to stay under OpenMeteo's per-hour rate limit.
+#      After each batch succeeds the checkpoint is updated in GCS.
+#   5. After all batches succeed, it invokes the Cloud Run Job with
 #      JOB_TYPE=commit_weather_grid_backfill, which advances the live cursor
 #      so that tomorrow's run picks up from the next point in the backfill.
+#   6. Deletes the checkpoint (successful run) and consolidates logs.
 #
 # If any batch fails, the workflow aborts without committing the cursor, so
 # tomorrow's plan job will re-derive the same manifest and retry.
+# Re-triggering today's run manually will skip already-completed batches.
 
 resource "google_workflows_workflow" "weather_grid_backfill" {
   name                = "pv-prospect-extract-weather-grid-backfill"
@@ -34,9 +39,11 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
               - workflow_name: "pv-prospect-extract-weather-grid-backfill"
               - bucket: "${var.staging_bucket_name}"
               - manifest_object: "${var.manifest_object_path}"
+              - checkpoint_object: "${var.checkpoint_object_path}"
               - data_source: $${default(map.get(args, "data_source"), "${var.data_source}")}
               - sleep_seconds: $${default(map.get(args, "sleep_seconds_between_batches"), ${var.sleep_seconds_between_batches})}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
+              - completed: {}
 
         - plan:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -79,12 +86,44 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
             assign:
               - batches: $${list.concat([manifest.step2_batch], manifest.step3_batches)}
 
+        # Load any existing checkpoint so a re-triggered run skips already-done
+        # batches.  If no checkpoint exists the try block raises a 404 and we
+        # fall through to init_completed, which leaves `completed` as {}.
+        - load_checkpoint:
+            try:
+              steps:
+                - fetch_checkpoint:
+                    call: googleapis.storage.v1.objects.get
+                    args:
+                      bucket: $${bucket}
+                      object: $${text.url_encode(checkpoint_object)}
+                      alt: media
+                    result: checkpoint_raw
+                - decode_checkpoint:
+                    assign:
+                      - completed: $${json.decode(checkpoint_raw)}
+                - log_resuming:
+                    call: sys.log
+                    args:
+                      data: $${"Resuming from checkpoint — " + string(len(keys(completed))) + " batches already done"}
+            except:
+              as: checkpoint_err
+              steps:
+                - init_completed:
+                    assign:
+                      - completed: {}
+
         - dispatch:
             for:
               value: batch
               index: i
               in: $${batches}
               steps:
+                # Skip batches that already succeeded in a previous execution.
+                - check_already_done:
+                    switch:
+                      - condition: $${map.get(completed, string(i)) == true}
+                        next: next_batch
                 - maybe_sleep:
                     switch:
                       - condition: $${i > 0}
@@ -129,6 +168,23 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                     call: await_job
                     args:
                       execution_name: $${batch_op_done.response.name}
+                # Mark this batch done and persist the checkpoint so a re-run
+                # can skip it without re-extracting.
+                - mark_done:
+                    assign:
+                      - completed[string(i)]: true
+                - write_checkpoint:
+                    call: http.post
+                    args:
+                      url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
+                      auth:
+                        type: OAuth2
+                      headers:
+                        Content-Type: application/json
+                      body: $${json.encode_to_string(completed)}
+                - next_batch:
+                    assign:
+                      - _: null
 
         - commit:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -154,6 +210,22 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
             call: await_job
             args:
               execution_name: $${commit_op_done.response.name}
+
+        # Delete the checkpoint on success so tomorrow's scheduled run starts
+        # fresh.  Silently ignore errors (e.g. 404 if the checkpoint was never
+        # written because all batches were already skipped).
+        - delete_checkpoint:
+            try:
+              call: googleapis.storage.v1.objects.delete
+              args:
+                bucket: $${bucket}
+                object: $${text.url_encode(checkpoint_object)}
+            except:
+              as: delete_err
+              steps:
+                - ignore_delete_error:
+                    assign:
+                      - _: null
 
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run

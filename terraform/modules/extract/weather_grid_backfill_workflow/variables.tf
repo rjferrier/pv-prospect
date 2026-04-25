@@ -24,6 +24,12 @@ variable "manifest_object_path" {
   default     = "resources/todays_manifest.json"
 }
 
+variable "checkpoint_object_path" {
+  type        = string
+  description = "GCS object path (inside the staging bucket) where the workflow persists its per-run resume checkpoint"
+  default     = "resources/weather_grid_backfill_checkpoint.json"
+}
+
 variable "sleep_seconds_between_batches" {
   type        = number
   description = "Seconds to sleep between dispatching successive extraction batches. Defaults to 720 (12 minutes), which keeps us safely under OpenMeteo's 5,000/hour limit."
