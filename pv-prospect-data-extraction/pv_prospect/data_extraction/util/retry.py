@@ -13,8 +13,8 @@ def retry_on_429(func: Callable[P, R]) -> Callable[P, R]:
     Decorator that retries a method if a 429 HTTPError is encountered.
 
     Backoff strategy:
-    - Initial backoffs: [1, 2, 5, 10, 20, 30, 60] minutes
-    - After that: continue backing off for 60 minutes at a time until successful
+    - Initial backoffs: [1, 2, 5, 10] minutes
+    - Capped at 20 minutes total retry duration to avoid Cloud Run Job timeouts.
 
     Args:
         func: The function to decorate
@@ -26,8 +26,10 @@ def retry_on_429(func: Callable[P, R]) -> Callable[P, R]:
     @wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         # Backoff times in minutes
-        backoff_minutes = [1, 2, 5, 10, 20, 30, 60]
+        backoff_minutes = [1, 2, 5, 10]
+        max_duration_seconds = 1200  # 20 minutes
         attempt = 0
+        start_time = time.time()
 
         while True:
             try:
@@ -39,10 +41,17 @@ def retry_on_429(func: Callable[P, R]) -> Callable[P, R]:
                     if attempt < len(backoff_minutes):
                         backoff_min = backoff_minutes[attempt]
                     else:
-                        # After exhausting the list, keep using 60 minutes
-                        backoff_min = 60
+                        backoff_min = 10
 
                     backoff_seconds = backoff_min * 60
+                    elapsed = time.time() - start_time
+
+                    if elapsed + backoff_seconds > max_duration_seconds:
+                        print(
+                            '⚠️  429 Too Many Requests error - max retry duration (20m) exceeded. Aborting.'
+                        )
+                        raise
+
                     attempt += 1
 
                     print(f'⚠️  429 Too Many Requests error - attempt {attempt}')
