@@ -93,8 +93,6 @@ class Fields(Enum):
         'relative_humidity_2m',
         'pressure_msl',
         'cloud_cover',
-        'wind_speed_80m',
-        'wind_direction_80m',
         'wind_speed_180m',
         'wind_direction_180m',
         'direct_normal_irradiance',
