@@ -1,3 +1,4 @@
+import logging
 import time
 from datetime import date, datetime
 from typing import Collection, Optional
@@ -8,6 +9,8 @@ from pv_prospect.common import VarMapping, map_from_env
 from pv_prospect.common.domain import Period, PVSite
 from pv_prospect.data_extraction import TimeSeries
 from pv_prospect.data_extraction.util import retry_on_429
+
+logger = logging.getLogger(__name__)
 
 URL = 'https://pvoutput.org/service/r2/getstatus.jsp'
 API_KEY_HEADER_NAME = 'X-Pvoutput-Apikey'
@@ -172,6 +175,13 @@ class PVOutputExtractor:
             # Retry the request
             response = requests.get(URL, headers=headers, params=params, timeout=60)
 
+        if response.status_code >= 400:
+            logger.error(
+                'API error: status=%d url=%s text=%s',
+                response.status_code,
+                response.url,
+                response.text,
+            )
         response.raise_for_status()
 
         # Update rate limiter from response headers

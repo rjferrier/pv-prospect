@@ -8,6 +8,7 @@ resource "google_workflows_workflow" "data_transformation" {
   region              = var.region
   service_account     = var.service_account_email
   deletion_protection = false
+  call_log_level      = "LOG_ALL_CALLS"
   description         = "Orchestrates PV Prospect data transformation DAG via Cloud Run Jobs"
 
   source_contents = <<-YAML

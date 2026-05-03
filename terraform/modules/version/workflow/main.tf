@@ -6,6 +6,7 @@ resource "google_workflows_workflow" "data_versioning" {
   name            = "pv-prospect-version"
   region          = var.region
   service_account = var.service_account_email
+  call_log_level  = "LOG_ALL_CALLS"
   description     = "Runs the PV Prospect data versioner Cloud Run Job"
 
   source_contents = <<-YAML

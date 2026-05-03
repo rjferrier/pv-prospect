@@ -1,4 +1,5 @@
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from enum import Enum
@@ -10,6 +11,8 @@ from typing_extensions import deprecated
 from pv_prospect.common.domain import AnySite, Location, Period
 from pv_prospect.data_extraction import TimeSeries
 from pv_prospect.data_extraction.util import retry_on_429
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SPLIT_PERIOD: Period | None = None
 
@@ -282,6 +285,13 @@ class OpenMeteoWeatherDataExtractor:
             locations, start_datetime, end_datetime
         )
         response = requests.get(url=url, params=params, timeout=60)
+        if response.status_code >= 400:
+            logger.error(
+                'API error: status=%d url=%s text=%s',
+                response.status_code,
+                response.url,
+                response.text,
+            )
         response.raise_for_status()
 
         # Parse JSON response and convert to CSV rows
