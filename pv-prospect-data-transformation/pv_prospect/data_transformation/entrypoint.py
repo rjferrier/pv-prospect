@@ -114,8 +114,7 @@ def _run_consolidate_logs(config: DataTransformationConfig) -> None:
 
 
 def main() -> None:
-    transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
-    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+    job_type = os.environ.get('JOB_TYPE', '')
 
     config = get_config(
         DataTransformationConfig,
@@ -126,9 +125,16 @@ def main() -> None:
         ],
     )
 
-    if transformation is Transformation.CONSOLIDATE_LOGS:
+    if job_type == 'plan_transform':
+        resources_fs = get_filesystem(config.resources_storage)
+        _run_plan_transform(resources_fs)
+        return
+    elif job_type == 'consolidate_logs':
         _run_consolidate_logs(config)
         return
+
+    transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
+    workflow_name = os.environ.get('WORKFLOW_NAME', '')
 
     split_by = os.environ.get('SPLIT_BY')
     pv_system_id = _env_int('PV_SYSTEM_ID')
@@ -231,6 +237,138 @@ def main() -> None:
     else:
         logger.error('unknown TRANSFORM_STEP=%s', transformation)
         sys.exit(1)
+
+    task_hash = os.environ.get('TASK_HASH')
+    if task_hash:
+        start_date_str = (
+            os.environ.get('START_DATE')
+            or os.environ.get('DATE')
+            or date.today().isoformat()
+        )
+        from pv_prospect.etl import WorkflowOrchestrator
+
+        orchestrator = WorkflowOrchestrator(resources_fs, workflow_name, start_date_str)
+        orchestrator.mark_task_completed(task_hash)
+
+
+def _run_plan_transform(resources_fs: FileSystem) -> None:
+    import json
+
+    from pv_prospect.etl import WorkflowOrchestrator, build_env_list, inject_task_hash
+
+    workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-transform')
+    start_date_str = (
+        os.environ.get('START_DATE')
+        or os.environ.get('DATE')
+        or date.today().isoformat()
+    )
+
+    pv_system_ids = json.loads(os.environ.get('PV_SYSTEM_IDS', '[]'))
+    locations = json.loads(os.environ.get('LOCATIONS', '[]'))
+    split_by = os.environ.get('SPLIT_BY', '')
+
+    orchestrator = WorkflowOrchestrator(resources_fs, workflow_name, start_date_str)
+
+    phases = []
+
+    # Phase 0: Clean
+    phase0 = []
+    for pv_id in pv_system_ids:
+        env = build_env_list(
+            TRANSFORM_STEP='clean_pv',
+            PV_SYSTEM_ID=str(pv_id),
+            DATE=start_date_str,
+            START_DATE=start_date_str,
+            SPLIT_BY=split_by,
+            WORKFLOW_NAME=workflow_name,
+        )
+        phase0.append(inject_task_hash(env))
+
+        env = build_env_list(
+            TRANSFORM_STEP='clean_weather',
+            PV_SYSTEM_ID=str(pv_id),
+            DATE=start_date_str,
+            START_DATE=start_date_str,
+            SPLIT_BY=split_by,
+            WORKFLOW_NAME=workflow_name,
+        )
+        phase0.append(inject_task_hash(env))
+
+    for loc in locations:
+        env = build_env_list(
+            TRANSFORM_STEP='clean_weather',
+            LOCATION=loc,
+            DATE=start_date_str,
+            START_DATE=start_date_str,
+            SPLIT_BY=split_by,
+            WORKFLOW_NAME=workflow_name,
+        )
+        phase0.append(inject_task_hash(env))
+
+    phases.append(orchestrator.filter_remaining_tasks(phase0))
+
+    # Phase 1: Prepare
+    phase1 = []
+    for pv_id in pv_system_ids:
+        env = build_env_list(
+            TRANSFORM_STEP='prepare_pv',
+            PV_SYSTEM_ID=str(pv_id),
+            DATE=start_date_str,
+            START_DATE=start_date_str,
+            SPLIT_BY=split_by,
+            WORKFLOW_NAME=workflow_name,
+        )
+        phase1.append(inject_task_hash(env))
+
+        env = build_env_list(
+            TRANSFORM_STEP='prepare_weather',
+            PV_SYSTEM_ID=str(pv_id),
+            DATE=start_date_str,
+            START_DATE=start_date_str,
+            SPLIT_BY=split_by,
+            WORKFLOW_NAME=workflow_name,
+        )
+        phase1.append(inject_task_hash(env))
+
+    for loc in locations:
+        env = build_env_list(
+            TRANSFORM_STEP='prepare_weather',
+            LOCATION=loc,
+            DATE=start_date_str,
+            START_DATE=start_date_str,
+            SPLIT_BY=split_by,
+            WORKFLOW_NAME=workflow_name,
+        )
+        phase1.append(inject_task_hash(env))
+
+    phases.append(orchestrator.filter_remaining_tasks(phase1))
+
+    # Phase 2: Assemble
+    phase2 = []
+    for pv_id in pv_system_ids:
+        env = build_env_list(
+            TRANSFORM_STEP='assemble_pv',
+            PV_SYSTEM_ID=str(pv_id),
+            DATE=start_date_str,
+            START_DATE=start_date_str,
+            SPLIT_BY=split_by,
+            WORKFLOW_NAME=workflow_name,
+        )
+        phase2.append(inject_task_hash(env))
+
+    env = build_env_list(
+        TRANSFORM_STEP='assemble_weather',
+        DATE=start_date_str,
+        START_DATE=start_date_str,
+        SPLIT_BY=split_by,
+        WORKFLOW_NAME=workflow_name,
+    )
+    phase2.append(inject_task_hash(env))
+
+    phases.append(orchestrator.filter_remaining_tasks(phase2))
+
+    orchestrator.write_manifest(phases)
+    logger.info('plan_transform: wrote manifest with %d phases', len(phases))
 
 
 if __name__ == '__main__':

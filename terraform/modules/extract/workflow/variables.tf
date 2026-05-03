@@ -13,6 +13,11 @@ variable "cloud_run_job_name" {
   description = "Name of the Cloud Run Job to invoke"
 }
 
+variable "staging_bucket_name" {
+  type        = string
+  description = "Name of the GCS staging bucket"
+}
+
 variable "default_pv_model_data_sources" {
   type        = list(string)
   description = "Default data sources for PV-system-based scheduled runs"

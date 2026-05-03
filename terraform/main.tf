@@ -137,6 +137,7 @@ module "extractor_workflow" {
 
   service_account_email              = google_service_account.pipeline.email
   cloud_run_job_name                 = module.cloud_run_extract.job_name
+  staging_bucket_name                = module.storage.staging_bucket_name
   default_pv_model_data_sources      = var.default_pv_model_data_sources
   default_pv_system_ids              = var.default_pv_system_ids
   default_locations                  = var.default_locations
@@ -261,6 +262,7 @@ module "transformer_workflow" {
 
   service_account_email = google_service_account.pipeline.email
   cloud_run_job_name    = module.cloud_run_transform.job_name
+  staging_bucket_name   = module.storage.staging_bucket_name
   default_pv_system_ids = var.default_pv_system_ids
   default_locations     = var.default_locations
 

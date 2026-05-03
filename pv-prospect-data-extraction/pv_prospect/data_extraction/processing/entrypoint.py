@@ -6,7 +6,7 @@ and calls the corresponding core function.
 Environment variables
 ---------------------
 JOB_TYPE
-    ``preprocess``, ``extract_and_load``,
+    ``preprocess``, ``extract_and_load``, ``plan_extract``,
     ``plan_weather_grid_backfill``, ``commit_weather_grid_backfill``,
     ``plan_pv_site_backfill``, or ``commit_pv_site_backfill``
 
@@ -227,6 +227,78 @@ def _run_extract_and_load(
         )
         sys.exit(1)
 
+    task_hash = os.environ.get('TASK_HASH')
+    if task_hash:
+        workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
+        start_date_str = (
+            os.environ.get('START_DATE')
+            or os.environ.get('DATE')
+            or date.today().isoformat()
+        )
+        from pv_prospect.etl import WorkflowOrchestrator
+
+        orchestrator = WorkflowOrchestrator(resources_fs, workflow_name, start_date_str)
+        orchestrator.mark_task_completed(task_hash)
+
+
+def _run_plan_extract(resources_fs: FileSystem) -> None:
+    import json
+
+    from pv_prospect.etl import WorkflowOrchestrator, build_env_list, inject_task_hash
+
+    workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
+    start_date_str = (
+        os.environ.get('START_DATE')
+        or os.environ.get('DATE')
+        or date.today().isoformat()
+    )
+
+    pv_system_ids = json.loads(os.environ.get('PV_SYSTEM_IDS', '[]'))
+    locations = json.loads(os.environ.get('LOCATIONS', '[]'))
+    pv_sources = json.loads(os.environ.get('PV_MODEL_DATA_SOURCES', '[]'))
+    weather_sources = json.loads(os.environ.get('WEATHER_MODEL_DATA_SOURCES', '[]'))
+    dry_run = os.environ.get('DRY_RUN', 'false')
+    split_by = os.environ.get('SPLIT_BY', '')
+
+    orchestrator = WorkflowOrchestrator(resources_fs, workflow_name, start_date_str)
+    all_tasks = []
+
+    for pv_id in pv_system_ids:
+        for ds in pv_sources:
+            env = build_env_list(
+                JOB_TYPE='extract_and_load',
+                DATA_SOURCE=ds,
+                PV_SYSTEM_ID=str(pv_id),
+                DATE=start_date_str,
+                START_DATE=start_date_str,
+                DRY_RUN=dry_run,
+                SPLIT_BY=split_by,
+                WORKFLOW_NAME=workflow_name,
+            )
+            all_tasks.append(inject_task_hash(env))
+
+    for loc in locations:
+        for ds in weather_sources:
+            env = build_env_list(
+                JOB_TYPE='extract_and_load',
+                DATA_SOURCE=ds,
+                LOCATION=loc,
+                DATE=start_date_str,
+                START_DATE=start_date_str,
+                DRY_RUN=dry_run,
+                SPLIT_BY=split_by,
+                WORKFLOW_NAME=workflow_name,
+            )
+            all_tasks.append(inject_task_hash(env))
+
+    remaining = orchestrator.filter_remaining_tasks(all_tasks)
+    orchestrator.write_manifest([remaining])
+    logger.info(
+        'plan_extract: wrote manifest with %d / %d tasks remaining',
+        len(remaining),
+        len(all_tasks),
+    )
+
 
 def _run_plan_weather_grid_backfill(resources_fs: FileSystem) -> None:
     today = date.today()
@@ -310,6 +382,8 @@ def main() -> None:
 
     if job_type == 'preprocess':
         _run_preprocess(staging_fs, data_source)
+    elif job_type == 'plan_extract':
+        _run_plan_extract(resources_fs)
     elif job_type == 'extract_and_load':
         _run_extract_and_load(staging_fs, resources_fs, data_source)
     elif job_type == 'plan_weather_grid_backfill':

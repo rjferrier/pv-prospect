@@ -1,8 +1,14 @@
 from decimal import Decimal
 
 import pytest
-from common.domain import PanelGeometry, Shading, System
-from pv_prospect.common.domain import ArbitrarySite, Location, PVSite
+from pv_prospect.common.domain import (
+    ArbitrarySite,
+    Location,
+    PanelGeometry,
+    PVSite,
+    Shading,
+    System,
+)
 from pv_prospect.data_sources import DataSourceType, resolve_site
 
 

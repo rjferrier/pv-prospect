@@ -12,7 +12,7 @@ resource "google_workflows_workflow" "data_transformation" {
   description         = "Orchestrates PV Prospect data transformation DAG via Cloud Run Jobs"
 
   source_contents = <<-YAML
-    main:
+     main:
       params: [args]
       steps:
         - init:
@@ -20,10 +20,13 @@ resource "google_workflows_workflow" "data_transformation" {
               - project_id: $${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
               - region: "${var.region}"
               - job_name: "${var.cloud_run_job_name}"
+              - bucket: "${var.staging_bucket_name}"
               - workflow_name: "pv-prospect-transform"
-              - date: $${default(map.get(args, "date"), text.substring(time.format(sys.now() - 86400), 0, 10))}
+              - plan_job_type: "plan_transform"
+              - date: $${default(map.get(args, "date"), default(map.get(args, "start_date"), text.substring(time.format(sys.now() - 86400), 0, 10)))}
               - raw_pv_system_ids: $${default(map.get(args, "pv_system_ids"), [])}
               - raw_locations: $${default(map.get(args, "locations"), [])}
+              - split_by: $${default(map.get(args, "split_by"), "")}
 
         - parse_all_pvs:
             switch:
@@ -42,173 +45,91 @@ resource "google_workflows_workflow" "data_transformation" {
               - condition: true
                 assign:
                   - locations: $${raw_locations}
-        - clean_parallel:
-            parallel:
-              branches:
-                - clean_weather_branch:
-                    steps:
-                      - clean_weather_parallel:
-                          parallel:
-                            branches:
-                              - clean_weather_by_pv_system_id:
-                                  steps:
-                                    - run_clean_weather_loop:
-                                        parallel:
-                                          for:
-                                            value: pv_system_id
-                                            in: $${pv_system_ids}
-                                            steps:
-                                              - run_clean_weather:
-                                                  call: googleapis.run.v2.projects.locations.jobs.run
-                                                  args:
-                                                    name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                                                    body:
-                                                      overrides:
-                                                        containerOverrides:
-                                                          - env:
-                                                              - name: TRANSFORM_STEP
-                                                                value: clean_weather
-                                                              - name: PV_SYSTEM_ID
-                                                                value: $${string(pv_system_id)}
-                                                              - name: DATE
-                                                                value: $${date}
-                                                              - name: WORKFLOW_NAME
-                                                                value: $${workflow_name}
-                                                  result: clean_weather_result
-                              - clean_weather_by_location:
-                                  steps:
-                                    - run_clean_weather_location_loop:
-                                        parallel:
-                                          for:
-                                            value: location
-                                            in: $${locations}
-                                            steps:
-                                              - run_clean_weather_location:
-                                                  call: googleapis.run.v2.projects.locations.jobs.run
-                                                  args:
-                                                    name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                                                    body:
-                                                      overrides:
-                                                        containerOverrides:
-                                                          - env:
-                                                              - name: TRANSFORM_STEP
-                                                                value: clean_weather
-                                                              - name: LOCATION
-                                                                value: $${location}
-                                                              - name: DATE
-                                                                value: $${date}
-                                                              - name: WORKFLOW_NAME
-                                                                value: $${workflow_name}
-                                                  result: clean_weather_location_result
-                - clean_pv_branch:
-                    steps:
-                      - run_clean_pv_loop:
-                          parallel:
-                            for:
-                              value: pv_system_id
-                              in: $${pv_system_ids}
-                              steps:
-                                - run_clean_pv:
-                                    call: googleapis.run.v2.projects.locations.jobs.run
-                                    args:
-                                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                                      body:
-                                        overrides:
-                                          containerOverrides:
-                                            - env:
-                                                - name: TRANSFORM_STEP
-                                                  value: clean_pv
-                                                - name: PV_SYSTEM_ID
-                                                  value: $${string(pv_system_id)}
-                                                - name: DATE
-                                                  value: $${date}
-                                                - name: WORKFLOW_NAME
-                                                  value: $${workflow_name}
-                                    result: clean_pv_result
 
-        - process_parallel:
-            parallel:
-              branches:
-                - prepare_weather_branch:
-                    steps:
-                      - prepare_weather_parallel:
-                          parallel:
-                            branches:
-                              - prepare_weather_by_pv_system_id:
-                                  steps:
-                                    - run_prepare_weather_loop:
-                                        parallel:
-                                          for:
-                                            value: pv_system_id
-                                            in: $${pv_system_ids}
-                                            steps:
-                                              - run_prepare_weather:
-                                                  call: googleapis.run.v2.projects.locations.jobs.run
-                                                  args:
-                                                    name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                                                    body:
-                                                      overrides:
-                                                        containerOverrides:
-                                                          - env:
-                                                              - name: TRANSFORM_STEP
-                                                                value: prepare_weather
-                                                              - name: PV_SYSTEM_ID
-                                                                value: $${string(pv_system_id)}
-                                                              - name: DATE
-                                                                value: $${date}
-                                                              - name: WORKFLOW_NAME
-                                                                value: $${workflow_name}
-                                                  result: prepare_weather_result
-                              - prepare_weather_by_location:
-                                  steps:
-                                    - run_prepare_weather_location_loop:
-                                        parallel:
-                                          for:
-                                            value: location
-                                            in: $${locations}
-                                            steps:
-                                              - run_prepare_weather_location:
-                                                  call: googleapis.run.v2.projects.locations.jobs.run
-                                                  args:
-                                                    name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                                                    body:
-                                                      overrides:
-                                                        containerOverrides:
-                                                          - env:
-                                                              - name: TRANSFORM_STEP
-                                                                value: prepare_weather
-                                                              - name: LOCATION
-                                                                value: $${location}
-                                                              - name: DATE
-                                                                value: $${date}
-                                                              - name: WORKFLOW_NAME
-                                                                value: $${workflow_name}
-                                                  result: prepare_weather_location_result
-                - prepare_pv_branch:
-                    steps:
-                      - run_prepare_pv_loop:
-                          parallel:
-                            for:
-                              value: pv_system_id
-                              in: $${pv_system_ids}
-                              steps:
-                                - run_prepare_pv:
-                                    call: googleapis.run.v2.projects.locations.jobs.run
-                                    args:
-                                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                                      body:
-                                        overrides:
-                                          containerOverrides:
-                                            - env:
-                                                - name: TRANSFORM_STEP
-                                                  value: prepare_pv
-                                                - name: PV_SYSTEM_ID
-                                                  value: $${string(pv_system_id)}
-                                                - name: DATE
-                                                  value: $${date}
-                                                - name: WORKFLOW_NAME
-                                                  value: $${workflow_name}
-                                    result: prepare_pv_result
+        - run_plan:
+            call: googleapis.run.v2.projects.locations.jobs.run
+            args:
+              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+              body:
+                overrides:
+                  containerOverrides:
+                    - env:
+                        - name: JOB_TYPE
+                          value: $${plan_job_type}
+                        - name: WORKFLOW_NAME
+                          value: $${workflow_name}
+                        - name: START_DATE
+                          value: $${date}
+                        - name: DATE
+                          value: $${date}
+                        - name: PV_SYSTEM_IDS
+                          value: $${json.encode_to_string(pv_system_ids)}
+                        - name: LOCATIONS
+                          value: $${json.encode_to_string(locations)}
+                        - name: SPLIT_BY
+                          value: $${split_by}
+            result: plan_op
+
+        - wait_plan_op:
+            call: wait_for_operation
+            args:
+              operation_name: $${plan_op.name}
+            result: plan_op_done
+
+        - wait_plan:
+            call: await_job
+            args:
+              execution_name: $${plan_op_done.response.name}
+
+        - fetch_manifest:
+            call: googleapis.storage.v1.objects.get
+            args:
+              bucket: $${bucket}
+              object: $${text.url_encode("manifests/" + workflow_name + "_" + date + ".json")}
+              alt: media
+            result: manifest_raw
+
+        - decode_manifest:
+            assign:
+              - manifest: $${json.decode(manifest_raw)}
+              - phases: $${manifest.phases}
+
+        - execute_phases:
+            for:
+              value: phase_tasks
+              in: $${phases}
+              steps:
+                - check_phase_empty:
+                    switch:
+                      - condition: $${len(phase_tasks) == 0}
+                        next: continue_phase
+                - dispatch_tasks:
+                    parallel:
+                      for:
+                        value: task_env
+                        in: $${phase_tasks}
+                        steps:
+                          - run_task:
+                              call: googleapis.run.v2.projects.locations.jobs.run
+                              args:
+                                name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                                body:
+                                  overrides:
+                                    containerOverrides:
+                                      - env: $${task_env}
+                              result: task_op
+                          - wait_task_op:
+                              call: wait_for_operation
+                              args:
+                                operation_name: $${task_op.name}
+                              result: task_op_done
+                          - wait_task:
+                              call: await_job
+                              args:
+                                execution_name: $${task_op_done.response.name}
+                - continue_phase:
+                    assign:
+                      - _dummy: true
 
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -218,13 +139,70 @@ resource "google_workflows_workflow" "data_transformation" {
                 overrides:
                   containerOverrides:
                     - env:
-                        - name: TRANSFORM_STEP
+                        - name: JOB_TYPE
                           value: consolidate_logs
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
-            result: consolidate_logs_result
+            result: consolidate_logs_op
+
+        - wait_consolidate_op:
+            call: wait_for_operation
+            args:
+              operation_name: $${consolidate_logs_op.name}
+            result: consolidate_logs_op_done
+
+        - wait_consolidate:
+            call: await_job
+            args:
+              execution_name: $${consolidate_logs_op_done.response.name}
 
         - done:
             return: "completed"
+
+    wait_for_operation:
+      params: [operation_name]
+      steps:
+        - check_op:
+            call: googleapis.run.v2.projects.locations.operations.get
+            args:
+              name: $${operation_name}
+            result: op
+        - evaluate_op:
+            switch:
+              - condition: $${default(op.done, false)}
+                return: $${op}
+              - condition: true
+                steps:
+                  - wait:
+                      call: sys.sleep
+                      args:
+                        seconds: 2
+                  - retry_op:
+                      next: check_op
+
+    await_job:
+      params: [execution_name]
+      steps:
+        - check_status:
+            call: googleapis.run.v2.projects.locations.jobs.executions.get
+            args:
+              name: $${execution_name}
+            result: exec
+        - evaluate_status:
+            switch:
+              - condition: $${map.get(exec, "completionTime") == null}
+                steps:
+                  - wait:
+                      call: sys.sleep
+                      args:
+                        seconds: 10
+                  - retry:
+                      next: check_status
+              - condition: $${exec.succeededCount == exec.taskCount}
+                return: $${exec}
+              - condition: true
+                raise:
+                  message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ")"}'
+                  data: $${exec}
   YAML
 }
