@@ -10,7 +10,11 @@
 #   4. It dispatches one extract_and_load Cloud Run Job per batch, sleeping
 #      between dispatches to stay under OpenMeteo's per-hour rate limit.
 #      After each batch succeeds the checkpoint is updated in GCS.
-#   5. After all batches succeed, it invokes the Cloud Run Job with
+#      NOTE: To fully respect the 5k/hr limit, the workflow accepts a
+#      `max_batches_per_run` parameter and is triggered twice by Cloud Scheduler.
+#      Run 1 processes the first few batches and exits early; Run 2 resumes
+#      from the checkpoint to finish the remaining batches.
+#   5. After all batches in the manifest succeed, it invokes the Cloud Run Job with
 #      JOB_TYPE=commit_weather_grid_backfill, which advances the live cursor
 #      so that tomorrow's run picks up from the next point in the backfill.
 #   6. Deletes the checkpoint (successful run) and consolidates logs.
@@ -42,6 +46,8 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
               - checkpoint_object: "${var.checkpoint_object_path}"
               - data_source: $${default(map.get(args, "data_source"), "${var.data_source}")}
               - sleep_seconds: $${default(map.get(args, "sleep_seconds_between_batches"), ${var.sleep_seconds_between_batches})}
+              - max_batches_per_run: $${default(map.get(args, "max_batches_per_run"), 100)}
+              - run_count: 0
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
               - completed: {}
 
@@ -124,9 +130,16 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                     switch:
                       - condition: $${map.get(completed, string(i)) == true}
                         next: next_batch
+                - check_run_limit:
+                    switch:
+                      - condition: $${run_count >= max_batches_per_run}
+                        next: check_all_done
+                - increment_run_count:
+                    assign:
+                      - run_count: $${run_count + 1}
                 - maybe_sleep:
                     switch:
-                      - condition: $${i > 0}
+                      - condition: $${run_count > 1}
                         steps:
                           - pace:
                               call: sys.sleep
@@ -185,6 +198,13 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                 - next_batch:
                     assign:
                       - _: null
+
+        - check_all_done:
+            switch:
+              - condition: $${len(keys(completed)) == len(batches)}
+                next: commit
+              - condition: true
+                return: $${"Partially completed (" + string(len(keys(completed))) + "/" + string(len(batches)) + ")"}
 
         - commit:
             call: googleapis.run.v2.projects.locations.jobs.run
