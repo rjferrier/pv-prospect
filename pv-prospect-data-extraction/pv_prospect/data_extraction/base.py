@@ -12,7 +12,7 @@ class TimeSeries:
 class TimeSeriesDataExtractor(Protocol):
     def extract(
         self,
-        entities: Collection[Any],
+        sites: Collection[Any],
         date_: date,
         end_date: date | None = None,
     ) -> list[TimeSeries]: ...

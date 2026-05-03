@@ -131,7 +131,7 @@ class PVOutputExtractor:
     @retry_on_429
     def extract(
         self,
-        entities: Collection[PVSite],
+        sites: Collection[PVSite],
         date_: date,
         end_date: Optional[date] = None,
     ) -> list[TimeSeries]:
@@ -139,7 +139,7 @@ class PVOutputExtractor:
         Extract PV output status data for a single date from the PVOutput API.
 
         Args:
-            entities: PVSite entities identifying the target systems.
+            sites: PVSite sites identifying the target systems.
             date_: The date to extract data for.
             end_date: Optional end date (ignored — PVOutput only supports single-date queries).
 
@@ -153,7 +153,7 @@ class PVOutputExtractor:
             'X-Rate-Limit': '1',  # Request rate limit information in response headers
         }
 
-        pv_site = next(iter(entities))
+        pv_site = next(iter(sites))
 
         params = {
             'sid1': pv_site.id,

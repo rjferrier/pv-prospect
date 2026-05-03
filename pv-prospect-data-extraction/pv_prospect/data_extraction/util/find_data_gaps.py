@@ -77,7 +77,7 @@ def analyze_dataset(
 ) -> Dict[str, Dict[str, List[Tuple[datetime, datetime, int]]]]:
     """
     Analyze the entire dataset and find gaps.
-    Returns nested dict: {dataset_path: {entity_id: [gaps]}}
+    Returns nested dict: {dataset_path: {site_id: [gaps]}}
     """
     results: Dict[str, Dict[str, List[Tuple[datetime, datetime, int]]]] = defaultdict(
         lambda: defaultdict(list)
@@ -101,8 +101,8 @@ def analyze_dataset(
 
         interval_days = get_expected_interval(dataset_path)
 
-        # Group files by entity ID
-        entity_files = defaultdict(list)
+        # Group files by site ID
+        site_files = defaultdict(list)
 
         for file_info in files:
             filename = file_info.name
@@ -111,40 +111,40 @@ def analyze_dataset(
             if date is None:
                 continue
 
-            # Extract entity ID from filename (format: prefix_id_YYYYMMDD.csv)
+            # Extract site ID from filename (format: prefix_id_YYYYMMDD.csv)
             match = re.match(r'^[^_]+_(\d+)_\d{8}\.csv$', filename)
             if match:
-                entity_id = match.group(1)
-                entity_files[entity_id].append(date)
+                site_id = match.group(1)
+                site_files[site_id].append(date)
 
-        # Find gaps for each entity
-        for entity_id, dates in sorted(entity_files.items()):
+        # Find gaps for each site
+        for site_id, dates in sorted(site_files.items()):
             gaps = find_gaps(dates, interval_days)
             if gaps:
-                results[dataset_path][entity_id] = gaps
+                results[dataset_path][site_id] = gaps
 
     return results
 
 
 def aggregate_gaps(
-    entities_gaps: Dict[str, List[Tuple[datetime, datetime, int]]], interval_days: int
+    sites_gaps: Dict[str, List[Tuple[datetime, datetime, int]]], interval_days: int
 ) -> List[Tuple[datetime, datetime, int, set]]:
     """
-    Aggregate gaps across multiple entities, merging overlapping date ranges.
+    Aggregate gaps across multiple sites, merging overlapping date ranges.
 
     Args:
-        entities_gaps: Dict mapping entity_id to list of (gap_start, gap_end, missing_count)
+        sites_gaps: Dict mapping site_id to list of (gap_start, gap_end, missing_count)
         interval_days: The expected interval between files (for proper merging)
 
     Returns:
-        List of (gap_start, gap_end, total_missing, entity_ids) tuples, sorted by date
-        where entity_ids is a set of entity IDs associated with the gap
+        List of (gap_start, gap_end, total_missing, site_ids) tuples, sorted by date
+        where site_ids is a set of site IDs associated with the gap
     """
-    # Collect all gap segments with their entity info
+    # Collect all gap segments with their site info
     all_segments = []
-    for entity_id, gaps in entities_gaps.items():
+    for site_id, gaps in sites_gaps.items():
         for gap_start, gap_end, missing_count in gaps:
-            all_segments.append((gap_start, gap_end, missing_count, entity_id))
+            all_segments.append((gap_start, gap_end, missing_count, site_id))
 
     if not all_segments:
         return []
@@ -157,10 +157,10 @@ def aggregate_gaps(
     current_start = all_segments[0][0]
     current_end = all_segments[0][1]
     current_missing = all_segments[0][2]
-    entities = {all_segments[0][3]}
+    sites = {all_segments[0][3]}
 
     for i in range(1, len(all_segments)):
-        gap_start, gap_end, missing_count, entity_id = all_segments[i]
+        gap_start, gap_end, missing_count, site_id = all_segments[i]
 
         # Check if this gap is adjacent or overlapping with current gap
         # Adjacent means: gap_start is at most interval_days after current_end
@@ -168,17 +168,17 @@ def aggregate_gaps(
             # Merge: extend the end date and add missing files
             current_end = max(current_end, gap_end)
             current_missing += missing_count
-            entities.add(entity_id)
+            sites.add(site_id)
         else:
             # No overlap: save current and start new
-            merged.append((current_start, current_end, current_missing, entities))
+            merged.append((current_start, current_end, current_missing, sites))
             current_start = gap_start
             current_end = gap_end
             current_missing = missing_count
-            entities = {entity_id}
+            sites = {site_id}
 
     # Don't forget the last one
-    merged.append((current_start, current_end, current_missing, entities))
+    merged.append((current_start, current_end, current_missing, sites))
 
     return merged
 
@@ -193,7 +193,7 @@ def format_gap_report(
     lines.append('=' * 80)
     lines.append('')
 
-    total_gaps = sum(len(entities) for entities in results.values())
+    total_gaps = sum(len(sites) for sites in results.values())
 
     if total_gaps == 0:
         lines.append('✓ No gaps found in the dataset!')
@@ -201,7 +201,7 @@ def format_gap_report(
         return '\n'.join(lines)
 
     for dataset_path in sorted(results.keys()):
-        entities = results[dataset_path]
+        sites = results[dataset_path]
         interval_days = get_expected_interval(dataset_path)
         interval_str = f'{interval_days} day{"s" if interval_days > 1 else ""}'
 
@@ -209,14 +209,14 @@ def format_gap_report(
         lines.append(f'Expected interval: {interval_str}')
         lines.append('-' * 80)
 
-        # Aggregate gaps across all entities
-        aggregated_gaps = aggregate_gaps(entities, interval_days)
+        # Aggregate gaps across all sites
+        aggregated_gaps = aggregate_gaps(sites, interval_days)
 
         lines.append(f'\n  Total gaps: {len(aggregated_gaps)}')
 
-        for gap_start, gap_end, missing_count, entity_ids in aggregated_gaps:
-            entity_count = len(entity_ids)
-            entity_str = 'entity' if entity_count == 1 else 'entities'
+        for gap_start, gap_end, missing_count, site_ids in aggregated_gaps:
+            site_count = len(site_ids)
+            site_str = 'site' if site_count == 1 else 'sites'
             file_str = 'file' if missing_count == 1 else 'files'
 
             # For the display, add interval to end date to show full range (exclusive end)
@@ -224,13 +224,13 @@ def format_gap_report(
 
             lines.append(
                 f'    • {gap_start.strftime("%Y-%m-%d")} to {display_end.strftime("%Y-%m-%d")} '
-                f'({missing_count} missing {file_str} across {entity_count} {entity_str})'
+                f'({missing_count} missing {file_str} across {site_count} {site_str})'
             )
 
         lines.append('')
 
     lines.append('=' * 80)
-    lines.append(f'SUMMARY: Found gaps in {total_gaps} entity/dataset combination(s)')
+    lines.append(f'SUMMARY: Found gaps in {total_gaps} site/dataset combination(s)')
     lines.append('=' * 80)
 
     return '\n'.join(lines)
@@ -267,11 +267,11 @@ def generate_docker_commands(
     Generate Docker Compose commands to rectify the identified gaps.
 
     Commands are in the format:
-    docker compose run --rm taskproducer <source> <entities> -d <start> -e <end> [-w] [-l <local-dir>]
+    docker compose run --rm taskproducer <source> <sites> -d <start> -e <end> [-w] [-l <local-dir>]
 
     Where:
     - <source> is the data source (pv, weather-om-15, weather-om-historical, etc.)
-    - <entities> is a comma-separated list of entity IDs
+    - <sites> is a comma-separated list of site IDs
     - <start> is the inclusive start date (YYYY-MM-DD)
     - <end> is the exclusive end date (YYYY-MM-DD)
     - -w flag is only included for weekly-spaced data
@@ -286,7 +286,7 @@ def generate_docker_commands(
     total_commands = 0
 
     for dataset_path in sorted(results.keys()):
-        entities = results[dataset_path]
+        sites = results[dataset_path]
         interval_days = get_expected_interval(dataset_path)
         source_name = get_source_name(dataset_path)
 
@@ -294,20 +294,20 @@ def generate_docker_commands(
         lines.append(f'# Source: {source_name}')
         lines.append('-' * 80)
 
-        # Aggregate gaps across all entities for command generation
-        aggregated_gaps = aggregate_gaps(entities, interval_days)
+        # Aggregate gaps across all sites for command generation
+        aggregated_gaps = aggregate_gaps(sites, interval_days)
 
-        for gap_start, gap_end, _missing_count, entity_ids in aggregated_gaps:
+        for gap_start, gap_end, _missing_count, site_ids in aggregated_gaps:
             # Calculate exclusive end date (add interval to gap_end)
             exclusive_end = gap_end + timedelta(days=interval_days)
 
-            # Format entity IDs as comma-separated list
-            entity_list = ','.join(sorted(entity_ids, key=int))
+            # Format site IDs as comma-separated list
+            site_list = ','.join(sorted(site_ids, key=int))
 
-            # Format the command with entity IDs
+            # Format the command with site IDs
             command = (
                 f'docker compose run --rm taskproducer {source_name} '
-                f'{entity_list} -d {gap_start.strftime("%Y-%m-%d")} '
+                f'{site_list} -d {gap_start.strftime("%Y-%m-%d")} '
                 f'-e {exclusive_end.strftime("%Y-%m-%d")}'
             )
 

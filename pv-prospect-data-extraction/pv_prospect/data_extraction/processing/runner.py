@@ -234,14 +234,14 @@ def _main() -> None:
             final_ranges = [complete_date_range]
         if args.reverse:
             final_ranges.reverse()
-        entities: list[AnySite] = (
+        sites: list[AnySite] = (
             pv_sites + arbitrary_sites
             if sd.type == DataSourceType.WEATHER
             else pv_sites
         )
         for dr in final_ranges:
-            for ent in entities:
-                work_items.append((sd, ent, dr))
+            for site in sites:
+                work_items.append((sd, site, dr))
 
     if not work_items:
         print('No tasks to process.')
@@ -259,19 +259,19 @@ def _main() -> None:
                 get_extractor,
                 sd,
                 staging_fs,
-                ent,
+                site,
                 dr,
                 args.dry_run,
-            ): (sd, ent, dr)
-            for sd, ent, dr in work_items
+            ): (sd, site, dr)
+            for sd, site, dr in work_items
         }
         for future in as_completed(futures):
             try:
                 result: Result = future.result()
                 stats.record(result)
             except Exception as exc:
-                sd, ent, dr = futures[future]
-                print(f'    UNHANDLED ERROR for {sd}/{ent}/{dr}: {exc}')
+                sd, site, dr = futures[future]
+                print(f'    UNHANDLED ERROR for {sd}/{site}/{dr}: {exc}')
 
     stats.print_summary()
 

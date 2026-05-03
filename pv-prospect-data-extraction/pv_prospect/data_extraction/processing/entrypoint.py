@@ -108,7 +108,7 @@ def _run_preprocess(
     core.preprocess(staging_fs, data_source)
 
 
-def _resolve_entities(
+def _resolve_sites(
     data_source: DataSource,
     resources_fs: FileSystem,
 ) -> list[AnySite]:
@@ -171,12 +171,12 @@ def _run_extract_and_load(
     resources_extractor = Extractor(resources_fs)
     build_pv_site_repo(resources_extractor.read_file(core.PV_SITES_CSV_FILE))
 
-    entities = _resolve_entities(data_source, resources_fs)
+    sites = _resolve_sites(data_source, resources_fs)
 
     logger.info(
-        'extract_and_load: %s, %d entities, %s, split_by=%s',
+        'extract_and_load: %s, %d sites, %s, split_by=%s',
         data_source,
-        len(entities),
+        len(sites),
         complete_date_range,
         split_by,
     )
@@ -203,17 +203,17 @@ def _run_extract_and_load(
         )
         return
 
-    for entity in entities:
+    for site in sites:
         for dr in final_ranges:
             result = core.extract_and_load(
                 get_extractor,
                 data_source,
                 staging_fs,
-                entity,
+                site,
                 dr,
                 dry_run,
             )
-            logger.info('%s %s: %s', entity, dr, result.type.value)
+            logger.info('%s %s: %s', site, dr, result.type.value)
 
 
 def _run_plan_weather_grid_backfill(resources_fs: FileSystem) -> None:
