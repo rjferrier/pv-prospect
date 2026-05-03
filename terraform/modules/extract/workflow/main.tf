@@ -12,7 +12,7 @@ resource "google_workflows_workflow" "data_extraction" {
   description         = "Orchestrates daily PV Prospect data extraction via Cloud Run Jobs"
 
   source_contents = <<-YAML
-     main:
+    main:
       params: [args]
       steps:
         - init:

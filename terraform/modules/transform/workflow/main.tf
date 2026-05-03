@@ -12,7 +12,7 @@ resource "google_workflows_workflow" "data_transformation" {
   description         = "Orchestrates PV Prospect data transformation DAG via Cloud Run Jobs"
 
   source_contents = <<-YAML
-     main:
+    main:
       params: [args]
       steps:
         - init:

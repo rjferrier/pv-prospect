@@ -119,85 +119,100 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                     assign:
                       - completed: {}
 
-        - dispatch:
-            for:
-              value: batch
-              index: i
-              in: $${batches}
-              steps:
-                # Skip batches that already succeeded in a previous execution.
-                - check_already_done:
-                    switch:
-                      - condition: $${map.get(completed, string(i)) == true}
-                        next: next_batch
-                - check_run_limit:
-                    switch:
-                      - condition: $${run_count >= max_batches_per_run}
-                        next: check_all_done
-                - increment_run_count:
-                    assign:
-                      - run_count: $${run_count + 1}
-                - maybe_sleep:
-                    switch:
-                      - condition: $${run_count > 1}
-                        steps:
-                          - pace:
-                              call: sys.sleep
-                              args:
-                                seconds: $${sleep_seconds}
-                - log_batch_start:
-                    call: sys.log
-                    args:
-                      data: $${"Starting weather extraction for batch " + string(i+1) + "/" + string(len(batches)) + " (sample_file_index=" + string(batch.sample_file_index) + ")"}
-                - run_batch:
-                    call: googleapis.run.v2.projects.locations.jobs.run
-                    args:
-                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                      body:
-                        overrides:
-                          containerOverrides:
-                            - env:
-                                - name: JOB_TYPE
-                                  value: extract_and_load
-                                - name: DATA_SOURCE
-                                  value: $${data_source}
-                                - name: SAMPLE_FILE_INDEX
-                                  value: $${string(batch.sample_file_index)}
-                                - name: START_DATE
-                                  value: $${batch.start_date}
-                                - name: END_DATE
-                                  value: $${batch.end_date}
-                                - name: DRY_RUN
-                                  value: $${dry_run}
-                                - name: WORKFLOW_NAME
-                                  value: $${workflow_name}
-                    result: batch_op
-                - wait_for_batch_op:
-                    call: wait_for_operation
-                    args:
-                      operation_name: $${batch_op.name}
-                    result: batch_op_done
-                - wait_for_batch:
-                    call: await_job
-                    args:
-                      execution_name: $${batch_op_done.response.name}
-                # Mark this batch done and persist the checkpoint so a re-run
-                # can skip it without re-extracting.
-                - mark_done:
-                    assign:
-                      - completed[string(i)]: true
-                - write_checkpoint:
-                    call: http.post
-                    args:
-                      url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
-                      auth:
-                        type: OAuth2
-                      headers:
-                        Content-Type: application/json
-                      body: $${json.encode_to_string(completed)}
-                - next_batch:
-                    assign:
-                      - _: null
+        - dispatch_init:
+            assign:
+              - i: 0
+
+        - dispatch_loop:
+            switch:
+              - condition: $${i >= len(batches)}
+                next: check_all_done
+
+        - get_batch:
+            assign:
+              - batch: $${batches[i]}
+
+        - check_already_done:
+            switch:
+              - condition: $${map.get(completed, string(i)) == true}
+                next: next_batch
+
+        - check_run_limit:
+            switch:
+              - condition: $${run_count >= max_batches_per_run}
+                next: check_all_done
+
+        - increment_run_count:
+            assign:
+              - run_count: $${run_count + 1}
+
+        - maybe_sleep:
+            switch:
+              - condition: $${run_count > 1}
+                steps:
+                  - pace:
+                      call: sys.sleep
+                      args:
+                        seconds: $${sleep_seconds}
+
+        - log_batch_start:
+            call: sys.log
+            args:
+              data: $${"Starting weather extraction for batch " + string(i+1) + "/" + string(len(batches)) + " (sample_file_index=" + string(batch.sample_file_index) + ")"}
+
+        - run_batch:
+            call: googleapis.run.v2.projects.locations.jobs.run
+            args:
+              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+              body:
+                overrides:
+                  containerOverrides:
+                    - env:
+                        - name: JOB_TYPE
+                          value: extract_and_load
+                        - name: DATA_SOURCE
+                          value: $${data_source}
+                        - name: SAMPLE_FILE_INDEX
+                          value: $${string(batch.sample_file_index)}
+                        - name: START_DATE
+                          value: $${batch.start_date}
+                        - name: END_DATE
+                          value: $${batch.end_date}
+                        - name: DRY_RUN
+                          value: $${dry_run}
+                        - name: WORKFLOW_NAME
+                          value: $${workflow_name}
+            result: batch_op
+
+        - wait_for_batch_op:
+            call: wait_for_operation
+            args:
+              operation_name: $${batch_op.name}
+            result: batch_op_done
+
+        - wait_for_batch:
+            call: await_job
+            args:
+              execution_name: $${batch_op_done.response.name}
+
+        - mark_done:
+            assign:
+              - completed[string(i)]: true
+
+        - write_checkpoint:
+            call: http.post
+            args:
+              url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
+              auth:
+                type: OAuth2
+              headers:
+                Content-Type: application/json
+              body: $${json.encode_to_string(completed)}
+
+        - next_batch:
+            assign:
+              - i: $${i + 1}
+            next: dispatch_loop
 
         - check_all_done:
             switch:
