@@ -69,6 +69,7 @@ from pv_prospect.data_extraction.processing.sample_file import (
     read_sample_file,
     sample_file_path,
 )
+from pv_prospect.data_extraction.processing.value_objects import ResultType
 from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
 from pv_prospect.data_sources import (
     DataSourceType,
@@ -203,6 +204,7 @@ def _run_extract_and_load(
         )
         return
 
+    failures: list[str] = []
     for site in sites:
         for dr in final_ranges:
             result = core.extract_and_load(
@@ -214,6 +216,16 @@ def _run_extract_and_load(
                 dry_run,
             )
             logger.info('%s %s: %s', site, dr, result.type.value)
+            if result.type == ResultType.FAILURE:
+                failures.append(f'{site} {dr}')
+
+    if failures:
+        logger.error(
+            'extract_and_load: %d task(s) failed: %s',
+            len(failures),
+            ', '.join(failures),
+        )
+        sys.exit(1)
 
 
 def _run_plan_weather_grid_backfill(resources_fs: FileSystem) -> None:

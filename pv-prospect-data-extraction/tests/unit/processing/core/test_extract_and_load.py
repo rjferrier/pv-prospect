@@ -50,7 +50,7 @@ def test_overwrites_when_all_files_exist() -> None:
 
     rows = [['2025-06-01', '100']]
     mock_extractor = MagicMock()
-    mock_extractor.extract.return_value = [TimeSeries(entity=_PV_SITE, rows=rows)]
+    mock_extractor.extract.return_value = [TimeSeries(rows=rows)]
 
     staging_fs = FakeFileSystem({expected_path: 'old,data'})
     result = extract_and_load(
@@ -69,7 +69,7 @@ def test_overwrites_when_all_files_exist() -> None:
 def test_extracts_and_writes_csv() -> None:
     rows = [['2025-06-01', '100'], ['2025-06-01', '200']]
     mock_extractor = MagicMock()
-    mock_extractor.extract.return_value = [TimeSeries(entity=_PV_SITE, rows=rows)]
+    mock_extractor.extract.return_value = [TimeSeries(rows=rows)]
 
     staging_fs = FakeFileSystem()
     result = extract_and_load(
