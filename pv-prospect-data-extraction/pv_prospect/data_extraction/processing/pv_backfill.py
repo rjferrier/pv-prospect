@@ -25,8 +25,8 @@ from pv_prospect.etl.storage import FileSystem
 
 PV_BACKFILL_WINDOW_DAYS = 28
 
-PV_BACKFILL_CURSOR_PATH = 'pv_backfill_cursor.json'
-PV_BACKFILL_MANIFEST_PATH = 'todays_pv_backfill_manifest.json'
+PV_BACKFILL_CURSOR_PATH = 'manifests/pv_backfill_cursor.json'
+PV_BACKFILL_MANIFEST_PATH = 'manifests/todays_pv_backfill_manifest.json'
 
 
 @dataclass(frozen=True)

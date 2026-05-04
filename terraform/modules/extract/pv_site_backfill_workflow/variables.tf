@@ -21,13 +21,13 @@ variable "staging_bucket_name" {
 variable "manifest_object_path" {
   type        = string
   description = "GCS object path (inside the staging bucket) where plan_pv_site_backfill writes the manifest"
-  default     = "resources/todays_pv_backfill_manifest.json"
+  default     = "resources/manifests/todays_pv_backfill_manifest.json"
 }
 
 variable "checkpoint_object_path" {
   type        = string
   description = "GCS object path (inside the staging bucket) where the workflow persists its per-run resume checkpoint"
-  default     = "resources/pv_site_backfill_checkpoint.json"
+  default     = "resources/manifests/pv_site_backfill_checkpoint.json"
 }
 
 variable "default_pv_system_ids" {

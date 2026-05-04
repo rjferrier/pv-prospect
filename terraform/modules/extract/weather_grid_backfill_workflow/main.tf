@@ -51,216 +51,236 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
               - completed: {}
 
-        - plan:
-            call: googleapis.run.v2.projects.locations.jobs.run
-            args:
-              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-              body:
-                overrides:
-                  containerOverrides:
-                    - env:
-                        - name: JOB_TYPE
-                          value: plan_weather_grid_backfill
-                        - name: WORKFLOW_NAME
-                          value: $${workflow_name}
-            result: plan_op
-
-        - wait_for_plan_op:
-            call: wait_for_operation
-            args:
-              operation_name: $${plan_op.name}
-            result: plan_op_done
-
-        - wait_for_plan:
-            call: await_job
-            args:
-              execution_name: $${plan_op_done.response.name}
-
-        - fetch_manifest:
-            call: googleapis.storage.v1.objects.get
-            args:
-              bucket: $${bucket}
-              object: $${text.url_encode(manifest_object)}
-              alt: media
-            result: manifest_raw
-
-        - decode_manifest:
-            assign:
-              - manifest: $${json.decode(manifest_raw)}
-
-        - collect_batches:
-            assign:
-              - batches: $${list.concat([manifest.step2_batch], manifest.step3_batches)}
-
-        # Load any existing checkpoint so a re-triggered run skips already-done
-        # batches.  If no checkpoint exists the try block raises a 404 and we
-        # fall through to init_completed, which leaves `completed` as {}.
-        - load_checkpoint:
+        - run_pipeline:
             try:
               steps:
-                - fetch_checkpoint:
+                - plan:
+                    call: googleapis.run.v2.projects.locations.jobs.run
+                    args:
+                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                      body:
+                        overrides:
+                          containerOverrides:
+                            - env:
+                                - name: JOB_TYPE
+                                  value: plan_weather_grid_backfill
+                                - name: WORKFLOW_NAME
+                                  value: $${workflow_name}
+                    result: plan_op
+
+                - wait_for_plan_op:
+                    call: wait_for_operation
+                    args:
+                      operation_name: $${plan_op.name}
+                    result: plan_op_done
+
+                - wait_for_plan:
+                    call: await_job
+                    args:
+                      execution_name: $${plan_op_done.response.name}
+
+                - fetch_manifest:
                     call: googleapis.storage.v1.objects.get
                     args:
                       bucket: $${bucket}
-                      object: $${text.url_encode(checkpoint_object)}
+                      object: $${text.url_encode(manifest_object)}
                       alt: media
-                    result: checkpoint_raw
-                - decode_checkpoint:
+                    result: manifest_raw
+
+                - decode_manifest:
                     assign:
-                      - completed: $${json.decode(checkpoint_raw)}
-                - log_resuming:
+                      - manifest: $${json.decode(manifest_raw)}
+
+                - collect_batches:
+                    assign:
+                      - batches: $${list.concat([manifest.step2_batch], manifest.step3_batches)}
+
+                # Load any existing checkpoint so a re-triggered run skips already-done
+                # batches.  If no checkpoint exists the try block raises a 404 and we
+                # fall through to init_completed, which leaves `completed` as {}.
+                - load_checkpoint:
+                    try:
+                      steps:
+                        - fetch_checkpoint:
+                            call: googleapis.storage.v1.objects.get
+                            args:
+                              bucket: $${bucket}
+                              object: $${text.url_encode(checkpoint_object)}
+                              alt: media
+                            result: checkpoint_raw
+                        - decode_checkpoint:
+                            assign:
+                              - completed: $${json.decode(checkpoint_raw)}
+                        - log_resuming:
+                            call: sys.log
+                            args:
+                              data: $${"Resuming from checkpoint — " + string(len(keys(completed))) + " batches already done"}
+                    except:
+                      as: checkpoint_err
+                      steps:
+                        - init_completed:
+                            assign:
+                              - completed: {}
+
+                - dispatch_init:
+                    assign:
+                      - i: 0
+
+                - dispatch_loop:
+                    switch:
+                      - condition: $${i >= len(batches)}
+                        next: check_all_done
+
+                - get_batch:
+                    assign:
+                      - batch: $${batches[i]}
+
+                - check_already_done:
+                    switch:
+                      - condition: $${map.get(completed, string(i)) == true}
+                        next: next_batch
+
+                - check_run_limit:
+                    switch:
+                      - condition: $${run_count >= max_batches_per_run}
+                        next: check_all_done
+
+                - increment_run_count:
+                    assign:
+                      - run_count: $${run_count + 1}
+
+                - maybe_sleep:
+                    switch:
+                      - condition: $${run_count > 1}
+                        steps:
+                          - pace:
+                              call: sys.sleep
+                              args:
+                                seconds: $${sleep_seconds}
+
+                - log_batch_start:
                     call: sys.log
                     args:
-                      data: $${"Resuming from checkpoint — " + string(len(keys(completed))) + " batches already done"}
-            except:
-              as: checkpoint_err
-              steps:
-                - init_completed:
+                      data: $${"Starting weather extraction for batch " + string(i+1) + "/" + string(len(batches)) + " (sample_file_index=" + string(batch.sample_file_index) + ")"}
+
+                - run_batch:
+                    try:
+                      steps:
+                        - start_job:
+                            call: googleapis.run.v2.projects.locations.jobs.run
+                            args:
+                              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                              body:
+                                overrides:
+                                  containerOverrides:
+                                    - env:
+                                        - name: JOB_TYPE
+                                          value: extract_and_load
+                                        - name: DATA_SOURCE
+                                          value: $${data_source}
+                                        - name: SAMPLE_FILE_INDEX
+                                          value: $${string(batch.sample_file_index)}
+                                        - name: START_DATE
+                                          value: $${batch.start_date}
+                                        - name: END_DATE
+                                          value: $${batch.end_date}
+                                        - name: DRY_RUN
+                                          value: $${dry_run}
+                                        - name: WORKFLOW_NAME
+                                          value: $${workflow_name}
+                            result: batch_op
+                        - wait_for_batch_op:
+                            call: wait_for_operation
+                            args:
+                              operation_name: $${batch_op.name}
+                            result: batch_op_done
+                        - wait_for_batch:
+                            call: await_job
+                            args:
+                              execution_name: $${batch_op_done.response.name}
+                    retry:
+                      predicate: $${retry_predicate}
+                      max_retries: 3
+                      backoff:
+                        initial_delay: 60
+                        max_delay: 600
+                        multiplier: 2
+
+                - mark_done:
                     assign:
-                      - completed: {}
+                      - completed[string(i)]: true
 
-        - dispatch_init:
-            assign:
-              - i: 0
+                - write_checkpoint:
+                    call: http.post
+                    args:
+                      url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
+                      auth:
+                        type: OAuth2
+                      headers:
+                        Content-Type: application/json
+                      body: $${json.encode_to_string(completed)}
 
-        - dispatch_loop:
-            switch:
-              - condition: $${i >= len(batches)}
-                next: check_all_done
+                - next_batch:
+                    assign:
+                      - i: $${i + 1}
+                    next: dispatch_loop
 
-        - get_batch:
-            assign:
-              - batch: $${batches[i]}
+                - check_all_done:
+                    switch:
+                      - condition: $${len(keys(completed)) == len(batches)}
+                        next: commit
+                      - condition: true
+                        return: $${"Partially completed (" + string(len(keys(completed))) + "/" + string(len(batches)) + ")"}
 
-        - check_already_done:
-            switch:
-              - condition: $${map.get(completed, string(i)) == true}
-                next: next_batch
+                - commit:
+                    call: googleapis.run.v2.projects.locations.jobs.run
+                    args:
+                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                      body:
+                        overrides:
+                          containerOverrides:
+                            - env:
+                                - name: JOB_TYPE
+                                  value: commit_weather_grid_backfill
+                                - name: WORKFLOW_NAME
+                                  value: $${workflow_name}
+                    result: commit_op
 
-        - check_run_limit:
-            switch:
-              - condition: $${run_count >= max_batches_per_run}
-                next: check_all_done
+                - wait_for_commit_op:
+                    call: wait_for_operation
+                    args:
+                      operation_name: $${commit_op.name}
+                    result: commit_op_done
 
-        - increment_run_count:
-            assign:
-              - run_count: $${run_count + 1}
+                - wait_for_commit:
+                    call: await_job
+                    args:
+                      execution_name: $${commit_op_done.response.name}
 
-        - maybe_sleep:
-            switch:
-              - condition: $${run_count > 1}
-                steps:
-                  - pace:
-                      call: sys.sleep
+                # Delete the checkpoint on success so tomorrow's scheduled run starts
+                # fresh.  Silently ignore errors (e.g. 404 if the checkpoint was never
+                # written because all batches were already skipped).
+                - delete_checkpoint:
+                    try:
+                      call: googleapis.storage.v1.objects.delete
                       args:
-                        seconds: $${sleep_seconds}
-
-        - log_batch_start:
-            call: sys.log
-            args:
-              data: $${"Starting weather extraction for batch " + string(i+1) + "/" + string(len(batches)) + " (sample_file_index=" + string(batch.sample_file_index) + ")"}
-
-        - run_batch:
-            call: googleapis.run.v2.projects.locations.jobs.run
-            args:
-              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-              body:
-                overrides:
-                  containerOverrides:
-                    - env:
-                        - name: JOB_TYPE
-                          value: extract_and_load
-                        - name: DATA_SOURCE
-                          value: $${data_source}
-                        - name: SAMPLE_FILE_INDEX
-                          value: $${string(batch.sample_file_index)}
-                        - name: START_DATE
-                          value: $${batch.start_date}
-                        - name: END_DATE
-                          value: $${batch.end_date}
-                        - name: DRY_RUN
-                          value: $${dry_run}
-                        - name: WORKFLOW_NAME
-                          value: $${workflow_name}
-            result: batch_op
-
-        - wait_for_batch_op:
-            call: wait_for_operation
-            args:
-              operation_name: $${batch_op.name}
-            result: batch_op_done
-
-        - wait_for_batch:
-            call: await_job
-            args:
-              execution_name: $${batch_op_done.response.name}
-
-        - mark_done:
-            assign:
-              - completed[string(i)]: true
-
-        - write_checkpoint:
-            call: http.post
-            args:
-              url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
-              auth:
-                type: OAuth2
-              headers:
-                Content-Type: application/json
-              body: $${json.encode_to_string(completed)}
-
-        - next_batch:
-            assign:
-              - i: $${i + 1}
-            next: dispatch_loop
-
-        - check_all_done:
-            switch:
-              - condition: $${len(keys(completed)) == len(batches)}
-                next: commit
-              - condition: true
-                return: $${"Partially completed (" + string(len(keys(completed))) + "/" + string(len(batches)) + ")"}
-
-        - commit:
-            call: googleapis.run.v2.projects.locations.jobs.run
-            args:
-              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-              body:
-                overrides:
-                  containerOverrides:
-                    - env:
-                        - name: JOB_TYPE
-                          value: commit_weather_grid_backfill
-                        - name: WORKFLOW_NAME
-                          value: $${workflow_name}
-            result: commit_op
-
-        - wait_for_commit_op:
-            call: wait_for_operation
-            args:
-              operation_name: $${commit_op.name}
-            result: commit_op_done
-
-        - wait_for_commit:
-            call: await_job
-            args:
-              execution_name: $${commit_op_done.response.name}
-
-        # Delete the checkpoint on success so tomorrow's scheduled run starts
-        # fresh.  Silently ignore errors (e.g. 404 if the checkpoint was never
-        # written because all batches were already skipped).
-        - delete_checkpoint:
-            try:
-              call: googleapis.storage.v1.objects.delete
-              args:
-                bucket: $${bucket}
-                object: $${text.url_encode(checkpoint_object)}
+                        bucket: $${bucket}
+                        object: $${text.url_encode(checkpoint_object)}
+                    except:
+                      as: delete_err
+                      steps:
+                        - ignore_delete_error:
+                            assign:
+                              - _: null
             except:
-              as: delete_err
+              as: workflow_err
               steps:
-                - ignore_delete_error:
-                    assign:
-                      - _: null
+                - log_workflow_error:
+                    call: sys.log
+                    args:
+                      data: '$${"Workflow encountered an error - proceeding to log consolidation. Error: " + string(workflow_err)}'
+                      severity: "ERROR"
+
 
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -289,6 +309,20 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
 
         - done:
             return: "completed"
+
+    retry_predicate:
+      params: [e]
+      steps:
+        - check_retriable:
+            switch:
+              # Retry on 429 (Too Many Requests), 500, 503, or our own failure message
+              - condition: $${e.code == 429 or e.code == 500 or e.code == 503}
+                return: true
+              - condition: $${text.match_regex(default(e.message, ""), "Job execution failed")}
+                return: true
+              - condition: true
+                return: false
+
 
     wait_for_operation:
       params: [operation_name]

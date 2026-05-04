@@ -15,19 +15,19 @@ variable "cloud_run_job_name" {
 
 variable "staging_bucket_name" {
   type        = string
-  description = "Name of the GCS staging bucket; the workflow reads the manifest from gs://<bucket>/resources/todays_manifest.json"
+  description = "Name of the GCS staging bucket; the workflow reads the manifest from gs://<bucket>/resources/manifests/todays_manifest.json"
 }
 
 variable "manifest_object_path" {
   type        = string
   description = "GCS object path (inside the staging bucket) where plan_grid_point_backfill writes the manifest"
-  default     = "resources/todays_manifest.json"
+  default     = "resources/manifests/todays_manifest.json"
 }
 
 variable "checkpoint_object_path" {
   type        = string
   description = "GCS object path (inside the staging bucket) where the workflow persists its per-run resume checkpoint"
-  default     = "resources/weather_grid_backfill_checkpoint.json"
+  default     = "resources/manifests/weather_grid_backfill_checkpoint.json"
 }
 
 variable "sleep_seconds_between_batches" {

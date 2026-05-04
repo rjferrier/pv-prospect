@@ -66,7 +66,15 @@ class GcsFileSystem:
         pass  # GCS has a flat namespace
 
     def rmdir(self, path: str) -> None:
-        pass  # GCS has a flat namespace
+        """Delete a directory marker blob if it exists.
+
+        Note: GCS is flat, but some tools create zero-byte blobs ending in '/'
+        to represent folders.
+        """
+        full_path = self._blob_path(path).rstrip('/') + '/'
+        blob = self._bucket.blob(full_path)
+        if blob.exists():
+            blob.delete()
 
     def list_files(
         self, prefix: str, pattern: str = '*', recursive: bool = False

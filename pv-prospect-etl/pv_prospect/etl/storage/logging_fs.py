@@ -121,3 +121,11 @@ def consolidate_logs(
         log_fs.delete(entry.path)
 
     log_fs.rmdir(prefix)
+    # Also try to remove the date directory if it is now empty
+    parent = '/'.join(prefix.split('/')[:-1])
+    if parent:
+        try:
+            log_fs.rmdir(parent)
+        except Exception:  # nosec B110
+            # Ignore if parent is not empty (e.g. other workflows ran today)
+            pass

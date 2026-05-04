@@ -46,90 +46,111 @@ resource "google_workflows_workflow" "data_transformation" {
                 assign:
                   - locations: $${raw_locations}
 
-        - run_plan:
-            call: googleapis.run.v2.projects.locations.jobs.run
-            args:
-              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-              body:
-                overrides:
-                  containerOverrides:
-                    - env:
-                        - name: JOB_TYPE
-                          value: $${plan_job_type}
-                        - name: WORKFLOW_NAME
-                          value: $${workflow_name}
-                        - name: START_DATE
-                          value: $${date}
-                        - name: DATE
-                          value: $${date}
-                        - name: PV_SYSTEM_IDS
-                          value: $${json.encode_to_string(pv_system_ids)}
-                        - name: LOCATIONS
-                          value: $${json.encode_to_string(locations)}
-                        - name: SPLIT_BY
-                          value: $${split_by}
-            result: plan_op
-
-        - wait_plan_op:
-            call: wait_for_operation
-            args:
-              operation_name: $${plan_op.name}
-            result: plan_op_done
-
-        - wait_plan:
-            call: await_job
-            args:
-              execution_name: $${plan_op_done.response.name}
-
-        - fetch_manifest:
-            call: googleapis.storage.v1.objects.get
-            args:
-              bucket: $${bucket}
-              object: $${text.url_encode("manifests/" + workflow_name + "_" + date + ".json")}
-              alt: media
-            result: manifest_raw
-
-        - decode_manifest:
-            assign:
-              - manifest: $${json.decode(manifest_raw)}
-              - phases: $${manifest.phases}
-
-        - execute_phases:
-            for:
-              value: phase_tasks
-              in: $${phases}
+        - run_pipeline:
+            try:
               steps:
-                - check_phase_empty:
-                    switch:
-                      - condition: $${len(phase_tasks) == 0}
-                        next: continue_phase
-                - dispatch_tasks:
-                    parallel:
-                      for:
-                        value: task_env
-                        in: $${phase_tasks}
-                        steps:
-                          - run_task:
-                              call: googleapis.run.v2.projects.locations.jobs.run
-                              args:
-                                name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                                body:
-                                  overrides:
-                                    containerOverrides:
-                                      - env: $${task_env}
-                              result: task_op
-                          - wait_task_op:
-                              call: wait_for_operation
-                              args:
-                                operation_name: $${task_op.name}
-                              result: task_op_done
-                          - wait_task:
-                              call: await_job
-                              args:
-                                execution_name: $${task_op_done.response.name}
-                - continue_phase:
+                - run_plan:
+                    call: googleapis.run.v2.projects.locations.jobs.run
+                    args:
+                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                      body:
+                        overrides:
+                          containerOverrides:
+                            - env:
+                                - name: JOB_TYPE
+                                  value: $${plan_job_type}
+                                - name: WORKFLOW_NAME
+                                  value: $${workflow_name}
+                                - name: START_DATE
+                                  value: $${date}
+                                - name: DATE
+                                  value: $${date}
+                                - name: PV_SYSTEM_IDS
+                                  value: $${json.encode_to_string(pv_system_ids)}
+                                - name: LOCATIONS
+                                  value: $${json.encode_to_string(locations)}
+                                - name: SPLIT_BY
+                                  value: $${split_by}
+                    result: plan_op
+
+                - wait_plan_op:
+                    call: wait_for_operation
+                    args:
+                      operation_name: $${plan_op.name}
+                    result: plan_op_done
+
+                - wait_plan:
+                    call: await_job
+                    args:
+                      execution_name: $${plan_op_done.response.name}
+
+                - fetch_manifest:
+                    call: googleapis.storage.v1.objects.get
+                    args:
+                      bucket: $${bucket}
+                      object: $${text.url_encode("resources/manifests/" + workflow_name + "_" + date + ".json")}
+                      alt: media
+                    result: manifest_raw
+
+                - decode_manifest:
                     assign:
-                      - _dummy: true
+                      - manifest: $${json.decode(manifest_raw)}
+                      - phases: $${manifest.phases}
+
+                - execute_phases:
+                    for:
+                      value: phase_tasks
+                      in: $${phases}
+                      steps:
+                        - check_phase_empty:
+                            switch:
+                              - condition: $${len(phase_tasks) == 0}
+                                next: continue_phase
+                        - dispatch_tasks:
+                            parallel:
+                              for:
+                                value: task_env
+                                in: $${phase_tasks}
+                                steps:
+                                  - run_task:
+                                      try:
+                                        steps:
+                                          - start_job:
+                                              call: googleapis.run.v2.projects.locations.jobs.run
+                                              args:
+                                                name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                                                body:
+                                                  overrides:
+                                                    containerOverrides:
+                                                      - env: $${task_env}
+                                              result: task_op
+                                          - wait_task_op:
+                                              call: wait_for_operation
+                                              args:
+                                                operation_name: $${task_op.name}
+                                              result: task_op_done
+                                          - wait_task:
+                                              call: await_job
+                                              args:
+                                                execution_name: $${task_op_done.response.name}
+                                      retry:
+                                        predicate: $${retry_predicate}
+                                        max_retries: 3
+                                        backoff:
+                                          initial_delay: 60
+                                          max_delay: 600
+                                          multiplier: 2
+                        - continue_phase:
+                            assign:
+                              - _dummy: true
+            except:
+              as: workflow_err
+              steps:
+                - log_workflow_error:
+                    call: sys.log
+                    args:
+                      data: '$${"Workflow encountered an error - proceeding to log consolidation. Error: " + string(workflow_err)}'
+                      severity: "ERROR"
 
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run
@@ -158,6 +179,20 @@ resource "google_workflows_workflow" "data_transformation" {
 
         - done:
             return: "completed"
+
+    retry_predicate:
+      params: [e]
+      steps:
+        - check_retriable:
+            switch:
+              # Retry on 429 (Too Many Requests), 500, 503, or our own failure message
+              - condition: $${e.code == 429 or e.code == 500 or e.code == 503}
+                return: true
+              - condition: $${text.match_regex(default(e.message, ""), "Job execution failed")}
+                return: true
+              - condition: true
+                return: false
+
 
     wait_for_operation:
       params: [operation_name]

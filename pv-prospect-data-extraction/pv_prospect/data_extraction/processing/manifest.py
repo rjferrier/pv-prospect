@@ -126,7 +126,7 @@ def build_manifest(
     return manifest, updated_cursor
 
 
-CURSOR_PATH = 'backfill_cursor.json'
+CURSOR_PATH = 'manifests/backfill_cursor.json'
 
 
 def serialize_cursor(cursor: BackfillCursor) -> str:
@@ -160,7 +160,7 @@ def save_cursor(fs: FileSystem, cursor: BackfillCursor) -> None:
     fs.write_text(CURSOR_PATH, serialize_cursor(cursor))
 
 
-MANIFEST_PATH = 'todays_manifest.json'
+MANIFEST_PATH = 'manifests/todays_manifest.json'
 
 
 def _serialize_batch(batch: Batch) -> dict[str, str | int]:
