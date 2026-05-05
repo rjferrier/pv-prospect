@@ -78,7 +78,7 @@ they process a moving window across days:
 | Workflow | Cursor path | What it tracks |
 |---|---|---|
 | PV site backfill | `resources/manifests/pv_backfill_cursor.json` | Exclusive end date of next 28-day window |
-| Weather grid backfill | `resources/manifests/backfill_cursor.json` | Next end date and sample offset |
+| Weather grid backfill | `resources/manifests/weather_grid_backfill_cursor.json` | Next end date and sample offset |
 
 ### Weather Grid Backfill: Two-Run Split
 

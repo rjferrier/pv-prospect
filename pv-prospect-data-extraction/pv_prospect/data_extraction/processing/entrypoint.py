@@ -56,10 +56,6 @@ from pv_prospect.data_extraction import (
 )
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import core
-from pv_prospect.data_extraction.processing.manifest import (
-    commit_weather_grid_backfill,
-    plan_weather_grid_backfill,
-)
 from pv_prospect.data_extraction.processing.pv_backfill import (
     commit_pv_site_backfill,
     plan_pv_site_backfill,
@@ -70,6 +66,10 @@ from pv_prospect.data_extraction.processing.sample_file import (
     sample_file_path,
 )
 from pv_prospect.data_extraction.processing.value_objects import ResultType
+from pv_prospect.data_extraction.processing.weather_grid_backfill import (
+    commit_weather_grid_backfill,
+    plan_weather_grid_backfill,
+)
 from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
 from pv_prospect.data_sources import (
     DataSourceType,

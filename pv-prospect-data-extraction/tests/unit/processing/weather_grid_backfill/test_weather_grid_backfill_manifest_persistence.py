@@ -2,12 +2,12 @@
 
 from datetime import date, timedelta
 
-from pv_prospect.data_extraction.processing.manifest import (
-    CURSOR_PATH,
-    MANIFEST_PATH,
-    BackfillCursor,
+from pv_prospect.data_extraction.processing.weather_grid_backfill import (
+    WEATHER_GRID_BACKFILL_CURSOR_PATH,
+    WEATHER_GRID_BACKFILL_MANIFEST_PATH,
     Batch,
-    Manifest,
+    WeatherGridBackfillCursor,
+    WeatherGridManifest,
     commit_weather_grid_backfill,
     deserialize_manifest,
     load_cursor,
@@ -15,7 +15,7 @@ from pv_prospect.data_extraction.processing.manifest import (
     serialize_manifest,
 )
 
-_MANIFEST = Manifest(
+_MANIFEST = WeatherGridManifest(
     step2_batch=Batch(
         sample_file_index=17,
         start_date=date(2026, 3, 26),
@@ -35,7 +35,7 @@ _MANIFEST = Manifest(
     ],
 )
 
-_NEXT_CURSOR = BackfillCursor(
+_NEXT_CURSOR = WeatherGridBackfillCursor(
     next_end_date=date(2026, 2, 26),
     next_sample_offset=3,
 )
@@ -81,7 +81,7 @@ def test_plan_weather_grid_backfill_writes_manifest_file() -> None:
 
     plan_weather_grid_backfill(today, num_sample_files=32, fs=fs)
 
-    assert MANIFEST_PATH in fs.files
+    assert WEATHER_GRID_BACKFILL_MANIFEST_PATH in fs.files
 
 
 def test_plan_weather_grid_backfill_does_not_advance_live_cursor() -> None:
@@ -90,7 +90,7 @@ def test_plan_weather_grid_backfill_does_not_advance_live_cursor() -> None:
 
     plan_weather_grid_backfill(today, num_sample_files=32, fs=fs)
 
-    assert CURSOR_PATH not in fs.files
+    assert WEATHER_GRID_BACKFILL_CURSOR_PATH not in fs.files
 
 
 def test_plan_weather_grid_backfill_returns_manifest_consistent_with_file() -> None:
@@ -98,14 +98,16 @@ def test_plan_weather_grid_backfill_returns_manifest_consistent_with_file() -> N
     today = date(2026, 4, 9)
 
     returned = plan_weather_grid_backfill(today, num_sample_files=32, fs=fs)
-    persisted, _ = deserialize_manifest(fs.files[MANIFEST_PATH])
+    persisted, _ = deserialize_manifest(fs.files[WEATHER_GRID_BACKFILL_MANIFEST_PATH])
 
     assert returned == persisted
 
 
 def test_commit_weather_grid_backfill_promotes_next_cursor() -> None:
     fs = FakeFileSystem()
-    fs.files[MANIFEST_PATH] = serialize_manifest(_MANIFEST, _NEXT_CURSOR)
+    fs.files[WEATHER_GRID_BACKFILL_MANIFEST_PATH] = serialize_manifest(
+        _MANIFEST, _NEXT_CURSOR
+    )
 
     committed = commit_weather_grid_backfill(fs)
 
@@ -131,7 +133,7 @@ def test_plan_weather_grid_backfill_without_prior_cursor_uses_initial() -> None:
     today = date(2026, 4, 9)
 
     plan_weather_grid_backfill(today, num_sample_files=32, fs=fs)
-    _, next_cursor = deserialize_manifest(fs.files[MANIFEST_PATH])
+    _, next_cursor = deserialize_manifest(fs.files[WEATHER_GRID_BACKFILL_MANIFEST_PATH])
 
     # Initial cursor starts at (today - 14). After 8 more 14-day backward
     # steps the next_end_date should be (today - 14 - 8*14) = today - 126.

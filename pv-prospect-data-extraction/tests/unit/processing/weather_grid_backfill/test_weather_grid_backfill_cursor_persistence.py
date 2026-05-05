@@ -2,9 +2,9 @@
 
 from datetime import date
 
-from pv_prospect.data_extraction.processing.manifest import (
-    CURSOR_PATH,
-    BackfillCursor,
+from pv_prospect.data_extraction.processing.weather_grid_backfill import (
+    WEATHER_GRID_BACKFILL_CURSOR_PATH,
+    WeatherGridBackfillCursor,
     deserialize_cursor,
     load_cursor,
     save_cursor,
@@ -26,7 +26,7 @@ class FakeFileSystem:
         self._files[path] = content
 
 
-_CURSOR = BackfillCursor(
+_CURSOR = WeatherGridBackfillCursor(
     next_end_date=date(2025, 11, 20),
     next_sample_offset=9,
 )
@@ -58,7 +58,7 @@ def test_load_cursor_returns_initial_when_file_missing() -> None:
 
 def test_load_cursor_reads_existing_file() -> None:
     fs = FakeFileSystem()
-    fs._files[CURSOR_PATH] = serialize_cursor(_CURSOR)
+    fs._files[WEATHER_GRID_BACKFILL_CURSOR_PATH] = serialize_cursor(_CURSOR)
 
     cursor = load_cursor(fs, date(2026, 4, 3))
 
@@ -70,8 +70,8 @@ def test_save_cursor_writes_to_expected_path() -> None:
 
     save_cursor(fs, _CURSOR)
 
-    assert CURSOR_PATH in fs._files
-    assert deserialize_cursor(fs._files[CURSOR_PATH]) == _CURSOR
+    assert WEATHER_GRID_BACKFILL_CURSOR_PATH in fs._files
+    assert deserialize_cursor(fs._files[WEATHER_GRID_BACKFILL_CURSOR_PATH]) == _CURSOR
 
 
 def test_save_then_load_roundtrip() -> None:

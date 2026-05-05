@@ -9,7 +9,7 @@ Computes the work plan for a single day's API budget, consisting of:
   processing up to ``step3_batch_count`` further sample-file batches, each
   covering a 14-day window and marching backwards in time.
 
-A :class:`BackfillCursor` tracks Step 3 progress between runs.
+A :class:`WeatherGridBackfillCursor` tracks Step 3 progress between runs.
 """
 
 import json
@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from pv_prospect.etl.storage import FileSystem
 
 _EPOCH = date(1970, 1, 1)
-BACKFILL_WINDOW_DAYS = 14
+WEATHER_GRID_BACKFILL_WINDOW_DAYS = 14
 
 
 def _epoch_days(d: date) -> int:
@@ -40,7 +40,7 @@ class Batch:
 
 
 @dataclass(frozen=True)
-class Manifest:
+class WeatherGridManifest:
     """The complete daily work plan."""
 
     step2_batch: Batch
@@ -48,7 +48,7 @@ class Manifest:
 
 
 @dataclass(frozen=True)
-class BackfillCursor:
+class WeatherGridBackfillCursor:
     """Tracks where the historical backfill left off.
 
     ``next_end_date`` is the *exclusive* end of the next 14-day window to
@@ -61,20 +61,20 @@ class BackfillCursor:
     next_sample_offset: int
 
 
-def initial_cursor(today: date) -> BackfillCursor:
+def initial_weather_grid_backfill_cursor(today: date) -> WeatherGridBackfillCursor:
     """Return the cursor for a first-ever run (no prior backfill)."""
-    return BackfillCursor(
-        next_end_date=today - timedelta(days=BACKFILL_WINDOW_DAYS),
+    return WeatherGridBackfillCursor(
+        next_end_date=today - timedelta(days=WEATHER_GRID_BACKFILL_WINDOW_DAYS),
         next_sample_offset=1,
     )
 
 
-def build_manifest(
+def build_weather_grid_manifest(
     today: date,
     num_sample_files: int,
-    cursor: BackfillCursor,
+    cursor: WeatherGridBackfillCursor,
     step3_batch_count: int = 8,
-) -> tuple[Manifest, BackfillCursor]:
+) -> tuple[WeatherGridManifest, WeatherGridBackfillCursor]:
     """Build today's extraction manifest and return the updated cursor.
 
     Args:
@@ -91,7 +91,7 @@ def build_manifest(
     # Step 2: trailing 14 days for today's sample file
     step2_batch = Batch(
         sample_file_index=anchor,
-        start_date=today - timedelta(days=BACKFILL_WINDOW_DAYS),
+        start_date=today - timedelta(days=WEATHER_GRID_BACKFILL_WINDOW_DAYS),
         end_date=today,
     )
 
@@ -101,7 +101,7 @@ def build_manifest(
     sample_offset = cursor.next_sample_offset
 
     for _ in range(step3_batch_count):
-        start_date = end_date - timedelta(days=BACKFILL_WINDOW_DAYS)
+        start_date = end_date - timedelta(days=WEATHER_GRID_BACKFILL_WINDOW_DAYS)
         sample_index = (anchor - sample_offset) % num_sample_files
         step3_batches.append(
             Batch(
@@ -113,12 +113,12 @@ def build_manifest(
         end_date = start_date
         sample_offset += 1
 
-    updated_cursor = BackfillCursor(
+    updated_cursor = WeatherGridBackfillCursor(
         next_end_date=end_date,
         next_sample_offset=sample_offset,
     )
 
-    manifest = Manifest(
+    manifest = WeatherGridManifest(
         step2_batch=step2_batch,
         step3_batches=step3_batches,
     )
@@ -126,10 +126,10 @@ def build_manifest(
     return manifest, updated_cursor
 
 
-CURSOR_PATH = 'manifests/backfill_cursor.json'
+WEATHER_GRID_BACKFILL_CURSOR_PATH = 'manifests/weather_grid_backfill_cursor.json'
 
 
-def serialize_cursor(cursor: BackfillCursor) -> str:
+def serialize_cursor(cursor: WeatherGridBackfillCursor) -> str:
     """Serialize a cursor to a JSON string."""
     return json.dumps(
         {
@@ -139,28 +139,30 @@ def serialize_cursor(cursor: BackfillCursor) -> str:
     )
 
 
-def deserialize_cursor(text: str) -> BackfillCursor:
+def deserialize_cursor(text: str) -> WeatherGridBackfillCursor:
     """Deserialize a cursor from a JSON string."""
     data = json.loads(text)
-    return BackfillCursor(
+    return WeatherGridBackfillCursor(
         next_end_date=date.fromisoformat(data['next_end_date']),
         next_sample_offset=data['next_sample_offset'],
     )
 
 
-def load_cursor(fs: FileSystem, today: date) -> BackfillCursor:
+def load_cursor(fs: FileSystem, today: date) -> WeatherGridBackfillCursor:
     """Load the backfill cursor from storage, or create an initial one."""
-    if fs.exists(CURSOR_PATH):
-        return deserialize_cursor(fs.read_text(CURSOR_PATH))
-    return initial_cursor(today)
+    if fs.exists(WEATHER_GRID_BACKFILL_CURSOR_PATH):
+        return deserialize_cursor(fs.read_text(WEATHER_GRID_BACKFILL_CURSOR_PATH))
+    return initial_weather_grid_backfill_cursor(today)
 
 
-def save_cursor(fs: FileSystem, cursor: BackfillCursor) -> None:
+def save_cursor(fs: FileSystem, cursor: WeatherGridBackfillCursor) -> None:
     """Persist the backfill cursor to storage."""
-    fs.write_text(CURSOR_PATH, serialize_cursor(cursor))
+    fs.write_text(WEATHER_GRID_BACKFILL_CURSOR_PATH, serialize_cursor(cursor))
 
 
-MANIFEST_PATH = 'manifests/todays_manifest.json'
+WEATHER_GRID_BACKFILL_MANIFEST_PATH = (
+    'manifests/todays_weather_grid_backfill_manifest.json'
+)
 
 
 def _serialize_batch(batch: Batch) -> dict[str, str | int]:
@@ -179,7 +181,9 @@ def _deserialize_batch(data: dict[str, str | int]) -> Batch:
     )
 
 
-def serialize_manifest(manifest: Manifest, next_cursor: BackfillCursor) -> str:
+def serialize_manifest(
+    manifest: WeatherGridManifest, next_cursor: WeatherGridBackfillCursor
+) -> str:
     """Serialize a manifest (plus next cursor) to a JSON string.
 
     The JSON format is consumed by both the Cloud Workflow dispatcher and
@@ -198,14 +202,16 @@ def serialize_manifest(manifest: Manifest, next_cursor: BackfillCursor) -> str:
     )
 
 
-def deserialize_manifest(text: str) -> tuple[Manifest, BackfillCursor]:
+def deserialize_manifest(
+    text: str,
+) -> tuple[WeatherGridManifest, WeatherGridBackfillCursor]:
     """Deserialize a manifest (and its next cursor) from a JSON string."""
     data = json.loads(text)
-    manifest = Manifest(
+    manifest = WeatherGridManifest(
         step2_batch=_deserialize_batch(data['step2_batch']),
         step3_batches=[_deserialize_batch(b) for b in data['step3_batches']],
     )
-    next_cursor = BackfillCursor(
+    next_cursor = WeatherGridBackfillCursor(
         next_end_date=date.fromisoformat(data['next_cursor']['next_end_date']),
         next_sample_offset=int(data['next_cursor']['next_sample_offset']),
     )
@@ -217,28 +223,33 @@ def plan_weather_grid_backfill(
     num_sample_files: int,
     fs: FileSystem,
     step3_batch_count: int = 8,
-) -> Manifest:
+) -> WeatherGridManifest:
     """Compute today's manifest and persist it to storage.
 
     Reads the current cursor, builds the manifest, and writes both the
-    manifest and the *next* cursor to :data:`MANIFEST_PATH`. The live
-    cursor at :data:`CURSOR_PATH` is **not** advanced — that happens later
-    via :func:`commit_weather_grid_backfill`, after the batches have been
-    dispatched successfully.
+    manifest and the *next* cursor to
+    :data:`WEATHER_GRID_BACKFILL_MANIFEST_PATH`. The live cursor at
+    :data:`WEATHER_GRID_BACKFILL_CURSOR_PATH` is **not** advanced -- that
+    happens later via :func:`commit_weather_grid_backfill`, after the
+    batches have been dispatched successfully.
     """
     cursor = load_cursor(fs, today)
-    manifest, next_cursor = build_manifest(
+    manifest, next_cursor = build_weather_grid_manifest(
         today, num_sample_files, cursor, step3_batch_count=step3_batch_count
     )
-    fs.write_text(MANIFEST_PATH, serialize_manifest(manifest, next_cursor))
+    fs.write_text(
+        WEATHER_GRID_BACKFILL_MANIFEST_PATH, serialize_manifest(manifest, next_cursor)
+    )
     return manifest
 
 
-def commit_weather_grid_backfill(fs: FileSystem) -> BackfillCursor:
+def commit_weather_grid_backfill(fs: FileSystem) -> WeatherGridBackfillCursor:
     """Promote the manifest's next cursor to the live cursor.
 
     Called after all batches dispatched by the workflow have completed.
     """
-    _, next_cursor = deserialize_manifest(fs.read_text(MANIFEST_PATH))
+    _, next_cursor = deserialize_manifest(
+        fs.read_text(WEATHER_GRID_BACKFILL_MANIFEST_PATH)
+    )
     save_cursor(fs, next_cursor)
     return next_cursor
