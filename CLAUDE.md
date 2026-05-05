@@ -106,9 +106,27 @@ get_openmeteo_bounding_box_by_pv_system_id(pvo_sys_id)
 ```
 These are seeded from `pv_sites.csv` and `location_mapping.csv`. At runtime, these CSVs are read from the `resources_storage` config backend (GCS `staging/resources/` in production, local `resources/` directory for development). For local development, create a `resources/` directory with the required CSVs — this directory is gitignored.
 
-## Code Style
+## Code Style and Practices
 
+Code style:
 - Python 3.12, single quotes, 88-char line length (see `ruff.toml` at repo root).
 - All functions must be typed (`--disallow-untyped-defs`).
 - `__init__.py` files are excluded from mypy.
 - Ruff rules: `E4`, `E7`, `E9`, `F`, `I` (isort), `B` (bugbear), `C4` (comprehensions).
+
+Practices:
+- Changes should be documented if they are not self-explanatory from the code. This
+  includes explaining _why_ a change was done. Locate the place for adding documentation
+  thus:
+  - If the change (1) spans multiple sub-projects (packages/supporting libraries) and
+    (2) either (2.1) describes the system design or behaviour at a high level or (2.2)
+    has external implications (e.g. affects the contents of a bucket in cloud storage),
+    documentation should go in the top-level README.md.
+  - If the change (1) concerns just one sub-project and (2) either (2.1) describes the
+    system design or behaviour at a high level or (2.2) has external implications, then
+    document it in the README.md of the appropriate sub-project.
+  - Otherwise, if the change spans multiple sub-projects, document it in an appropriate
+    `.md` file in the top-level `doc/` directory. (Create the file if necessary.)
+  - Otherwise, if the change (1) concerns just one sub-project, document it in an
+    appropriate .md file in the `doc/` directory of the appropriate sub-project.
+    (Create the directory and file if necessary.)
