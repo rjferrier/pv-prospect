@@ -1,7 +1,7 @@
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from enum import Enum
 from typing import Any, Callable, Collection, Optional
 
@@ -24,6 +24,28 @@ GRID_STEP = 0.2
 CONSTANT_QUERY_PARAMS: dict[str, Any] = {
     # 'timezone': 'Europe/London',
 }
+
+
+def to_inclusive_datetime_bounds(
+    start_date: date, end_date_exclusive: Optional[date] = None
+) -> tuple[datetime, datetime]:
+    """Translate an exclusive-end date range to OpenMeteo's inclusive datetime bounds.
+
+    OpenMeteo's APIs treat their date/hour limit parameters as inclusive on both
+    ends. Callers in this codebase use exclusive-end :class:`DateRange`
+    semantics, so we must subtract one day from the exclusive end.
+
+    When *end_date_exclusive* is ``None`` the request covers just *start_date*.
+    """
+    inclusive_end_date = (
+        (end_date_exclusive - timedelta(days=1))
+        if end_date_exclusive is not None
+        else start_date
+    )
+    return (
+        datetime.combine(start_date, MIN_TIME),
+        datetime.combine(inclusive_end_date, MAX_TIME),
+    )
 
 
 @dataclass(frozen=True)
@@ -226,12 +248,14 @@ class OpenMeteoWeatherDataExtractor:
         date_: date,
         end_date: Optional[date] = None,
     ) -> list[TimeSeries]:
+        """Extract time series data for *sites* over ``[date_, end_date)``.
+
+        ``end_date`` is exclusive (matching :class:`DateRange` semantics).
+        When ``end_date`` is ``None`` the request covers only *date_*.
+        """
         sites_list = list(sites)
 
-        start_datetime = datetime.combine(date_, MIN_TIME)
-
-        # For multi-date extraction, use end_date if provided; otherwise use same day
-        end_datetime = datetime.combine(end_date if end_date else date_, MAX_TIME)
+        start_datetime, end_datetime = to_inclusive_datetime_bounds(date_, end_date)
 
         locations = [s.location for s in sites_list]
 
