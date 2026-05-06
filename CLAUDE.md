@@ -165,6 +165,21 @@ Python style:
   `C4` (comprehensions).
 
 Practices:
+- As a rule, non-trivial logic should exist in pure functions or methods, which means
+  unit tests can be written without the need to create patches. The existence of patches
+  is therefore considered a code smell which necessitates one of two things: (1) the
+  logic should be moved to a pure function, or the existing function be made pure, and
+  collaborating objects that would otherwise make the function impure should be passed
+  at an appropriately high (i.e. factory or orchestration) level. At that
+  level, unit tests may be omitted; integration or acceptance tests would be more
+  appropriate. (2) If the pure logic is actually trivial, e.g. there is no conditional
+  branching or other such constructs, it may be overkill to try and extract it and create
+  a unit test for it. The unit test in this case is not pulling its weight and may simply
+  be omitted. (Again, integration or acceptance tests should cover the functionality.)
+- When adding or modifying functionality, be sure to add and/or update the automated
+  tests, whether they are unit, integration, system or acceptance tests.
+  You may create a new unit test module when adding a new unit to be tested.
+  However, do not automatically create new modules for higher-level tests unless instructed.
 - Changes should be documented if they are not self-explanatory from the code.
   This includes explaining _why_ a change was done. Locate the place for adding
   documentation thus:
