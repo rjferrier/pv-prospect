@@ -19,6 +19,8 @@ def _make_config() -> DataVersionerConfig:
         instance_repo_branch='main',
         dvc_remote_name='feature',
         prepared_data_dir='data/prepared',
+        commit_author_name='test bot',
+        commit_author_email='test-bot@example.invalid',
     )
 
 
@@ -27,6 +29,7 @@ def _make_config() -> DataVersionerConfig:
 @patch('pv_prospect.data_versioner.core.git_commit_and_tag')
 @patch('pv_prospect.data_versioner.core.dvc_push')
 @patch('pv_prospect.data_versioner.core.dvc_add_files')
+@patch('pv_prospect.data_versioner.core.set_commit_identity')
 @patch('pv_prospect.data_versioner.core.clone_instance_repo')
 @patch('pv_prospect.data_versioner.core.setup_ssh')
 @patch('pv_prospect.data_versioner.core.verify_readiness')
@@ -34,6 +37,7 @@ def test_version_data_orchestrates_full_flow(
     mock_verify: MagicMock,
     mock_setup_ssh: MagicMock,
     mock_clone: MagicMock,
+    mock_set_identity: MagicMock,
     mock_dvc_add: MagicMock,
     mock_dvc_push: MagicMock,
     mock_git_commit: MagicMock,
@@ -62,6 +66,9 @@ def test_version_data_orchestrates_full_flow(
     mock_verify.assert_called_once_with(prepared_fs, batches_fs)
     mock_setup_ssh.assert_called_once()
     mock_clone.assert_called_once()
+    mock_set_identity.assert_called_once_with(
+        mock_repo, 'test bot', 'test-bot@example.invalid'
+    )
     mock_dvc_add.assert_called_once()
     mock_dvc_push.assert_called_once_with(
         mock_dvc_add.call_args[0][0],  # clone_dir

@@ -62,6 +62,18 @@ def clone_instance_repo(
     )
 
 
+def set_commit_identity(repo: git.Repo, name: str, email: str) -> None:
+    """Set ``user.name`` and ``user.email`` on the local repo config.
+
+    Required so that ``git commit`` and annotated ``git tag`` can record a
+    committer/tagger identity in non-interactive environments where no global
+    or system-wide identity is configured.
+    """
+    with repo.config_writer() as cw:
+        cw.set_value('user', 'name', name)
+        cw.set_value('user', 'email', email)
+
+
 def git_commit_and_tag(
     repo: git.Repo,
     dvc_file_paths: list[str],

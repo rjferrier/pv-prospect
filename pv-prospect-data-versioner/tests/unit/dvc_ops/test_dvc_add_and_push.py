@@ -17,8 +17,8 @@ def test_dvc_add_files_calls_add_per_file(mock_dvc_repo_cls: MagicMock) -> None:
 
     mock_dvc_repo_cls.assert_called_once_with(root_dir='/tmp/instance')
     assert mock_repo.add.call_count == 2
-    mock_repo.add.assert_any_call(targets='data/prepared/weather.csv')
-    mock_repo.add.assert_any_call(targets='data/prepared/pv/89665.csv')
+    mock_repo.add.assert_any_call(targets='/tmp/instance/data/prepared/weather.csv')
+    mock_repo.add.assert_any_call(targets='/tmp/instance/data/prepared/pv/89665.csv')
     assert result == [
         'data/prepared/weather.csv.dvc',
         'data/prepared/pv/89665.csv.dvc',
@@ -53,6 +53,9 @@ def test_dvc_push_calls_push_with_remote(mock_dvc_repo_cls: MagicMock) -> None:
 
     mock_dvc_repo_cls.assert_called_once_with(root_dir='/tmp/instance')
     mock_repo.push.assert_called_once_with(
-        targets=['data/prepared/weather.csv.dvc', 'data/prepared/pv/89665.csv.dvc'],
+        targets=[
+            '/tmp/instance/data/prepared/weather.csv.dvc',
+            '/tmp/instance/data/prepared/pv/89665.csv.dvc',
+        ],
         remote='feature',
     )

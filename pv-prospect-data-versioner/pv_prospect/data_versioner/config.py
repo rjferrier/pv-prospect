@@ -17,6 +17,8 @@ class DataVersionerConfig:
     instance_repo_branch: str
     dvc_remote_name: str
     prepared_data_dir: str
+    commit_author_name: str
+    commit_author_email: str
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DataVersionerConfig':
@@ -34,4 +36,10 @@ class DataVersionerConfig:
             instance_repo_branch=data.get('instance_repo_branch', 'main'),
             dvc_remote_name=data.get('dvc_remote_name', 'feature'),
             prepared_data_dir=data.get('prepared_data_dir', 'data/prepared'),
+            commit_author_name=data.get(
+                'commit_author_name', 'pv-prospect data-versioner'
+            ),
+            commit_author_email=data.get(
+                'commit_author_email', 'data-versioner@pv-prospect.invalid'
+            ),
         )

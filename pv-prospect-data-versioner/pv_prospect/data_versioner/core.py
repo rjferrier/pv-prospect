@@ -11,6 +11,7 @@ from pv_prospect.data_versioner.git_ops import (
     clone_instance_repo,
     git_commit_and_tag,
     git_push,
+    set_commit_identity,
     setup_ssh,
 )
 from pv_prospect.data_versioner.readiness import verify_readiness
@@ -51,6 +52,7 @@ def version_data(
             clone_dir,
             env,
         )
+        set_commit_identity(repo, config.commit_author_name, config.commit_author_email)
 
         _download_prepared_files(
             prepared_fs, clone_dir, config.prepared_data_dir, file_paths
