@@ -278,7 +278,7 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                 - log_workflow_error:
                     call: sys.log
                     args:
-                      data: '$${"Workflow encountered an error - proceeding to log consolidation. Error: " + string(workflow_err)}'
+                      data: '$${"Workflow encountered an error - proceeding to log consolidation. Error: " + json.encode_to_string(workflow_err)}'
                       severity: "ERROR"
 
 
@@ -313,10 +313,15 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
     retry_predicate:
       params: [e]
       steps:
+        # Use map.get + default so non-HTTP errors (e.g. TimeoutError, OSError)
+        # without a "code" field don't blow up the predicate with a KeyError.
+        - extract_error_code:
+            assign:
+              - error_code: $${default(map.get(e, "code"), 0)}
         - check_retriable:
             switch:
               # Retry on 429 (Too Many Requests), 500, 503, or our own failure message
-              - condition: $${e.code == 429 or e.code == 500 or e.code == 503}
+              - condition: $${error_code == 429 or error_code == 500 or error_code == 503}
                 return: true
               - condition: $${text.match_regex(default(e.message, ""), "Job execution failed")}
                 return: true
