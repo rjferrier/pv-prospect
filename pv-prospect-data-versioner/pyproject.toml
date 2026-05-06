@@ -30,6 +30,7 @@ pyyaml = "^6.0.3"
 ruff = { version = "^0.13" }
 mypy = { version = "^1.18" }
 pytest = "^9.0.1"
+types-pyyaml = "^6.0.12.20260408"
 
 [build-system]
 requires = ["poetry-core>=2.2.0,<3.0.0"]

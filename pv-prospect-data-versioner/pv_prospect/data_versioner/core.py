@@ -58,7 +58,9 @@ def version_data(
             prepared_fs, clone_dir, config.prepared_data_dir, file_paths
         )
 
-        dvc_file_paths = dvc_add_files(clone_dir, config.prepared_data_dir, file_paths)
+        dvc_file_paths = dvc_add_files(
+            clone_dir, config.prepared_data_dir, file_paths, config.dvc_remote_name
+        )
         dvc_push(clone_dir, config.dvc_remote_name, dvc_file_paths)
 
         git_commit_and_tag(repo, dvc_file_paths, tag, message)

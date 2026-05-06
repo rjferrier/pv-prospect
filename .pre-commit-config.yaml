@@ -32,6 +32,7 @@ repos:
           "--explicit-package-bases",
           "--namespace-packages"
         ]
+        additional_dependencies: ['types-PyYAML']
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4
