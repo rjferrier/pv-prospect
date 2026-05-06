@@ -1,8 +1,9 @@
 from functools import lru_cache
-from typing import Callable
 
+from pv_prospect.common import get_config
 from pv_prospect.common.domain import Period
 from pv_prospect.data_extraction import TimeSeriesDataExtractor
+from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.extractors import (
     OpenMeteoWeatherDataExtractor,
     PVOutputExtractor,
@@ -12,36 +13,66 @@ from pv_prospect.data_extraction.extractors.openmeteo import (
 )
 from pv_prospect.data_extraction.extractors.openmeteo import (
     APISelector,
-    Fields,
     Models,
     TimeResolution,
+    Variables,
 )
-from pv_prospect.data_extraction.extractors.openmeteo import Mode as OMMode
 from pv_prospect.data_extraction.extractors.pvoutput import (
     DEFAULT_SPLIT_PERIOD as _PVOUTPUT_DEFAULT_SPLIT_PERIOD,
 )
+from pv_prospect.data_extraction.resources import get_config_dir as get_de_config_dir
 from pv_prospect.data_sources import DataSource
+from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
+from pv_prospect.etl import get_config_dir as get_etl_config_dir
 
 
 @lru_cache(maxsize=None)
 def get_extractor(data_source: DataSource) -> TimeSeriesDataExtractor:
-    """Get an extractor instance for the given data source.
+    config = get_config(
+        DataExtractionConfig,
+        base_config_dirs=[
+            get_etl_config_dir(),
+            get_ds_config_dir(),
+            get_de_config_dir(),
+        ],
+    )
+    return _make_extractor(data_source, config.openmeteo.max_model_variables)
 
-    Results are cached to avoid recreating extractors for the same source.
 
-    Args:
-        data_source: The DataSource enum value
-
-    Returns:
-        An extractor instance
-    """
-    factory = _EXTRACTOR_FACTORIES[data_source]
-    return factory()
+def _make_extractor(
+    data_source: DataSource, max_model_variables: int
+) -> TimeSeriesDataExtractor:
+    if data_source == DataSource.PVOUTPUT:
+        return PVOutputExtractor.from_env()
+    if data_source == DataSource.OPENMETEO_QUARTERHOURLY:
+        return OpenMeteoWeatherDataExtractor.from_components(
+            api_selector=APISelector.FORECAST,
+            time_resolution=TimeResolution.QUARTERHOURLY,
+            variables=Variables.BEST_FIVE,
+            models=Models.BEST_TWO,
+            max_model_variables=max_model_variables,
+        )
+    if data_source == DataSource.OPENMETEO_HOURLY:
+        return OpenMeteoWeatherDataExtractor.from_components(
+            api_selector=APISelector.FORECAST,
+            time_resolution=TimeResolution.HOURLY,
+            variables=Variables.BEST_FIVE,
+            models=Models.BEST_TWO,
+            max_model_variables=max_model_variables,
+        )
+    if data_source == DataSource.OPENMETEO_HISTORICAL:
+        return OpenMeteoWeatherDataExtractor.from_components(
+            api_selector=APISelector.HISTORICAL,
+            time_resolution=TimeResolution.HOURLY,
+            variables=Variables.BEST_FIVE,
+            models=Models.BEST_TWO,
+            max_model_variables=max_model_variables,
+        )
+    raise ValueError(f'Unsupported data source: {data_source}')
 
 
 _MULTI_DATE_EXTRACTORS = {
     DataSource.OPENMETEO_HISTORICAL,
-    DataSource.OPENMETEO_SATELLITE,
 }
 
 
@@ -53,53 +84,9 @@ _DEFAULT_SPLIT_PERIODS: dict[DataSource, Period | None] = {
     DataSource.PVOUTPUT: _PVOUTPUT_DEFAULT_SPLIT_PERIOD,
     DataSource.OPENMETEO_QUARTERHOURLY: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
     DataSource.OPENMETEO_HOURLY: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
-    DataSource.OPENMETEO_SATELLITE: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
     DataSource.OPENMETEO_HISTORICAL: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
-    DataSource.OPENMETEO_V0_QUARTERHOURLY: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
-    DataSource.OPENMETEO_V0_HOURLY: _OPENMETEO_DEFAULT_SPLIT_PERIOD,
 }
 
 
 def default_split_period(data_source: DataSource) -> Period | None:
     return _DEFAULT_SPLIT_PERIODS[data_source]
-
-
-_EXTRACTOR_FACTORIES: dict[DataSource, Callable[[], TimeSeriesDataExtractor]] = {
-    DataSource.PVOUTPUT: lambda: PVOutputExtractor.from_env(),
-    DataSource.OPENMETEO_QUARTERHOURLY: lambda: (
-        OpenMeteoWeatherDataExtractor.from_components(
-            api_selector=APISelector.FORECAST,
-            time_resolution=TimeResolution.QUARTERHOURLY,
-            fields=Fields.FORECAST,
-            models=Models.ALL_FORECAST,
-        )
-    ),
-    DataSource.OPENMETEO_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_components(
-        api_selector=APISelector.FORECAST,
-        time_resolution=TimeResolution.HOURLY,
-        fields=Fields.FORECAST,
-        models=Models.ALL_FORECAST,
-    ),
-    DataSource.OPENMETEO_SATELLITE: lambda: (
-        OpenMeteoWeatherDataExtractor.from_components(
-            api_selector=APISelector.SATELLITE,
-            time_resolution=TimeResolution.HOURLY,
-            fields=Fields.SOLAR_RADIATION,
-            models=Models.ALL_SATELLITE,
-        )
-    ),
-    DataSource.OPENMETEO_HISTORICAL: lambda: (
-        OpenMeteoWeatherDataExtractor.from_components(
-            api_selector=APISelector.HISTORICAL,
-            time_resolution=TimeResolution.HOURLY,
-            fields=Fields.FORECAST,
-            models=Models.ALL_FORECAST,
-        )
-    ),
-    DataSource.OPENMETEO_V0_QUARTERHOURLY: lambda: (
-        OpenMeteoWeatherDataExtractor.from_mode(mode=OMMode.QUARTERHOURLY)
-    ),
-    DataSource.OPENMETEO_V0_HOURLY: lambda: OpenMeteoWeatherDataExtractor.from_mode(
-        mode=OMMode.HOURLY
-    ),
-}

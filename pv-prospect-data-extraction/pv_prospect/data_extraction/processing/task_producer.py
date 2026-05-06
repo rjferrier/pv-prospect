@@ -26,10 +26,7 @@ DATA_SOURCES = {
     'pv': DataSource.PVOUTPUT,
     'weather-om-15': DataSource.OPENMETEO_QUARTERHOURLY,
     'weather-om-60': DataSource.OPENMETEO_HOURLY,
-    'weather-om-satellite': DataSource.OPENMETEO_SATELLITE,
     'weather-om-historical': DataSource.OPENMETEO_HISTORICAL,
-    'weather-om-15-v0': DataSource.OPENMETEO_V0_QUARTERHOURLY,
-    'weather-om-60-v0': DataSource.OPENMETEO_V0_HOURLY,
 }
 
 

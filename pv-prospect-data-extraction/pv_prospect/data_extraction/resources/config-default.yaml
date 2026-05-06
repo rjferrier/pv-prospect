@@ -2,3 +2,6 @@ task_queue:
   task_spacing: 0.1
   task_jitter: 0.05
   join_timeout: 30
+
+openmeteo:
+  max_model_variables: 10  # See https://open-meteo.com/en/pricing for more context

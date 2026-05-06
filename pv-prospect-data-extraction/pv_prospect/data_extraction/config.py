@@ -25,6 +25,17 @@ class TaskQueueConfig:
 
 
 @dataclass
+class OpenMeteoConfig:
+    """Configuration for the OpenMeteo extractor."""
+
+    max_model_variables: int
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'OpenMeteoConfig':
+        return cls(max_model_variables=data['max_model_variables'])
+
+
+@dataclass
 class DataExtractionConfig:
     """Configuration for ETL processing behavior."""
 
@@ -32,6 +43,7 @@ class DataExtractionConfig:
     staged_raw_data_storage: AnyStorageConfig
     task_queue: TaskQueueConfig
     data_sources: DataSourcesConfig
+    openmeteo: OpenMeteoConfig
     log_storage: AnyStorageConfig | None = None
 
     @classmethod
@@ -45,5 +57,6 @@ class DataExtractionConfig:
                 data['staged_raw_data_storage']
             ),
             data_sources=DataSourcesConfig.from_dict(data),
+            openmeteo=OpenMeteoConfig.from_dict(data['openmeteo']),
             log_storage=parse_storage_config(log_data) if log_data else None,
         )

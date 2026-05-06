@@ -61,11 +61,6 @@ class APISelector(Enum):
         time_limit_suffix_supplier=lambda time_res: 'date',
         time_stringifier=lambda dt: dt.strftime('%Y-%m-%d'),
     )
-    SATELLITE = APISelectorData(
-        base_url='https://satellite-api.open-meteo.com/v1/archive',
-        time_limit_suffix_supplier=lambda time_res: 'date',
-        time_stringifier=lambda dt: dt.strftime('%Y-%m-%d'),
-    )
 
     @property
     def base_url(self) -> str:
@@ -90,8 +85,15 @@ class APISelector(Enum):
         return self.value.other_parameters if self.value.other_parameters else {}
 
 
-class Fields(Enum):
-    FORECAST = (
+class Variables(Enum):
+    BEST_FIVE = (
+        'temperature_2m',
+        'relative_humidity_2m',
+        'cloud_cover',
+        'direct_normal_irradiance',
+        'diffuse_radiation',
+    )
+    BEST_TEN = (
         'temperature_2m',
         'relative_humidity_2m',
         'pressure_msl',
@@ -103,32 +105,10 @@ class Fields(Enum):
         'visibility',
         'weather_code',
     )
-    SOLAR_RADIATION = (
-        'direct_normal_irradiance',
-        'diffuse_radiation',
-    )
-    FORECAST_DEPRECATED = (
-        'temperature_2m',
-        'visibility',
-        'cloud_cover',
-        'cloud_cover_low',
-        'cloud_cover_mid',
-        'cloud_cover_high',
-        'direct_radiation',
-        'direct_normal_irradiance',
-        'diffuse_radiation',
-        'diffuse_radiation_instant',
-        'direct_normal_irradiance_instant',
-        'direct_radiation_instant',
-    )
-    SOLAR_RADIATION_DEPRECATED = (
-        'direct_radiation',
-        'direct_normal_irradiance',
-        'diffuse_radiation',
-        'diffuse_radiation_instant',
-        'direct_normal_irradiance_instant',
-        'direct_radiation_instant',
-    )
+
+    @property
+    def count(self) -> int:
+        return len(self.value)
 
     def comma_separated(self) -> str:
         return ','.join(self.value)
@@ -136,25 +116,11 @@ class Fields(Enum):
 
 class Models(Enum):
     BEST = ('best_match',)
-    BEST_SUBSET = (
+    BEST_TWO = (
         'best_match',
         'ukmo_seamless',
     )
-    ALL_FORECAST = (
-        'best_match',
-        'dmi_seamless',
-        'gem_seamless',
-        'gfs_seamless',
-        'icon_seamless',
-        'jma_seamless',
-        'kma_seamless',
-        'knmi_seamless',
-        'meteofrance_seamless',
-        'meteoswiss_icon_seamless',
-        'metno_seamless',
-        'ukmo_seamless',
-    )
-    ALL_SATELLITE = (
+    ALL = (
         'best_match',
         'dmi_seamless',
         'gem_seamless',
@@ -167,9 +133,11 @@ class Models(Enum):
         'meteoswiss_icon_seamless',
         'metno_seamless',
         'ukmo_seamless',
-        'era5_seamless',
-        'satellite_radiation_seamless',
     )
+
+    @property
+    def count(self) -> int:
+        return len(self.value)
 
     def comma_separated(self) -> str:
         return ','.join(self.value)
@@ -179,7 +147,7 @@ class Models(Enum):
 class APIHelper:
     api_selector: APISelector
     time_resolution: TimeResolution
-    fields: Fields
+    variables: Variables
     models: Models
 
     def get_url(self) -> str:
@@ -196,7 +164,7 @@ class APIHelper:
             **self.api_selector.get_time_limit_params(
                 self.time_resolution, start_datetime, end_datetime
             ),
-            **self._get_fields_param(),
+            **self._get_variables_param(),
             **self._get_models_param(),
             **self.api_selector.other_params,
             **CONSTANT_QUERY_PARAMS,
@@ -209,8 +177,8 @@ class APIHelper:
             'longitude': ','.join(f'{loc.longitude:.4f}' for loc in locations),
         }
 
-    def _get_fields_param(self) -> dict[str, str]:
-        return {self.time_resolution.om_descriptor: self.fields.comma_separated()}
+    def _get_variables_param(self) -> dict[str, str]:
+        return {self.time_resolution.om_descriptor: self.variables.comma_separated()}
 
     def _get_models_param(self) -> dict[str, str]:
         return {'models': self.models.comma_separated()}
@@ -222,30 +190,9 @@ class Mode(Enum):
     HOURLY = 'hourly'
 
 
-API_HELPERS_BY_MODE = {
-    Mode.QUARTERHOURLY: APIHelper(
-        api_selector=APISelector.FORECAST,
-        time_resolution=TimeResolution['QUARTERHOURLY'],
-        models=Models.BEST,
-        fields=Fields.FORECAST_DEPRECATED,
-    ),
-    Mode.HOURLY: APIHelper(
-        api_selector=APISelector.SATELLITE,
-        time_resolution=TimeResolution['HOURLY'],
-        models=Models.ALL_SATELLITE,
-        fields=Fields.SOLAR_RADIATION_DEPRECATED,
-    ),
-}
-
-
 class OpenMeteoWeatherDataExtractor:
     def __init__(self, api_helper: APIHelper) -> None:
         self.api_helper = api_helper
-
-    @classmethod
-    def from_mode(cls, mode: Mode) -> 'OpenMeteoWeatherDataExtractor':
-        api_helper = API_HELPERS_BY_MODE[mode]
-        return cls(api_helper=api_helper)
 
     @classmethod
     def from_components(
@@ -253,14 +200,22 @@ class OpenMeteoWeatherDataExtractor:
         api_selector: APISelector,
         time_resolution: TimeResolution,
         models: Models,
-        fields: Fields,
+        variables: Variables,
+        max_model_variables: int,
     ) -> 'OpenMeteoWeatherDataExtractor':
+        n = models.count * variables.count
+        if n > max_model_variables:
+            raise ValueError(
+                f'{models.name} ({models.count} models) × {variables.name} '
+                f'({variables.count} variables) = {n} model-variables, '
+                f'exceeds the configured limit of {max_model_variables}.'
+            )
         return cls(
             api_helper=APIHelper(
                 api_selector=api_selector,
                 time_resolution=time_resolution,
                 models=models,
-                fields=fields,
+                variables=variables,
             ),
         )
 
