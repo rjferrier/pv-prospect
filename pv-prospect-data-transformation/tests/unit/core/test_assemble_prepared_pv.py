@@ -8,19 +8,17 @@ from pv_prospect.data_transformation.core import PV_COLUMNS, assemble_prepared_p
 from tests.unit.helpers.fake_file_system import FakeFileSystem
 
 
-def _headerless_csv(rows: list[list[object]]) -> str:
-    return '\n'.join(','.join(str(v) for v in row) for row in rows) + '\n'
+def _batch_csv(rows: list[list[object]]) -> str:
+    header = 'time,temperature,plane_of_array_irradiance,power'
+    data = '\n'.join(','.join(str(v) for v in row) for row in rows)
+    return header + '\n' + data + '\n'
 
 
 def test_merges_batches_into_per_system_master() -> None:
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _headerless_csv(
-                [['2026-01-15', 8.5, 300.0, 1500.0]]
-            ),
-            'pv/89665_20260116.csv': _headerless_csv(
-                [['2026-01-16', 9.0, 310.0, 1600.0]]
-            ),
+            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]]),
+            'pv/89665_20260116.csv': _batch_csv([['2026-01-16', 9.0, 310.0, 1600.0]]),
         }
     )
     prepared_fs = FakeFileSystem()
@@ -49,9 +47,7 @@ def test_deduplicates_on_time() -> None:
     )
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _headerless_csv(
-                [['2026-01-15', 8.5, 300.0, 1500.0]]
-            ),
+            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]]),
         }
     )
 
@@ -65,12 +61,8 @@ def test_deduplicates_on_time() -> None:
 def test_deletes_only_matching_system_batches() -> None:
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _headerless_csv(
-                [['2026-01-15', 8.5, 300.0, 1500.0]]
-            ),
-            'pv/12345_20260115.csv': _headerless_csv(
-                [['2026-01-15', 9.0, 310.0, 1600.0]]
-            ),
+            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]]),
+            'pv/12345_20260115.csv': _batch_csv([['2026-01-15', 9.0, 310.0, 1600.0]]),
         }
     )
     prepared_fs = FakeFileSystem()

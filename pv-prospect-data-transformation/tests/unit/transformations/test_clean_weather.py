@@ -109,3 +109,22 @@ def test_always_includes_time_column(raw_weather_df):
     result = clean_weather(raw_weather_df, weather_model='best_match')
 
     assert result.columns[0] == 'time'
+
+
+def test_strips_altitude_suffix_from_openmeteo_column_names():
+    """temperature_2m_best_match should produce a column named 'temperature'."""
+    df = pd.DataFrame(
+        {
+            'time': pd.to_datetime(['2026-05-05 00:00:00']),
+            'temperature_2m_best_match': [10.2],
+            'wind_speed_180m_best_match': [20.6],
+            'direct_normal_irradiance_best_match': [0.0],
+            'diffuse_radiation_best_match': [0.0],
+        }
+    )
+    result = clean_weather(df, weather_model='best_match')
+
+    assert 'temperature' in result.columns
+    assert 'temperature_2m' not in result.columns
+    assert 'wind_speed' in result.columns
+    assert 'wind_speed_180m' not in result.columns

@@ -187,7 +187,7 @@ def run_prepare_weather(
     site: AnySite,
     date_range: DateRange,
 ) -> None:
-    """Prepare cleaned weather CSVs for a date range into headerless batches."""
+    """Prepare cleaned weather CSVs for a date range into batch files."""
     for day_range in date_range.split_by(Period.DAY):
         date_str = day_range.start.strftime('%Y%m%d')
         path = build_time_series_csv_file_path(
@@ -210,7 +210,6 @@ def run_prepare_weather(
                 site.location.to_coordinate_string(filename_friendly=True),
                 date_str,
             ),
-            header=False,
         )
 
 
@@ -223,7 +222,7 @@ def run_prepare_pv(
     date_range: DateRange,
     get_pv_site: Callable[[int], PVSite],
 ) -> None:
-    """Join cleaned PV and weather data for a date range into headerless batches."""
+    """Join cleaned PV and weather data for a date range into batch files."""
     pv_site_full = get_pv_site(pv_site.pvo_sys_id)
 
     for day_range in date_range.split_by(Period.DAY):
@@ -261,7 +260,6 @@ def run_prepare_pv(
             batches_fs,
             prepared_df,
             _pv_batch_path(pv_site.pvo_sys_id, date_str),
-            header=False,
         )
 
 
@@ -290,7 +288,12 @@ def assemble_prepared_weather(
 
     for entry in batch_files:
         content = batches_fs.read_text(entry.path)
-        df = pd.read_csv(io.StringIO(content), names=WEATHER_COLUMNS, header=None)
+        df = pd.read_csv(io.StringIO(content))
+        if list(df.columns) != WEATHER_COLUMNS:
+            raise ValueError(
+                f'Batch {entry.path} has columns {list(df.columns)!r},'
+                f' expected {WEATHER_COLUMNS!r}'
+            )
         frames.append(df)
 
     combined = pd.concat(frames, ignore_index=True)
@@ -329,7 +332,12 @@ def assemble_prepared_pv(
 
     for entry in batch_files:
         content = batches_fs.read_text(entry.path)
-        df = pd.read_csv(io.StringIO(content), names=PV_COLUMNS, header=None)
+        df = pd.read_csv(io.StringIO(content))
+        if list(df.columns) != PV_COLUMNS:
+            raise ValueError(
+                f'Batch {entry.path} has columns {list(df.columns)!r},'
+                f' expected {PV_COLUMNS!r}'
+            )
         frames.append(df)
 
     combined = pd.concat(frames, ignore_index=True)

@@ -86,7 +86,7 @@ def test_writes_batch_at_expected_path(
     assert batches_fs.exists(expected_path)
 
 
-def test_batch_has_no_header(
+def test_batch_has_header(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
     grid_point: ArbitrarySite,
@@ -100,10 +100,11 @@ def test_batch_has_no_header(
     )
 
     content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
-    lines = content.strip().split('\n')
-    first_field = lines[0].split(',')[0]
-    # First field should be a number (latitude), not a column name
-    float(first_field)  # would raise if it were a header
+    header = content.strip().split('\n')[0]
+    assert (
+        header
+        == 'latitude,longitude,elevation,time,temperature,direct_normal_irradiance,diffuse_radiation'
+    )
 
 
 def test_batch_includes_metadata_values(
@@ -120,7 +121,8 @@ def test_batch_includes_metadata_values(
     )
 
     content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
-    fields = content.strip().split('\n')[0].split(',')
+    # Row 0 is the header; row 1 is the first data row
+    fields = content.strip().split('\n')[1].split(',')
     assert float(fields[0]) == pytest.approx(_METADATA['latitude'])
     assert float(fields[1]) == pytest.approx(_METADATA['longitude'])
     assert float(fields[2]) == pytest.approx(_METADATA['elevation'])
@@ -141,5 +143,6 @@ def test_batch_has_correct_number_of_fields(
 
     content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
     lines = content.strip().split('\n')
-    # latitude, longitude, elevation, time, temperature, direct_normal_irradiance, diffuse_radiation
-    assert len(lines[0].split(',')) == 7
+    # header + data rows each have: latitude, longitude, elevation, time,
+    # temperature, direct_normal_irradiance, diffuse_radiation
+    assert all(len(line.split(',')) == 7 for line in lines)

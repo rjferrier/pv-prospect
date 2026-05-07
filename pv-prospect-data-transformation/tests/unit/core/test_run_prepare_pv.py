@@ -115,7 +115,7 @@ def test_writes_batch_at_expected_path(
     assert batches_fs.exists(expected_path)
 
 
-def test_batch_has_no_header(
+def test_batch_has_header(
     cleaned_fs: FakeFileSystem,
     batches_fs: FakeFileSystem,
     pv_site: PVSite,
@@ -131,10 +131,8 @@ def test_batch_has_no_header(
     )
 
     content = batches_fs.read_text(f'pv/{_SYSTEM_ID}_{_DATE_STR}.csv')
-    lines = content.strip().split('\n')
-    first_field = lines[0].split(',')[0]
-    # First field should be a timestamp, not a column name like 'time'
-    assert first_field != 'time'
+    header = content.strip().split('\n')[0]
+    assert header == 'time,temperature,plane_of_array_irradiance,power'
 
 
 def test_skips_when_cleaned_pv_missing(

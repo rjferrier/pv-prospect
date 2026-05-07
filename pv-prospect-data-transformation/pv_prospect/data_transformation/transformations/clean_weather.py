@@ -1,3 +1,5 @@
+import re
+
 import pandas as pd
 
 from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
@@ -8,6 +10,13 @@ DEFAULT_EXCLUDED_COLUMNS = {
     'wind_direction_80m',
     'wind_direction_180m',
 }
+
+_ALTITUDE_SUFFIX_RE = re.compile(r'_\d+m$')
+
+
+def strip_altitude_suffix(name: str) -> str:
+    """Remove a trailing OpenMeteo altitude qualifier (e.g. '_2m', '_180m')."""
+    return _ALTITUDE_SUFFIX_RE.sub('', name)
 
 
 def clean_weather(
@@ -25,7 +34,7 @@ def clean_weather(
 
     Args:
         df: Raw weather DataFrame with model-suffixed column names
-            (e.g. 'temperature_best_match').
+            (e.g. 'temperature_2m_best_match').
         weather_model: Weather model name whose columns to select
             (default: 'best_match').
         excluded_columns: Column names (without model suffix) to drop.
@@ -47,7 +56,7 @@ def clean_weather(
     suffix = f'_{weather_model}'
     for col in df.columns:
         if col.endswith(suffix):
-            clean_name = col[: -len(suffix)]
+            clean_name = strip_altitude_suffix(col[: -len(suffix)])
             if clean_name not in excluded_columns:
                 result[clean_name] = df[col]
 
