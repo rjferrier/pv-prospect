@@ -27,7 +27,6 @@ variable "service_account_email" {
 
 variable "scheduler_job_name" {
   type        = string
-  default     = "pv-prospect-daily-extract"
   description = "Name for the Cloud Scheduler job"
 }
 

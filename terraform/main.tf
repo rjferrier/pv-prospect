@@ -128,7 +128,7 @@ module "cloud_run_extract" {
   }
   secret_env_vars = var.secret_env_vars
 
-  depends_on = [google_project_service.apis]
+  depends_on = [google_project_service.apis, module.artifact_registry_extract]
 }
 
 module "extractor_workflow" {
@@ -148,9 +148,10 @@ module "extractor_workflow" {
 }
 
 module "extractor_scheduler" {
-  source = "./modules/extract/scheduler"
+  source = "./modules/scheduler"
   region = var.region
 
+  scheduler_job_name    = "pv-prospect-daily-extract"
   workflow_id           = module.extractor_workflow.workflow_id
   service_account_email = google_service_account.pipeline.email
   schedule              = var.extractor_scheduler_cron
@@ -161,8 +162,8 @@ module "extractor_scheduler" {
   depends_on = [google_project_service.apis, module.extractor_workflow]
 }
 
-module "extractor_pv_site_backfill_workflow" {
-  source = "./modules/extract/pv_site_backfill_workflow"
+module "extractor_pv_sites_backfill_workflow" {
+  source = "./modules/extract/pv_sites_backfill_workflow"
   region = var.region
 
   service_account_email = google_service_account.pipeline.email
@@ -173,16 +174,16 @@ module "extractor_pv_site_backfill_workflow" {
   depends_on = [google_project_service.apis, module.cloud_run_extract]
 }
 
-module "extractor_pv_site_backfill_scheduler" {
-  source = "./modules/extract/scheduler"
+module "extractor_pv_sites_backfill_scheduler" {
+  source = "./modules/scheduler"
   region = var.region
 
-  scheduler_job_name    = "pv-prospect-daily-pv-site-backfill"
-  workflow_id           = module.extractor_pv_site_backfill_workflow.workflow_id
+  scheduler_job_name    = "pv-prospect-daily-extract-pv-sites-backfill"
+  workflow_id           = module.extractor_pv_sites_backfill_workflow.workflow_id
   service_account_email = google_service_account.pipeline.email
-  schedule              = var.extractor_pv_site_backfill_scheduler_cron
+  schedule              = var.extractor_pv_sites_backfill_scheduler_cron
 
-  depends_on = [google_project_service.apis, module.extractor_pv_site_backfill_workflow]
+  depends_on = [google_project_service.apis, module.extractor_pv_sites_backfill_workflow]
 }
 
 module "extractor_weather_grid_backfill_workflow" {
@@ -197,10 +198,10 @@ module "extractor_weather_grid_backfill_workflow" {
 }
 
 module "extractor_weather_grid_backfill_scheduler_run1" {
-  source = "./modules/extract/scheduler"
+  source = "./modules/scheduler"
   region = var.region
 
-  scheduler_job_name    = "pv-prospect-daily-weather-grid-backfill-run1"
+  scheduler_job_name    = "pv-prospect-daily-extract-weather-grid-backfill-run1"
   workflow_id           = module.extractor_weather_grid_backfill_workflow.workflow_id
   service_account_email = google_service_account.pipeline.email
   schedule              = var.extractor_weather_grid_backfill_scheduler_run1_cron
@@ -212,10 +213,10 @@ module "extractor_weather_grid_backfill_scheduler_run1" {
 }
 
 module "extractor_weather_grid_backfill_scheduler_run2" {
-  source = "./modules/extract/scheduler"
+  source = "./modules/scheduler"
   region = var.region
 
-  scheduler_job_name    = "pv-prospect-daily-weather-grid-backfill-run2"
+  scheduler_job_name    = "pv-prospect-daily-extract-weather-grid-backfill-run2"
   workflow_id           = module.extractor_weather_grid_backfill_workflow.workflow_id
   service_account_email = google_service_account.pipeline.email
   schedule              = var.extractor_weather_grid_backfill_scheduler_run2_cron
@@ -270,7 +271,7 @@ module "transformer_workflow" {
 }
 
 module "transformer_scheduler" {
-  source = "./modules/extract/scheduler"
+  source = "./modules/scheduler"
   region = var.region
 
   scheduler_job_name    = "pv-prospect-daily-transform"
@@ -282,6 +283,58 @@ module "transformer_scheduler" {
   })
 
   depends_on = [google_project_service.apis, module.transformer_workflow]
+}
+
+module "transformer_pv_sites_backfill_workflow" {
+  source = "./modules/transform/backfill_workflow"
+  region = var.region
+
+  service_account_email = google_service_account.pipeline.email
+  cloud_run_job_name    = module.cloud_run_transform.job_name
+  staging_bucket_name   = module.storage.staging_bucket_name
+  backfill_scope        = "pv_sites"
+  workflow_name_suffix  = "pv-sites"
+  default_pv_system_ids = var.default_pv_system_ids
+
+  depends_on = [google_project_service.apis, module.cloud_run_transform]
+}
+
+module "transformer_pv_sites_backfill_scheduler" {
+  source = "./modules/scheduler"
+  region = var.region
+
+  scheduler_job_name    = "pv-prospect-daily-transform-pv-sites-backfill"
+  workflow_id           = module.transformer_pv_sites_backfill_workflow.workflow_id
+  service_account_email = google_service_account.pipeline.email
+  schedule              = var.transformer_pv_sites_backfill_scheduler_cron
+
+  depends_on = [google_project_service.apis, module.transformer_pv_sites_backfill_workflow]
+}
+
+module "transformer_weather_grid_backfill_workflow" {
+  source = "./modules/transform/backfill_workflow"
+  region = var.region
+
+  service_account_email = google_service_account.pipeline.email
+  cloud_run_job_name    = module.cloud_run_transform.job_name
+  staging_bucket_name   = module.storage.staging_bucket_name
+  backfill_scope        = "weather_grid"
+  workflow_name_suffix  = "weather-grid"
+  default_locations     = var.default_locations
+
+  depends_on = [google_project_service.apis, module.cloud_run_transform]
+}
+
+module "transformer_weather_grid_backfill_scheduler" {
+  source = "./modules/scheduler"
+  region = var.region
+
+  scheduler_job_name    = "pv-prospect-daily-transform-weather-grid-backfill"
+  workflow_id           = module.transformer_weather_grid_backfill_workflow.workflow_id
+  service_account_email = google_service_account.pipeline.email
+  schedule              = var.transformer_weather_grid_backfill_scheduler_cron
+
+  depends_on = [google_project_service.apis, module.transformer_weather_grid_backfill_workflow]
 }
 
 # ---------------------------------------------------------------------------
@@ -450,14 +503,14 @@ output "transformer_scheduler_job_name" {
   description = "Transform Cloud Scheduler job name"
 }
 
-output "extractor_pv_site_backfill_workflow_name" {
-  value       = module.extractor_pv_site_backfill_workflow.workflow_name
-  description = "PV-site backfill workflow name"
+output "extractor_pv_sites_backfill_workflow_name" {
+  value       = module.extractor_pv_sites_backfill_workflow.workflow_name
+  description = "PV-sites backfill workflow name"
 }
 
-output "extractor_pv_site_backfill_scheduler_job_name" {
-  value       = module.extractor_pv_site_backfill_scheduler.scheduler_job_name
-  description = "PV-site backfill Cloud Scheduler job name"
+output "extractor_pv_sites_backfill_scheduler_job_name" {
+  value       = module.extractor_pv_sites_backfill_scheduler.scheduler_job_name
+  description = "PV-sites backfill Cloud Scheduler job name"
 }
 
 output "extractor_weather_grid_backfill_workflow_name" {
@@ -473,6 +526,26 @@ output "extractor_weather_grid_backfill_scheduler_run1_job_name" {
 output "extractor_weather_grid_backfill_scheduler_run2_job_name" {
   value       = module.extractor_weather_grid_backfill_scheduler_run2.scheduler_job_name
   description = "Weather grid backfill Run 2 Cloud Scheduler job name"
+}
+
+output "transformer_pv_sites_backfill_workflow_name" {
+  value       = module.transformer_pv_sites_backfill_workflow.workflow_name
+  description = "PV-sites transform backfill workflow name"
+}
+
+output "transformer_pv_sites_backfill_scheduler_job_name" {
+  value       = module.transformer_pv_sites_backfill_scheduler.scheduler_job_name
+  description = "PV-sites transform backfill Cloud Scheduler job name"
+}
+
+output "transformer_weather_grid_backfill_workflow_name" {
+  value       = module.transformer_weather_grid_backfill_workflow.workflow_name
+  description = "Weather-grid transform backfill workflow name"
+}
+
+output "transformer_weather_grid_backfill_scheduler_job_name" {
+  value       = module.transformer_weather_grid_backfill_scheduler.scheduler_job_name
+  description = "Weather-grid transform backfill Cloud Scheduler job name"
 }
 
 output "extractor_scheduler_job_name" {
