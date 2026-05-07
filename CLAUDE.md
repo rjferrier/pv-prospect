@@ -165,6 +165,10 @@ Python style:
   `C4` (comprehensions).
 
 Practices:
+- Refactor when appropriate. Is the same code used in two places, and do those places
+  share a common library or modules? Then extract the code to the library or one of the
+  shared modules, or consider creating a new shared module. Refactoring may be done
+  in a commit separate from functional changes.
 - As a rule, non-trivial logic should exist in pure functions or methods, which means
   unit tests can be written without the need to create patches. The existence of patches
   is therefore considered a code smell which necessitates one of two things: (1) the

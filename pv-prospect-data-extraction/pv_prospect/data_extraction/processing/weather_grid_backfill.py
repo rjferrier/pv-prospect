@@ -16,10 +16,16 @@ import json
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from pv_prospect.etl import BackfillScope, default_window_days
 from pv_prospect.etl.storage import FileSystem
 
 _EPOCH = date(1970, 1, 1)
-WEATHER_GRID_BACKFILL_WINDOW_DAYS = 14
+
+# 14-day window. Matches OpenMeteo's natural single-request window for the
+# historical-forecast endpoint. The constant is sourced from the shared
+# backfill-config in pv_prospect.etl so it cannot drift from the
+# transformation-side weather-grid backfill.
+WEATHER_GRID_BACKFILL_WINDOW_DAYS = default_window_days(BackfillScope.WEATHER_GRID)
 
 
 def _epoch_days(d: date) -> int:
