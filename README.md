@@ -100,14 +100,14 @@ Workflows on a daily basis:
 
 * **Daily Extraction (`pv-prospect-extract`)**: Runs at **02:00 UTC**. Triggers
   the data extraction workflow for the previous day.
-* **PV Site Backfill (`pv-prospect-extract-pv-site-backfill`)**: Runs at
-  **02:40 UTC**. Orchestrates daily PV-site backfill for historical data, covering
-  a 28-day window that marches backwards through history. Extracts PV output
-  sequentially (one Cloud Run Job per site) and weather data in parallel. A **GCS
-  checkpoint** (`resources/pv_site_backfill_checkpoint.json`) is written after each
-  successful site extraction, so a manually re-triggered run resumes from where the
-  previous execution stopped rather than starting over.
-* **Weather Grid Backfill (`pv-prospect-extract-weather-grid-backfill`)**:
+* **PV-Sites Extraction Backfill (`pv-prospect-extract-pv-sites-backfill`)**: Runs
+  at **02:40 UTC**. Orchestrates daily PV-site backfill for historical data,
+  covering a 28-day window that marches backwards through history. Extracts PV
+  output sequentially (one Cloud Run Job per site) and weather data in parallel.
+  A **GCS checkpoint** (`resources/pv_sites_backfill_checkpoint.json`) is written
+  after each successful site extraction, so a manually re-triggered run resumes
+  from where the previous execution stopped rather than starting over.
+* **Weather-Grid Extraction Backfill (`pv-prospect-extract-weather-grid-backfill`)**:
   Triggered twice daily at **03:20 UTC** and **04:30 UTC**. Orchestrates the daily
   grid-point weather backfill via a paced manifest-driven process. To stay strictly
   under Open-Meteo's 5,000 requests/hour limit, the backfill is split into two
@@ -117,16 +117,29 @@ Workflows on a daily basis:
   batches, then commits the cursor.
 * **Data Transformation (`pv-prospect-transform`)**: Runs at **05:30 UTC**.
   Orchestrates the data cleaning and preparation steps to generate the prepared
-  datasets for all data extracted and backfilled earlier in the day.
+  datasets for all data extracted earlier in the day.
+* **PV-Sites Transformation Backfill (`pv-prospect-transform-pv-sites-backfill`)**:
+  Runs at **06:00 UTC**. Trails the PV-sites extraction backfill, transforming the
+  same 28-day window once raw data is available. Internally calls
+  `plan_transform_backfill` to advance a dedicated cursor, then dispatches the
+  same `clean → prepare → assemble` task graph the daily transform uses across
+  every day in the window. `commit_transform_backfill` only advances the cursor
+  if every task succeeds.
+* **Weather-Grid Transformation Backfill
+  (`pv-prospect-transform-weather-grid-backfill`)**: Runs at **06:30 UTC**. Same
+  pattern as above but for the grid-point weather backfill (14-day window,
+  weather-only task graph). Uses an independent cursor so it can advance
+  separately from the PV-sites transform backfill.
 
-> **Scheduling rationale**: The daily extraction and PV site backfill both use the
-> PVOutput API, which rate-limits at 300 requests/hour. With individual Cloud Run
-> Job tasks capped at 30 minutes, a 40-minute gap between each PVOutput-using
-> workflow prevents concurrent API calls that could breach this limit. The weather
-> grid backfill uses OpenMeteo exclusively, but its 9 daily batches breach the
-> 5,000 requests/hour limit if run in a single window. Therefore, it is split
-> across two windows 70 minutes apart. The data transformation step is scheduled
-> after all extraction runs have safely completed.
+> **Scheduling rationale**: The daily extraction and PV-sites extraction backfill
+> both use the PVOutput API, which rate-limits at 300 requests/hour. With
+> individual Cloud Run Job tasks capped at 30 minutes, a 40-minute gap between
+> each PVOutput-using workflow prevents concurrent API calls that could breach
+> this limit. The weather-grid extraction backfill uses OpenMeteo exclusively,
+> but its 9 daily batches breach the 5,000 requests/hour limit if run in a single
+> window — so it is split across two windows 70 minutes apart. The transformation
+> workflows do not call any external API, so they can run back-to-back; they are
+> scheduled after all extraction runs have safely completed.
 
 ### Trigger the Pipeline Manually (Optional)
 
@@ -138,24 +151,24 @@ gcloud workflows run pv-prospect-extract \
   --data='{"pv_system_ids": [12345], "date": "2025-06-24"}'
 ```
 
-#### Resuming the PV Site Backfill after a timeout
+#### Resuming the PV-Sites Extraction Backfill after a timeout
 
-If `pv-prospect-extract-pv-site-backfill` is interrupted (e.g. the Cloud Workflows
+If `pv-prospect-extract-pv-sites-backfill` is interrupted (e.g. the Cloud Workflows
 execution times out or is cancelled), simply re-trigger it:
 
 ```bash
-gcloud workflows run pv-prospect-extract-pv-site-backfill \
+gcloud workflows run pv-prospect-extract-pv-sites-backfill \
   --location=europe-west2
 ```
 
 The workflow will read the checkpoint file at
-`gs://<staging-bucket>/resources/pv_site_backfill_checkpoint.json` and skip any PV
-systems that already completed successfully, logging `"Resuming from checkpoint --
-N sites already done"`. No duplicate extraction occurs. The checkpoint is deleted
-automatically once the full run completes so the next scheduled run starts from
-scratch.
+`gs://<staging-bucket>/resources/pv_sites_backfill_checkpoint.json` and skip any
+PV systems that already completed successfully, logging `"Resuming from checkpoint
+-- N sites already done"`. No duplicate extraction occurs. The checkpoint is
+deleted automatically once the full run completes so the next scheduled run
+starts from scratch.
 
-#### Resuming the Weather Grid Backfill after a timeout
+#### Resuming the Weather-Grid Extraction Backfill after a timeout
 
 The same pattern applies to `pv-prospect-extract-weather-grid-backfill`:
 
@@ -169,3 +182,21 @@ The workflow reads
 batches (indexed by position in the manifest) that already completed, and resumes
 from the first outstanding batch -- including honouring the configured inter-batch
 sleep so the rate limit is respected. The checkpoint is deleted on success.
+
+#### Resuming a Transformation Backfill after a timeout
+
+The transform backfills (`pv-prospect-transform-pv-sites-backfill` and
+`pv-prospect-transform-weather-grid-backfill`) use the shared
+`WorkflowOrchestrator` per-task checkpoints (keyed by `(workflow_name,
+run_date, task_hash)`) rather than a workflow-level checkpoint file. To resume,
+re-trigger the same workflow:
+
+```bash
+gcloud workflows run pv-prospect-transform-pv-sites-backfill \
+  --location=europe-west2
+```
+
+The plan-commit envelope re-derives the same window from the live cursor (which
+was not advanced because the previous run failed before `commit_transform_backfill`),
+re-plans the orchestrator manifest, and the per-task checkpoint filter skips
+already-completed `clean` / `prepare` / `assemble` tasks.
