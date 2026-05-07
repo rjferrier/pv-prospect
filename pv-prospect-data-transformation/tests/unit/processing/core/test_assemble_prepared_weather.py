@@ -3,7 +3,7 @@
 import io
 
 import pandas as pd
-from pv_prospect.data_transformation.core import (
+from pv_prospect.data_transformation.processing import (
     WEATHER_COLUMNS,
     assemble_prepared_weather,
 )

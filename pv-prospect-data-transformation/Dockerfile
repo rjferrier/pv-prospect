@@ -42,4 +42,4 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # ---- Cloud Run Job entrypoint (primary cloud target) ----
 FROM runtime-common AS entrypoint
 ENV RUNTIME_ENV=default
-CMD ["python", "-m", "pv_prospect.data_transformation.entrypoint"]
+CMD ["python", "-m", "pv_prospect.data_transformation.processing.entrypoint"]

@@ -12,7 +12,7 @@ from pv_prospect.data_sources import (
     build_time_series_csv_file_path,
     csv_path_to_metadata_path,
 )
-from pv_prospect.data_transformation.core import run_prepare_weather
+from pv_prospect.data_transformation.processing import run_prepare_weather
 from pv_prospect.etl import TIMESERIES_FOLDER
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem

@@ -16,7 +16,7 @@ from pv_prospect.common.domain import (
     System,
 )
 from pv_prospect.data_sources import DataSource, build_time_series_csv_file_path
-from pv_prospect.data_transformation.core import run_prepare_pv
+from pv_prospect.data_transformation.processing import run_prepare_pv
 from pv_prospect.etl import TIMESERIES_FOLDER
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem

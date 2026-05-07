@@ -3,7 +3,7 @@
 import io
 
 import pandas as pd
-from pv_prospect.data_transformation.core import PV_COLUMNS, assemble_prepared_pv
+from pv_prospect.data_transformation.processing import PV_COLUMNS, assemble_prepared_pv
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem
 

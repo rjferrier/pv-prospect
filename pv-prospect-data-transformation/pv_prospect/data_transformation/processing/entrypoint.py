@@ -42,7 +42,9 @@ from pv_prospect.common import (
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.data_sources import resolve_site
 from pv_prospect.data_transformation.config import DataTransformationConfig
-from pv_prospect.data_transformation.core import (
+from pv_prospect.data_transformation.processing import (
+    TRANSFORMATIONS_NEEDING_PV_SITE,
+    Transformation,
     assemble_prepared_pv,
     assemble_prepared_weather,
     run_clean_pv,
@@ -52,10 +54,6 @@ from pv_prospect.data_transformation.core import (
 )
 from pv_prospect.data_transformation.resources import (
     get_config_dir as get_dt_config_dir,
-)
-from pv_prospect.data_transformation.transformation import (
-    TRANSFORMATIONS_NEEDING_PV_SITE,
-    Transformation,
 )
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir

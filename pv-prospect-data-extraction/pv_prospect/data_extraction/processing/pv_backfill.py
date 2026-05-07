@@ -12,9 +12,12 @@ A :class:`PvBackfillCursor` tracks progress between daily runs.  The cursor
 stores the exclusive end date of the *next* window to process; each run
 walks 28 days further into the past.
 
-PVOutput rate-limits at 300 requests per hour.  With 10 PV sites and 28
-days per site the daily budget is 280 calls — safely under the cap when
-dispatched sequentially from the Cloud Workflow.
+The 28-day window is the largest round-week multiple compatible with the
+PVOutput rate limit. PVOutput's ``getstatus.jsp`` endpoint is single-date
+only — one HTTP call per (system, day) — and the API rate-limits at 300
+requests per hour. With 10 PV sites and 28 days per site the daily budget
+is 280 calls, safely under the cap when dispatched sequentially from the
+Cloud Workflow and leaving headroom for retries.
 """
 
 import json

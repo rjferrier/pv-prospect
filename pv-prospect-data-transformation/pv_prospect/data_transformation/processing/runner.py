@@ -5,13 +5,13 @@ instead of Cloud Run Jobs.
 
 Usage::
 
-    python -m pv_prospect.data_transformation.runner \
+    python -m pv_prospect.data_transformation.processing.runner \
         clean_weather,prepare_weather \
         --locations 50.49,-3.54 \
         --start-date 2025-06-01 --end-date 2025-06-30 \
         --local-dir ./out --workers 4
 
-    python -m pv_prospect.data_transformation.runner \
+    python -m pv_prospect.data_transformation.processing.runner \
         clean_pv,prepare_pv \
         89665,12345 \
         --start-date 2025-06-01 --end-date 2025-06-30
@@ -44,7 +44,13 @@ from pv_prospect.data_sources import (
     get_config_dir as get_ds_config_dir,
 )
 from pv_prospect.data_transformation.config import DataTransformationConfig
-from pv_prospect.data_transformation.core import (
+from pv_prospect.data_transformation.processing import (
+    ALL_TRANSFORMATIONS,
+    CLEANING_TRANSFORMATIONS,
+    PREPARING_TRANSFORMATIONS,
+    TRANSFORMATIONS_NEEDING_GRID_POINT,
+    TRANSFORMATIONS_NEEDING_PV_SITE,
+    Transformation,
     assemble_prepared_pv,
     assemble_prepared_weather,
     run_clean_pv,
@@ -54,14 +60,6 @@ from pv_prospect.data_transformation.core import (
 )
 from pv_prospect.data_transformation.resources import (
     get_config_dir as get_dt_config_dir,
-)
-from pv_prospect.data_transformation.transformation import (
-    ALL_TRANSFORMATIONS,
-    CLEANING_TRANSFORMATIONS,
-    PREPARING_TRANSFORMATIONS,
-    TRANSFORMATIONS_NEEDING_GRID_POINT,
-    TRANSFORMATIONS_NEEDING_PV_SITE,
-    Transformation,
 )
 from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
