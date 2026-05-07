@@ -1,11 +1,13 @@
-# Cloud Scheduler job that triggers the extraction workflow daily
+# Cloud Scheduler job that triggers a Cloud Workflow on a cron schedule.
+# Shared by the extract, transform, and version pipelines — each caller
+# supplies its own scheduler_job_name and workflow_id.
 
-resource "google_cloud_scheduler_job" "daily_extraction" {
+resource "google_cloud_scheduler_job" "scheduler" {
   name        = var.scheduler_job_name
   region      = var.region
   schedule    = var.schedule
   time_zone   = var.time_zone
-  description = "Triggers PV Prospect data extraction workflow daily"
+  description = "Triggers PV Prospect Cloud Workflow on a cron schedule"
 
   http_target {
     http_method = "POST"

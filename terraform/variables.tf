@@ -74,7 +74,7 @@ variable "default_by_week" {
   description = "Deprecated — superseded by default_split_by. Retained to avoid warnings from legacy tfvars."
 }
 
-variable "extractor_pv_site_backfill_scheduler_cron" {
+variable "extractor_pv_sites_backfill_scheduler_cron" {
   type        = string
   default     = "40 2 * * *"
   description = "Cron schedule for daily PV-site backfill (default: 02:40 UTC, 40 min after main extraction)"
@@ -90,6 +90,18 @@ variable "extractor_weather_grid_backfill_scheduler_run2_cron" {
   type        = string
   default     = "30 4 * * *"
   description = "Cron schedule for daily weather grid backfill Run 2 (default: 04:30 UTC, 70 min after Run 1)"
+}
+
+variable "transformer_pv_sites_backfill_scheduler_cron" {
+  type        = string
+  default     = "0 6 * * *"
+  description = "Cron schedule for daily PV-sites transform backfill (default: 06:00 UTC, 30 min after daily transform)"
+}
+
+variable "transformer_weather_grid_backfill_scheduler_cron" {
+  type        = string
+  default     = "30 6 * * *"
+  description = "Cron schedule for daily weather-grid transform backfill (default: 06:30 UTC, 30 min after PV-sites transform backfill)"
 }
 
 variable "versioner_image_tag" {

@@ -24,8 +24,8 @@
 # cursor, so tomorrow's plan job will re-derive the same manifest and retry.
 # Re-triggering today's run manually will skip already-processed sites.
 
-resource "google_workflows_workflow" "pv_site_backfill" {
-  name                = "pv-prospect-extract-pv-site-backfill"
+resource "google_workflows_workflow" "pv_sites_backfill" {
+  name                = "pv-prospect-extract-pv-sites-backfill"
   region              = var.region
   service_account     = var.service_account_email
   deletion_protection = false
@@ -41,7 +41,7 @@ resource "google_workflows_workflow" "pv_site_backfill" {
               - project_id: $${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
               - region: "${var.region}"
               - job_name: "${var.cloud_run_job_name}"
-              - workflow_name: "pv-prospect-extract-pv-site-backfill"
+              - workflow_name: "pv-prospect-extract-pv-sites-backfill"
               - bucket: "${var.staging_bucket_name}"
               - manifest_object: "${var.manifest_object_path}"
               - checkpoint_object: "${var.checkpoint_object_path}"

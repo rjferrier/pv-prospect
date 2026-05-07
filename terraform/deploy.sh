@@ -143,8 +143,8 @@ if run_stage terraform-extraction; then
     -target=module.cloud_run_extract \
     -target=module.extractor_workflow \
     -target=module.extractor_scheduler \
-    -target=module.extractor_pv_site_backfill_workflow \
-    -target=module.extractor_pv_site_backfill_scheduler \
+    -target=module.extractor_pv_sites_backfill_workflow \
+    -target=module.extractor_pv_sites_backfill_scheduler \
     -target=module.extractor_weather_grid_backfill_workflow \
     -target=module.extractor_weather_grid_backfill_scheduler \
     -auto-approve
@@ -157,6 +157,10 @@ if run_stage terraform-transform; then
   terraform apply \
     -target=module.cloud_run_transform \
     -target=module.transformer_workflow \
+    -target=module.transformer_pv_sites_backfill_workflow \
+    -target=module.transformer_pv_sites_backfill_scheduler \
+    -target=module.transformer_weather_grid_backfill_workflow \
+    -target=module.transformer_weather_grid_backfill_scheduler \
     -auto-approve
 fi
 
@@ -184,7 +188,7 @@ echo "    --location=$REGION \\"
 echo "    --data='{\"locations\": [\"50.49,-3.54\"], \"start_date\": \"2025-06-24\"}'"
 echo ""
 echo "To manually trigger backfills:"
-echo "  gcloud workflows run pv-prospect-extract-pv-site-backfill --location=$REGION"
+echo "  gcloud workflows run pv-prospect-extract-pv-sites-backfill --location=$REGION"
 echo "  gcloud workflows run pv-prospect-extract-weather-grid-backfill --location=$REGION"
 echo ""
 echo "To test transformation:"
