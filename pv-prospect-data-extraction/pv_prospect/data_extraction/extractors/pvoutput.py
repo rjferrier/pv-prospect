@@ -75,13 +75,15 @@ class PVOutputRateLimiter:
             reset_timestamp = int(headers[RATE_LIMIT_RESET_HEADER])
             self.reset_time = datetime.fromtimestamp(reset_timestamp)
 
-        # Print rate limit info on first update
+        # Log rate limit info on first update
         if self._first_update and self.rate_limit is not None:
             reset_time_str = (
                 self.reset_time.strftime('%H:%M:%S') if self.reset_time else 'unknown'
             )
-            print(
-                f'ℹ️  Rate limit: {self.rate_limit} requests per hour (resets at {reset_time_str})'
+            logger.info(
+                'Rate limit: %d requests per hour (resets at %s)',
+                self.rate_limit,
+                reset_time_str,
             )
             self._first_update = False
 
@@ -95,12 +97,11 @@ class PVOutputRateLimiter:
             if current_time < self.reset_time:
                 sleep_seconds = (self.reset_time - current_time).total_seconds()
                 if sleep_seconds > 0:
-                    limit_info = (
-                        f' (limit: {self.rate_limit})' if self.rate_limit else ''
-                    )
-                    print(f'\n⚠️  Rate limit reached{limit_info}.')
-                    print(
-                        f'   Sleeping for {sleep_seconds:.1f} seconds until {self.reset_time.strftime("%H:%M:%S")}...\n'
+                    logger.warning(
+                        'Rate limit reached (limit: %s). Sleeping for %.1f seconds until %s.',
+                        self.rate_limit,
+                        sleep_seconds,
+                        self.reset_time.strftime('%H:%M:%S'),
                     )
                     time.sleep(sleep_seconds)
                     # Reset after sleeping
