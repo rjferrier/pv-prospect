@@ -115,5 +115,5 @@ def extract_and_load(
         return Result.success(task)
 
     except Exception as e:
-        logger.error('%s: %s', task, e)
+        logger.exception('%s', task)
         return Result.failure(task, e)
