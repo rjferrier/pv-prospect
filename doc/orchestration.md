@@ -2,8 +2,17 @@
 
 This document describes the manifest/checkpoint system that coordinates work
 across the extraction and transformation pipelines. The shared logic lives in
-`pv_prospect.etl.orchestration` (`pv-prospect-etl` package); the Cloud Workflows
-in `terraform/modules/` consume the manifests it produces.
+the `pv-prospect-etl` package:
+
+- `pv_prospect.etl.orchestration` — orchestrator manifests + per-task checkpoints
+  for the daily phased workflows.
+- `pv_prospect.etl.backfill` — `BackfillScope`, `BackfillCursor`, and the
+  plan-commit primitives that extraction and transformation backfills both
+  delegate to. Centralising it here means changing a window length in one place
+  updates both pipelines.
+
+The Cloud Workflows in `terraform/modules/` consume the manifests these modules
+produce.
 
 ## Core Concepts
 
@@ -62,30 +71,67 @@ checkpoint filter in step 2 ensures already-completed tasks are skipped.
 
 ## Backfill Workflows (Plan-Commit Pattern)
 
-The PV site backfill and weather grid backfill use a different pattern because
-they process a moving window across days:
+The extraction and transformation backfills use a different pattern from the
+daily workflows because they process a moving window across days:
 
 1. **Plan** -- Reads a live **cursor** (tracking where the window left off),
    computes the next window, and writes a manifest containing both the work items
    and the **next cursor** value.
-2. **Dispatch** -- Cloud Workflow dispatches tasks. For weather grid backfill, a
-   GCS checkpoint tracks completed batches (by index), allowing resumption.
+2. **Dispatch** -- Cloud Workflow dispatches tasks. The extract-side weather
+   grid backfill additionally maintains a GCS checkpoint tracking completed
+   batches (by index) to allow within-run resumption.
 3. **Commit** -- Only after all tasks succeed, the next cursor is promoted to
    live. This ensures the cursor only advances when work actually completes.
 
+### Backfill Scope and Window Configuration
+
+`BackfillScope` (defined in `pv_prospect.etl.backfill`) names the two backfill
+axes the project tracks. `default_window_days(scope)` returns the cadence both
+extraction and transformation use for that scope:
+
+| Scope | Default window | Why |
+|---|---|---|
+| `PV_SITES` | 28 days | PVOutput's `getstatus.jsp` is single-date only (one HTTP call per system per day) and rate-limits at 300/hour; 10 sites × 28 days = 280 calls is the largest round-week multiple that fits with retry headroom. |
+| `WEATHER_GRID` | 14 days | OpenMeteo's natural single-request window for the historical-forecast endpoint. |
+
 ### Cursor Files
+
+Each backfill instance has its own cursor and manifest paths. Extraction and
+transformation cursors for the same scope are independent so the two pipelines
+can advance at their own pace.
 
 | Workflow | Cursor path | What it tracks |
 |---|---|---|
-| PV site backfill | `resources/manifests/pv_backfill_cursor.json` | Exclusive end date of next 28-day window |
-| Weather grid backfill | `resources/manifests/weather_grid_backfill_cursor.json` | Next end date and sample offset |
+| PV-sites extraction backfill | `resources/manifests/pv_backfill_cursor.json` | Exclusive end date of next 28-day window |
+| Weather-grid extraction backfill | `resources/manifests/weather_grid_backfill_cursor.json` | Next end date and sample offset |
+| PV-sites transformation backfill | `resources/manifests/pv_sites_transform_backfill_cursor.json` | Exclusive end date of next 28-day window |
+| Weather-grid transformation backfill | `resources/manifests/weather_grid_transform_backfill_cursor.json` | Exclusive end date of next 14-day window |
 
-### Weather Grid Backfill: Two-Run Split
+### Weather-Grid Extraction Backfill: Two-Run Split
 
-The weather grid backfill is split into two scheduled Cloud Scheduler runs (03:20
-and 04:30 UTC) to stay within OpenMeteo's 5,000 requests/hour limit. Run 1
-processes 4 batches and exits cleanly. Run 2 resumes from the GCS checkpoint,
-processes the remaining batches, and commits the cursor.
+The weather-grid extraction backfill is split into two scheduled Cloud Scheduler
+runs (03:20 and 04:30 UTC) to stay within OpenMeteo's 5,000 requests/hour limit.
+Run 1 processes 4 batches and exits cleanly. Run 2 resumes from the GCS
+checkpoint, processes the remaining batches, and commits the cursor.
+
+### Transformation Backfills
+
+The transformation backfills wrap the daily-transform plan-execute-phases
+pattern in a plan-commit envelope. Each run:
+
+1. Calls `plan_transform_backfill` (with `BACKFILL_SCOPE`) to advance the
+   scope-specific cursor by one window.
+2. Calls `plan_transform` with the resulting `[start_date, end_date)` to produce
+   an orchestrator manifest of `clean → prepare → assemble` phases over every
+   day in the window.
+3. Executes the phased manifest using the same dispatcher the daily transform
+   uses; per-task checkpoints make re-runs idempotent.
+4. Calls `commit_transform_backfill` to promote the next-cursor — only reached
+   if every task succeeded, so a failed run leaves the cursor unchanged for
+   tomorrow's scheduled re-plan.
+
+The two scopes use independent cursors, so a hiccup transforming the weather
+grid does not block PV-sites progress (or vice versa).
 
 ## Retry and Rate-Limit Handling
 
