@@ -5,6 +5,14 @@ and calls the corresponding core function.
 
 Environment variables
 ---------------------
+JOB_TYPE
+    ``plan_transform``, ``plan_transform_backfill``,
+    ``commit_transform_backfill``, or ``consolidate_logs``. If unset the
+    job runs a single transform step (selected by ``TRANSFORM_STEP``).
+BACKFILL_SCOPE
+    Required for ``plan_transform_backfill`` and
+    ``commit_transform_backfill``. ``pv_sites`` or ``weather_grid`` —
+    selects which transform-backfill cursor to advance.
 TRANSFORM_STEP
     ``clean_weather``, ``clean_pv``, ``prepare_weather``, ``prepare_pv``,
     ``assemble_weather``, or ``assemble_pv``
@@ -47,6 +55,8 @@ from pv_prospect.data_transformation.processing import (
     Transformation,
     assemble_prepared_pv,
     assemble_prepared_weather,
+    commit_transform_backfill,
+    plan_transform_backfill,
     run_clean_pv,
     run_clean_weather,
     run_prepare_pv,
@@ -55,7 +65,12 @@ from pv_prospect.data_transformation.processing import (
 from pv_prospect.data_transformation.resources import (
     get_config_dir as get_dt_config_dir,
 )
-from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
+from pv_prospect.etl import (
+    BackfillScope,
+    DegenerateDateRange,
+    Extractor,
+    build_date_range,
+)
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
     AnyStorageConfig,
@@ -126,6 +141,14 @@ def main() -> None:
     if job_type == 'plan_transform':
         resources_fs = get_filesystem(config.resources_storage)
         _run_plan_transform(resources_fs)
+        return
+    elif job_type == 'plan_transform_backfill':
+        resources_fs = get_filesystem(config.resources_storage)
+        _run_plan_transform_backfill(resources_fs)
+        return
+    elif job_type == 'commit_transform_backfill':
+        resources_fs = get_filesystem(config.resources_storage)
+        _run_commit_transform_backfill(resources_fs)
         return
     elif job_type == 'consolidate_logs':
         _run_consolidate_logs(config)
@@ -367,6 +390,39 @@ def _run_plan_transform(resources_fs: FileSystem) -> None:
 
     orchestrator.write_manifest(phases)
     logger.info('plan_transform: wrote manifest with %d phases', len(phases))
+
+
+def parse_backfill_scope(raw: str) -> BackfillScope:
+    """Parse a ``BACKFILL_SCOPE`` env-var value, raising on invalid input."""
+    try:
+        return BackfillScope(raw)
+    except ValueError as e:
+        raise ValueError(
+            f'BACKFILL_SCOPE must be one of '
+            f'{[s.value for s in BackfillScope]!r}; got {raw!r}'
+        ) from e
+
+
+def _run_plan_transform_backfill(resources_fs: FileSystem) -> None:
+    scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
+    today = date.today()
+    plan = plan_transform_backfill(scope, today, resources_fs)
+    logger.info(
+        'plan_transform_backfill[%s]: wrote manifest (%s to %s)',
+        scope.value,
+        plan.start_date,
+        plan.end_date,
+    )
+
+
+def _run_commit_transform_backfill(resources_fs: FileSystem) -> None:
+    scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
+    cursor = commit_transform_backfill(scope, resources_fs)
+    logger.info(
+        'commit_transform_backfill[%s]: advanced cursor to %s',
+        scope.value,
+        cursor.next_end_date,
+    )
 
 
 if __name__ == '__main__':
