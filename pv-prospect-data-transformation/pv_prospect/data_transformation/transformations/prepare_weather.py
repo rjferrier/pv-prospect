@@ -1,6 +1,6 @@
 import pandas as pd
 
-from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
+from pv_prospect.data_transformation.helpers import downsample_by_days
 
 DEFAULT_KEEP_COLUMNS = ('temperature', 'direct_normal_irradiance', 'diffuse_radiation')
 
@@ -30,18 +30,6 @@ def prepare_weather(
     result = df[columns_to_keep].copy()
 
     if timescale_days is not None and timescale_days > 0 and not result.empty:
-        result = _downsample(result, timescale_days)
+        result = downsample_by_days(result, timescale_days)
 
     return result
-
-
-def _downsample(df: pd.DataFrame, timescale_days: int) -> pd.DataFrame:
-    """Downsample a DataFrame using time-weighted averaging."""
-    start_time = df['time'].min().normalize()
-    end_time = df['time'].max()
-    ref_times = pd.date_range(
-        start=start_time + pd.Timedelta(days=timescale_days),
-        end=end_time + pd.Timedelta(days=timescale_days),
-        freq=f'{timescale_days}D',
-    )
-    return reduce_rows(df, ref_times.to_series())

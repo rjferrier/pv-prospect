@@ -30,6 +30,15 @@ The transformation process consists of six steps, organised into three layers:
 - **Role**: Inner-joins the two cleaned datasets on `time`, calculates Plane of Array (POA) irradiance using `pvlib` (accounting for panel tilt, azimuth, and area fraction), selects the final feature set (e.g. `temperature`, `plane_of_array_irradiance`, `power`), and downsamples time resolution.
 - **Output**: Headerless micro-batch CSV (`prepared-batches/pv/{system_id}_{date}.csv`).
 
+#### Downsampling
+
+`clean_weather`, `prepare_weather`, and `prepare_pv` share a single
+`downsample_by_days` helper (in `helpers/data_operations.py`). It
+time-weighted-averages each `timescale_days` window and labels each output
+row by the **start** of the window it represents — a daily aggregate of
+`2026-05-07`'s hourly data is therefore labelled `2026-05-07`, not
+`2026-05-08`.
+
 ### Assembly (prepared-batches → prepared)
 
 The prepare steps fan out across dates in parallel. Once all batches are written, a single-threaded assembly step merges them into cumulative master CSVs. This avoids per-date format overhead (cleaned data is tens of rows per file).

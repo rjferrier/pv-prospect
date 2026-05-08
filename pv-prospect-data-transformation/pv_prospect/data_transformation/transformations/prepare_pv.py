@@ -3,6 +3,7 @@ import pandas as pd
 import pvlib
 
 from pv_prospect.common.domain import PVSite
+from pv_prospect.data_transformation.helpers import downsample_by_days
 from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
 
 ALTITUDE = 0
@@ -51,7 +52,7 @@ def prepare_pv(
 
     # Downsample if requested
     if timescale_days is not None and timescale_days > 0 and not result.empty:
-        result = _downsample(result, timescale_days)
+        result = downsample_by_days(result, timescale_days)
 
     # Drop rows with any NaN
     result = result.dropna()
@@ -113,15 +114,3 @@ def _calculate_poa_irradiance(df: pd.DataFrame, pv_site: PVSite) -> pd.Series:
         poa_total += poa_components['poa_global'].values * panel_geom.area_fraction
 
     return pd.Series(poa_total, index=df.index)
-
-
-def _downsample(df: pd.DataFrame, timescale_days: int) -> pd.DataFrame:
-    """Downsample a DataFrame using time-weighted averaging."""
-    start_time = df['time'].min().normalize()
-    end_time = df['time'].max()
-    ref_times = pd.date_range(
-        start=start_time + pd.Timedelta(days=timescale_days),
-        end=end_time + pd.Timedelta(days=timescale_days),
-        freq=f'{timescale_days}D',
-    )
-    return reduce_rows(df, ref_times.to_series())

@@ -1,5 +1,6 @@
 """Tests for run_prepare_pv."""
 
+import io
 from datetime import date
 from decimal import Decimal
 
@@ -133,6 +134,28 @@ def test_batch_has_header(
     content = batches_fs.read_text(f'pv/{_SYSTEM_ID}_{_DATE_STR}.csv')
     header = content.strip().split('\n')[0]
     assert header == 'time,temperature,plane_of_array_irradiance,power'
+
+
+def test_daily_row_is_labelled_with_input_date(
+    cleaned_fs: FakeFileSystem,
+    batches_fs: FakeFileSystem,
+    pv_site: PVSite,
+) -> None:
+    """The downsampled row for 2026-06-21's hourly inputs should be labelled
+    2026-06-21 — not 2026-06-22."""
+    run_prepare_pv(
+        cleaned_fs,
+        batches_fs,
+        _PV_DESCRIPTOR,
+        _WEATHER_DESCRIPTOR,
+        pv_site,
+        _DATE_RANGE,
+        lambda _: pv_site,
+    )
+
+    content = batches_fs.read_text(f'pv/{_SYSTEM_ID}_{_DATE_STR}.csv')
+    df = pd.read_csv(io.StringIO(content), parse_dates=['time'])
+    assert list(df['time']) == [pd.Timestamp('2026-06-21 00:00:00')]
 
 
 def test_skips_when_cleaned_pv_missing(

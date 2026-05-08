@@ -1,5 +1,6 @@
 """Tests for run_prepare_weather."""
 
+import io
 import json
 from datetime import date
 
@@ -146,3 +147,23 @@ def test_batch_has_correct_number_of_fields(
     # header + data rows each have: latitude, longitude, elevation, time,
     # temperature, direct_normal_irradiance, diffuse_radiation
     assert all(len(line.split(',')) == 7 for line in lines)
+
+
+def test_daily_row_is_labelled_with_input_date(
+    cleaned_fs: FakeFileSystem,
+    batches_fs: FakeFileSystem,
+    grid_point: ArbitrarySite,
+) -> None:
+    """The downsampled row for 2026-01-15's hourly weather should be
+    labelled 2026-01-15 — not 2026-01-16."""
+    run_prepare_weather(
+        cleaned_fs,
+        batches_fs,
+        DataSource.OPENMETEO_HISTORICAL,
+        grid_point,
+        _DATE_RANGE,
+    )
+
+    content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
+    df = pd.read_csv(io.StringIO(content), parse_dates=['time'])
+    assert list(df['time']) == [pd.Timestamp('2026-01-15 00:00:00')]

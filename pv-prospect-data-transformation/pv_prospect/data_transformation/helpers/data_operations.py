@@ -1,6 +1,37 @@
 import pandas as pd
 
 
+def downsample_by_days(df: pd.DataFrame, timescale_days: int) -> pd.DataFrame:
+    """
+    Aggregate a DataFrame to one row per ``timescale_days``-period.
+
+    Each output row is a time-weighted average of the rows in its period and
+    is labelled with the start of that period — so a daily aggregate of
+    2026-05-07's hourly data is labelled ``2026-05-07``, not ``2026-05-08``.
+
+    Args:
+        df: DataFrame with a 'time' column and numeric value columns.
+        timescale_days: Period length in days (must be > 0).
+
+    Returns:
+        DataFrame with one row per period, labelled by the period's start.
+    """
+    if df.empty:
+        return df.copy()
+    start = df['time'].min().normalize()
+    end = df['time'].max()
+    period = pd.Timedelta(days=timescale_days)
+    ref_times = pd.date_range(
+        start=start + period,
+        end=end + period,
+        freq=f'{timescale_days}D',
+    )
+    result = reduce_rows(df, ref_times.to_series())
+    if not result.empty:
+        result['time'] = result['time'] - period
+    return result
+
+
 def reduce_rows(df: pd.DataFrame, ref_times: pd.Series) -> pd.DataFrame:
     """
     Reduce rows of a dataframe to match reference times using time-weighted averaging.
