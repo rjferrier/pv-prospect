@@ -176,6 +176,17 @@ class PVOutputExtractor:
             # Retry the request
             response = requests.get(URL, headers=headers, params=params, timeout=60)
 
+        # PVOutput returns 400 "No status found" when a system has no readings
+        # for the requested day (e.g. system offline, owner deleted readings).
+        # Treat as an empty result rather than a hard failure.
+        if response.status_code == 400 and 'No status found' in response.text:
+            logger.warning(
+                'No status found for sid1=%s d=%s — treating as empty result',
+                pv_site.id,
+                params['d'],
+            )
+            return [TimeSeries(rows=[HEADER])]
+
         if response.status_code >= 400:
             logger.error(
                 'API error: status=%d url=%s text=%s',
