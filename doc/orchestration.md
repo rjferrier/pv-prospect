@@ -52,6 +52,47 @@ On re-run, `filter_remaining_tasks()` scans the checkpoint directory and removes
 already-completed tasks from the manifest, so the workflow resumes from where it
 left off.
 
+### Task-Outcome Ledger
+
+Alongside checkpoints, each task records a JSONL outcome entry on the
+`log_storage` filesystem via `WorkflowOrchestrator.record_outcome()`. Unlike
+checkpoints (which only mark successes), the ledger records both `completed` and
+`failed` outcomes, giving us a durable audit trail of what each run actually did.
+
+Each entry has the schema:
+
+```json
+{
+  "recorded_at": "<ISO 8601 UTC>",
+  "run_date": "<YYYY-MM-DD>",
+  "workflow": "<workflow_name>",
+  "task_hash": "<sha256>",
+  "descriptor": { "<workflow-specific keys>": "..." },
+  "status": "completed" | "failed",
+  "error": "<repr of exception, only for failed>"
+}
+```
+
+The `descriptor` is opaque to the orchestrator and supplied by the entrypoint;
+each workflow uses its own keys (e.g. `data_source`, `pv_system_id`,
+`start_date` for extraction; `transform_step`, `pv_system_id`, `start_date` for
+transformation). This keeps the ledger queryable by domain identifiers without
+relying on parsing back the task hash.
+
+During a run, entries live at `<log_storage>/<run_date>/<workflow>/<task_hash>.jsonl`
+— one file per task, partitioned by hash so concurrent tasks never write to the
+same file. A task that fails and is retried within the same run accumulates
+multiple entries in its file. The end-of-workflow `consolidate_logs` job calls
+`consolidate_ledger`, which merges per-task files into a single
+`<log_storage>/<run_date>/<run_date>-<HHMMSS>-<workflow>.jsonl` sorted by
+`recorded_at` and deletes the originals.
+
+Currently the ledger runs alongside checkpoints and pipeline write-logs without
+displacing either. The intent is to migrate both onto the ledger over time:
+`mark_task_completed` is redundant once `filter_remaining_tasks` reads the
+ledger, and the per-write `LoggingFileSystem` audit will be subsumed by per-task
+outcome records.
+
 ## Daily Workflows (Extraction and Transformation)
 
 Both the daily extraction (`pv-prospect-extract`) and transformation

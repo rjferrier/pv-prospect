@@ -40,6 +40,12 @@ class LocalFileSystem:
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding='utf-8')
 
+    def append_text(self, path: str, content: str) -> None:
+        full_path = self._base_dir / path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        with full_path.open('a', encoding='utf-8') as fh:
+            fh.write(content)
+
     def read_bytes(self, path: str) -> bytes:
         full_path = self._base_dir / path
         if not full_path.exists():

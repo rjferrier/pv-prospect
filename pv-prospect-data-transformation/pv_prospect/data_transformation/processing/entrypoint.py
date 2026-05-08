@@ -36,6 +36,7 @@ LOCATION
     of the two must be set.
 """
 
+import json
 import logging
 import os
 import sys
@@ -47,6 +48,7 @@ from pv_prospect.common import (
     get_config,
     get_pv_site_by_system_id,
 )
+from pv_prospect.common.domain import DateRange
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
 from pv_prospect.data_sources import resolve_site
 from pv_prospect.data_transformation.config import DataTransformationConfig
@@ -69,13 +71,17 @@ from pv_prospect.etl import (
     BackfillScope,
     DegenerateDateRange,
     Extractor,
+    WorkflowOrchestrator,
     build_date_range,
+    build_env_list,
+    inject_task_hash,
 )
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
     AnyStorageConfig,
     FileSystem,
     LoggingFileSystem,
+    consolidate_ledger,
     consolidate_logs,
     get_filesystem,
 )
@@ -124,6 +130,27 @@ def _run_consolidate_logs(config: DataTransformationConfig) -> None:
     log_fs = get_filesystem(config.log_storage)
     today = date.today()
     consolidate_logs(log_fs, workflow_name, today)
+    consolidate_ledger(log_fs, workflow_name, today)
+
+
+def _build_transform_descriptor(
+    transformation: 'Transformation',
+    start_date_str: str,
+    pv_system_id: int | None,
+    location_str: str | None,
+) -> dict[str, str]:
+    descriptor: dict[str, str] = {
+        'transform_step': transformation.value,
+        'start_date': start_date_str,
+    }
+    if pv_system_id is not None:
+        descriptor['pv_system_id'] = str(pv_system_id)
+    if location_str:
+        descriptor['location'] = location_str
+    end_date = os.environ.get('END_DATE')
+    if end_date:
+        descriptor['end_date'] = end_date
+    return descriptor
 
 
 def main() -> None:
@@ -173,6 +200,7 @@ def main() -> None:
 
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
+    log_fs = get_filesystem(config.log_storage) if config.log_storage else None
     cleaned_fs = _get_logging_filesystem(
         config.staged_cleaned_data_storage, config.log_storage, workflow_name, 'cleaned'
     )
@@ -196,6 +224,50 @@ def main() -> None:
 
     logger.info('Starting %s for %s, split_by=%s', transformation, date_range, split_by)
 
+    task_hash = os.environ.get('TASK_HASH', '')
+    descriptor = _build_transform_descriptor(
+        transformation, start_date_str, pv_system_id, location_str
+    )
+    orchestrator = WorkflowOrchestrator(
+        resources_fs, workflow_name, start_date_str, log_fs=log_fs
+    )
+
+    try:
+        _run_transform_step(
+            transformation,
+            raw_fs,
+            cleaned_fs,
+            batches_fs,
+            prepared_fs,
+            config,
+            pv_system_id,
+            location_str,
+            date_range,
+            split_by,
+        )
+    except SystemExit:
+        raise
+    except Exception as e:
+        orchestrator.record_outcome(task_hash, descriptor, 'failed', error=repr(e))
+        raise
+
+    orchestrator.record_outcome(task_hash, descriptor, 'completed')
+    if task_hash:
+        orchestrator.mark_task_completed(task_hash)
+
+
+def _run_transform_step(
+    transformation: 'Transformation',
+    raw_fs: FileSystem,
+    cleaned_fs: FileSystem,
+    batches_fs: FileSystem,
+    prepared_fs: FileSystem,
+    config: DataTransformationConfig,
+    pv_system_id: int | None,
+    location_str: str | None,
+    date_range: DateRange,
+    split_by: str | None,
+) -> None:
     if transformation is Transformation.CLEAN_WEATHER:
         site = resolve_site(
             config.data_sources.weather.type,
@@ -259,24 +331,8 @@ def main() -> None:
         logger.error('unknown TRANSFORM_STEP=%s', transformation)
         sys.exit(1)
 
-    task_hash = os.environ.get('TASK_HASH')
-    if task_hash:
-        start_date_str = (
-            os.environ.get('START_DATE')
-            or os.environ.get('DATE')
-            or date.today().isoformat()
-        )
-        from pv_prospect.etl import WorkflowOrchestrator
-
-        orchestrator = WorkflowOrchestrator(resources_fs, workflow_name, start_date_str)
-        orchestrator.mark_task_completed(task_hash)
-
 
 def _run_plan_transform(resources_fs: FileSystem) -> None:
-    import json
-
-    from pv_prospect.etl import WorkflowOrchestrator, build_env_list, inject_task_hash
-
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-transform')
     start_date_str = (
         os.environ.get('START_DATE')

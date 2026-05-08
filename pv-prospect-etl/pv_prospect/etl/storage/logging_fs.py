@@ -63,6 +63,9 @@ class LoggingFileSystem:
         self._inner.write_text(path, content)
         self._log_write(path)
 
+    def append_text(self, path: str, content: str) -> None:
+        self._inner.append_text(path, content)
+
     def read_bytes(self, path: str) -> bytes:
         return self._inner.read_bytes(path)
 

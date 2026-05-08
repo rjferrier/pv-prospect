@@ -50,6 +50,16 @@ class GcsFileSystem:
         blob = self._bucket.blob(self._blob_path(path))
         blob.upload_from_string(content, content_type='text/plain')
 
+    def append_text(self, path: str, content: str) -> None:
+        """Append text by read-modify-write.
+
+        Safe only when at most one writer touches *path* at a time. The
+        ledger guarantees this by partitioning by task hash.
+        """
+        blob = self._bucket.blob(self._blob_path(path))
+        existing = blob.download_as_bytes().decode('utf-8') if blob.exists() else ''
+        blob.upload_from_string(existing + content, content_type='text/plain')
+
     def read_bytes(self, path: str) -> bytes:
         blob = self._bucket.blob(self._blob_path(path))
         return blob.download_as_bytes()

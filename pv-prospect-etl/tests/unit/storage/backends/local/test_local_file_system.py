@@ -49,6 +49,33 @@ def test_write_text_creates_parent_directories(tmp_path):
     ) == 'nested'
 
 
+def test_append_text_creates_file_when_missing(tmp_path):
+    fs = LocalFileSystem(str(tmp_path))
+
+    fs.append_text('ledger.jsonl', 'line\n')
+
+    assert (tmp_path / 'ledger.jsonl').read_text(encoding='utf-8') == 'line\n'
+
+
+def test_append_text_appends_to_existing_file(tmp_path):
+    (tmp_path / 'ledger.jsonl').write_text('first\n', encoding='utf-8')
+    fs = LocalFileSystem(str(tmp_path))
+
+    fs.append_text('ledger.jsonl', 'second\n')
+
+    assert (tmp_path / 'ledger.jsonl').read_text(encoding='utf-8') == 'first\nsecond\n'
+
+
+def test_append_text_creates_parent_directories(tmp_path):
+    fs = LocalFileSystem(str(tmp_path))
+
+    fs.append_text('sub/dir/ledger.jsonl', 'line\n')
+
+    assert (tmp_path / 'sub' / 'dir' / 'ledger.jsonl').read_text(
+        encoding='utf-8'
+    ) == 'line\n'
+
+
 def test_mkdir_creates_directory(tmp_path):
     fs = LocalFileSystem(str(tmp_path))
 

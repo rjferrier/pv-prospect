@@ -1,7 +1,17 @@
 import hashlib
 import json
+from datetime import datetime, timezone
+from typing import Callable, Literal, Mapping
 
 from pv_prospect.etl.storage import FileSystem
+from pv_prospect.etl.storage.ledger import ledger_entry_path
+
+NowFn = Callable[[], datetime]
+TaskStatus = Literal['completed', 'failed']
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def compute_task_hash(task_env: list[dict[str, str]]) -> str:
@@ -29,10 +39,23 @@ def build_env_list(**kwargs: str) -> list[dict[str, str]]:
 
 
 class WorkflowOrchestrator:
-    """Orchestrates job execution by writing manifests and tracking completion via checkpoints."""
+    """Orchestrates job execution by writing manifests and tracking completion via checkpoints.
 
-    def __init__(self, resources_fs: FileSystem, workflow_name: str, run_date: str):
+    When a *log_fs* is provided, also appends per-task outcome entries to a
+    JSONL ledger via :meth:`record_outcome`. The ledger captures both
+    successes and failures and is intended to grow into the durable record
+    of task outcomes; checkpoints remain the resumption mechanism for now.
+    """
+
+    def __init__(
+        self,
+        resources_fs: FileSystem,
+        workflow_name: str,
+        run_date: str,
+        log_fs: FileSystem | None = None,
+    ):
         self.fs = resources_fs
+        self.log_fs = log_fs
         self.workflow_name = workflow_name
         self.run_date = run_date
         self.checkpoint_prefix = f'checkpoints/{workflow_name}/{run_date}'
@@ -46,6 +69,58 @@ class WorkflowOrchestrator:
         path = f'{self.checkpoint_prefix}/{task_hash}.json'
         if not self.fs.exists(path):
             self.fs.write_text(path, json.dumps({'status': 'completed'}))
+
+    def record_outcome(
+        self,
+        task_hash: str,
+        descriptor: Mapping[str, str],
+        status: TaskStatus,
+        error: str | None = None,
+        now: NowFn = _utc_now,
+    ) -> None:
+        """Append a JSONL ledger entry recording the outcome of a task.
+
+        Each entry has the schema::
+
+            {
+                "recorded_at": "<ISO 8601 UTC>",
+                "run_date": "<YYYY-MM-DD>",
+                "workflow": "<workflow_name>",
+                "task_hash": "<sha256>",
+                "descriptor": { ... opaque per-workflow keys ... },
+                "status": "completed" | "failed",
+                "error": "<repr of exception, only for failed>"
+            }
+
+        No-op if no ``log_fs`` was configured or if *task_hash* is empty.
+        Idempotent on completed entries: a second 'completed' record for
+        the same task hash within the same run is not appended. Failures
+        are always appended (a task may be retried in-run and end up with
+        multiple 'failed' entries plus a final 'completed').
+        """
+        if self.log_fs is None or not task_hash:
+            return
+        path = ledger_entry_path(self.run_date, self.workflow_name, task_hash)
+        if status == 'completed' and self.log_fs.exists(path):
+            existing = self.log_fs.read_text(path)
+            for line in existing.splitlines():
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get('status') == 'completed':
+                    return
+        entry: dict[str, object] = {
+            'recorded_at': now().isoformat(),
+            'run_date': self.run_date,
+            'workflow': self.workflow_name,
+            'task_hash': task_hash,
+            'descriptor': dict(descriptor),
+            'status': status,
+        }
+        if error is not None:
+            entry['error'] = error
+        self.log_fs.append_text(path, json.dumps(entry) + '\n')
 
     def filter_remaining_tasks(
         self, all_tasks: list[list[dict[str, str]]]

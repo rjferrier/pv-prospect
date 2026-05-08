@@ -33,6 +33,7 @@ For **extract_and_load**:
                         data source default: day for PV, unsplit for weather)
 """
 
+import json
 import logging
 import os
 import sys
@@ -46,6 +47,7 @@ from pv_prospect.common import (
 )
 from pv_prospect.common.domain import (
     AnySite,
+    DateRange,
     Period,
 )
 from pv_prospect.data_extraction import (
@@ -79,12 +81,20 @@ from pv_prospect.data_sources import (
 from pv_prospect.data_sources import (
     get_config_dir as get_ds_config_dir,
 )
-from pv_prospect.etl import DegenerateDateRange, Extractor, build_date_range
+from pv_prospect.etl import (
+    DegenerateDateRange,
+    Extractor,
+    WorkflowOrchestrator,
+    build_date_range,
+    build_env_list,
+    inject_task_hash,
+)
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
     AnyStorageConfig,
     FileSystem,
     LoggingFileSystem,
+    consolidate_ledger,
     consolidate_logs,
     get_filesystem,
 )
@@ -150,25 +160,37 @@ def _resolve_sites(
     return sites
 
 
-def _run_extract_and_load(
+def _build_extract_descriptor(start_date_str: str) -> dict[str, str]:
+    descriptor: dict[str, str] = {
+        'data_source': os.environ.get('DATA_SOURCE', ''),
+        'start_date': start_date_str,
+    }
+    for env_name, key in (
+        ('END_DATE', 'end_date'),
+        ('PV_SYSTEM_ID', 'pv_system_id'),
+        ('LOCATION', 'location'),
+        ('SAMPLE_FILE_INDEX', 'sample_file_index'),
+    ):
+        value = os.environ.get(env_name)
+        if value:
+            descriptor[key] = value
+    return descriptor
+
+
+def _execute_extract_and_load(
     staging_fs: FileSystem,
     resources_fs: FileSystem,
     data_source: DataSource,
-) -> None:
-    dry_run = _env_bool('DRY_RUN')
-    split_by = os.environ.get('SPLIT_BY')
+    complete_date_range: DateRange,
+    split_by: str | None,
+    dry_run: bool,
+) -> list[str]:
+    """Run extraction across the resolved sites and split date ranges.
 
-    try:
-        start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
-        if not start_date_str:
-            raise ValueError('START_DATE (or DATE) must be set.')
-        complete_date_range = build_date_range(
-            start_date_str, os.environ.get('END_DATE')
-        )
-    except DegenerateDateRange as e:
-        logger.error('%s', e)
-        sys.exit(1)
-
+    Returns a list of failure descriptions (empty when every per-site,
+    per-range extraction succeeded). The empty-range case logs a warning
+    and returns an empty list — there is no work to fail.
+    """
     resources_extractor = Extractor(resources_fs)
     build_pv_site_repo(resources_extractor.read_file(core.PV_SITES_CSV_FILE))
 
@@ -202,7 +224,7 @@ def _run_extract_and_load(
             data_source,
             complete_date_range,
         )
-        return
+        return []
 
     failures: list[str] = []
     for site in sites:
@@ -218,34 +240,63 @@ def _run_extract_and_load(
             logger.info('%s %s: %s', site, dr, result.type.value)
             if result.type == ResultType.FAILURE:
                 failures.append(f'{site} {dr}')
+    return failures
 
-    if failures:
-        logger.error(
-            'extract_and_load: %d task(s) failed: %s',
-            len(failures),
-            ', '.join(failures),
+
+def _run_extract_and_load(
+    staging_fs: FileSystem,
+    resources_fs: FileSystem,
+    log_fs: FileSystem | None,
+    data_source: DataSource,
+) -> None:
+    dry_run = _env_bool('DRY_RUN')
+    split_by = os.environ.get('SPLIT_BY')
+
+    try:
+        start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
+        if not start_date_str:
+            raise ValueError('START_DATE (or DATE) must be set.')
+        complete_date_range = build_date_range(
+            start_date_str, os.environ.get('END_DATE')
         )
+    except DegenerateDateRange as e:
+        logger.error('%s', e)
         sys.exit(1)
 
-    task_hash = os.environ.get('TASK_HASH')
-    if task_hash:
-        workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
-        start_date_str = (
-            os.environ.get('START_DATE')
-            or os.environ.get('DATE')
-            or date.today().isoformat()
-        )
-        from pv_prospect.etl import WorkflowOrchestrator
+    task_hash = os.environ.get('TASK_HASH', '')
+    workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
+    descriptor = _build_extract_descriptor(start_date_str)
+    orchestrator = WorkflowOrchestrator(
+        resources_fs, workflow_name, start_date_str, log_fs=log_fs
+    )
 
-        orchestrator = WorkflowOrchestrator(resources_fs, workflow_name, start_date_str)
+    try:
+        failures = _execute_extract_and_load(
+            staging_fs,
+            resources_fs,
+            data_source,
+            complete_date_range,
+            split_by,
+            dry_run,
+        )
+    except Exception as e:
+        orchestrator.record_outcome(task_hash, descriptor, 'failed', error=repr(e))
+        raise
+
+    if failures:
+        error_summary = f'{len(failures)} task(s) failed: ' + ', '.join(failures)
+        orchestrator.record_outcome(
+            task_hash, descriptor, 'failed', error=error_summary
+        )
+        logger.error('extract_and_load: %s', error_summary)
+        sys.exit(1)
+
+    orchestrator.record_outcome(task_hash, descriptor, 'completed')
+    if task_hash:
         orchestrator.mark_task_completed(task_hash)
 
 
 def _run_plan_extract(resources_fs: FileSystem) -> None:
-    import json
-
-    from pv_prospect.etl import WorkflowOrchestrator, build_env_list, inject_task_hash
-
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
     start_date_str = (
         os.environ.get('START_DATE')
@@ -354,6 +405,7 @@ def _run_consolidate_logs(config: DataExtractionConfig) -> None:
     log_fs = get_filesystem(config.log_storage)
     today = date.today()
     consolidate_logs(log_fs, workflow_name, today)
+    consolidate_ledger(log_fs, workflow_name, today)
 
 
 def main() -> None:
@@ -379,13 +431,14 @@ def main() -> None:
         config.staged_raw_data_storage, config.log_storage, workflow_name, 'raw'
     )
     resources_fs = get_filesystem(config.resources_storage)
+    log_fs = get_filesystem(config.log_storage) if config.log_storage else None
 
     if job_type == 'preprocess':
         _run_preprocess(staging_fs, data_source)
     elif job_type == 'plan_extract':
         _run_plan_extract(resources_fs)
     elif job_type == 'extract_and_load':
-        _run_extract_and_load(staging_fs, resources_fs, data_source)
+        _run_extract_and_load(staging_fs, resources_fs, log_fs, data_source)
     elif job_type == 'plan_weather_grid_backfill':
         _run_plan_weather_grid_backfill(resources_fs)
     elif job_type == 'commit_weather_grid_backfill':

@@ -28,6 +28,9 @@ class FakeFileSystem:
     def write_text(self, path: str, content: str) -> None:
         self._files[path] = content
 
+    def append_text(self, path: str, content: str) -> None:
+        self._files[path] = self._files.get(path, '') + content
+
     def read_bytes(self, path: str) -> bytes:
         if path not in self._binary_files:
             raise FileNotFoundError(path)
