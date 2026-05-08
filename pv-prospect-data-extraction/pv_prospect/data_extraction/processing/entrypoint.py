@@ -292,11 +292,11 @@ def _run_extract_and_load(
         sys.exit(1)
 
     orchestrator.record_outcome(task_hash, descriptor, 'completed')
-    if task_hash:
-        orchestrator.mark_task_completed(task_hash)
 
 
-def _run_plan_extract(resources_fs: FileSystem) -> None:
+def _run_plan_extract(
+    resources_fs: FileSystem, log_fs: FileSystem | None = None
+) -> None:
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
     start_date_str = (
         os.environ.get('START_DATE')
@@ -311,7 +311,9 @@ def _run_plan_extract(resources_fs: FileSystem) -> None:
     dry_run = os.environ.get('DRY_RUN', 'false')
     split_by = os.environ.get('SPLIT_BY', '')
 
-    orchestrator = WorkflowOrchestrator(resources_fs, workflow_name, start_date_str)
+    orchestrator = WorkflowOrchestrator(
+        resources_fs, workflow_name, start_date_str, log_fs=log_fs
+    )
     all_tasks = []
 
     for pv_id in pv_system_ids:
@@ -436,7 +438,7 @@ def main() -> None:
     if job_type == 'preprocess':
         _run_preprocess(staging_fs, data_source)
     elif job_type == 'plan_extract':
-        _run_plan_extract(resources_fs)
+        _run_plan_extract(resources_fs, log_fs)
     elif job_type == 'extract_and_load':
         _run_extract_and_load(staging_fs, resources_fs, log_fs, data_source)
     elif job_type == 'plan_weather_grid_backfill':

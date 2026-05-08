@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Callable, Literal, Mapping
 
 from pv_prospect.etl.storage import FileSystem
-from pv_prospect.etl.storage.ledger import ledger_entry_path
+from pv_prospect.etl.storage.ledger import ledger_entry_path, ledger_prefix
 
 NowFn = Callable[[], datetime]
 TaskStatus = Literal['completed', 'failed']
@@ -12,6 +12,22 @@ TaskStatus = Literal['completed', 'failed']
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _parse_ledger_line(line: str) -> dict[str, object] | None:
+    try:
+        rec = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def _has_completed_entry(content: str) -> bool:
+    for line in content.splitlines():
+        rec = _parse_ledger_line(line)
+        if rec is not None and rec.get('status') == 'completed':
+            return True
+    return False
 
 
 def compute_task_hash(task_env: list[dict[str, str]]) -> str:
@@ -39,12 +55,17 @@ def build_env_list(**kwargs: str) -> list[dict[str, str]]:
 
 
 class WorkflowOrchestrator:
-    """Orchestrates job execution by writing manifests and tracking completion via checkpoints.
+    """Orchestrates job execution by writing manifests and tracking task outcomes
+    via the JSONL ledger on *log_fs*.
 
-    When a *log_fs* is provided, also appends per-task outcome entries to a
-    JSONL ledger via :meth:`record_outcome`. The ledger captures both
-    successes and failures and is intended to grow into the durable record
-    of task outcomes; checkpoints remain the resumption mechanism for now.
+    Each task records its outcome (``completed`` or ``failed``) through
+    :meth:`record_outcome`. ``filter_remaining_tasks`` consults the same ledger
+    to skip already-completed tasks on re-run, so the ledger doubles as both
+    audit trail and resumption mechanism.
+
+    When no *log_fs* is configured, ``record_outcome`` is a no-op and
+    ``filter_remaining_tasks`` returns every task — i.e. resumption is disabled
+    but workflows still run.
     """
 
     def __init__(
@@ -58,17 +79,7 @@ class WorkflowOrchestrator:
         self.log_fs = log_fs
         self.workflow_name = workflow_name
         self.run_date = run_date
-        self.checkpoint_prefix = f'checkpoints/{workflow_name}/{run_date}'
         self.manifest_path = f'manifests/{workflow_name}_{run_date}.json'
-
-    def mark_task_completed(self, task_hash: str) -> None:
-        """Write a checkpoint file to mark a task as completed."""
-        if not task_hash:
-            return
-
-        path = f'{self.checkpoint_prefix}/{task_hash}.json'
-        if not self.fs.exists(path):
-            self.fs.write_text(path, json.dumps({'status': 'completed'}))
 
     def record_outcome(
         self,
@@ -102,14 +113,8 @@ class WorkflowOrchestrator:
             return
         path = ledger_entry_path(self.run_date, self.workflow_name, task_hash)
         if status == 'completed' and self.log_fs.exists(path):
-            existing = self.log_fs.read_text(path)
-            for line in existing.splitlines():
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if rec.get('status') == 'completed':
-                    return
+            if _has_completed_entry(self.log_fs.read_text(path)):
+                return
         entry: dict[str, object] = {
             'recorded_at': now().isoformat(),
             'run_date': self.run_date,
@@ -125,23 +130,42 @@ class WorkflowOrchestrator:
     def filter_remaining_tasks(
         self, all_tasks: list[list[dict[str, str]]]
     ) -> list[list[dict[str, str]]]:
-        """Filter out tasks that have already been marked as completed."""
-        entries = self.fs.list_files(self.checkpoint_prefix, '*.json')
-        completed_hashes = {
-            entry.path.split('/')[-1].replace('.json', '') for entry in entries
-        }
+        """Filter out tasks whose ledger shows a 'completed' entry.
 
+        Reads both per-task ledger files (``<run_date>/<workflow>/<hash>.jsonl``,
+        present mid-run) and any consolidated ledger files (``<run_date>/
+        <run_date>-<HHMMSS>-<workflow>.jsonl``, present once consolidation has
+        run). When *log_fs* is None, no filtering happens — every task is
+        returned, so the workflow proceeds without resumption.
+        """
+        completed = self._completed_task_hashes()
         remaining = []
         for task in all_tasks:
-            # Extract task hash
             thash = next((e['value'] for e in task if e['name'] == 'TASK_HASH'), None)
-            if thash and thash not in completed_hashes:
+            if not thash or thash not in completed:
                 remaining.append(task)
-            elif not thash:
-                # If a task somehow has no hash, run it to be safe
-                remaining.append(task)
-
         return remaining
+
+    def _completed_task_hashes(self) -> set[str]:
+        log_fs = self.log_fs
+        if log_fs is None:
+            return set()
+        completed: set[str] = set()
+        per_task_dir = ledger_prefix(self.run_date, self.workflow_name)
+        for entry in log_fs.list_files(per_task_dir, '*.jsonl'):
+            if _has_completed_entry(log_fs.read_text(entry.path)):
+                completed.add(entry.name.removesuffix('.jsonl'))
+        consolidated_pattern = f'{self.run_date}-*-{self.workflow_name}.jsonl'
+        for entry in log_fs.list_files(self.run_date, consolidated_pattern):
+            for line in log_fs.read_text(entry.path).splitlines():
+                rec = _parse_ledger_line(line)
+                if rec is None:
+                    continue
+                if rec.get('status') == 'completed':
+                    task_hash = rec.get('task_hash')
+                    if isinstance(task_hash, str) and task_hash:
+                        completed.add(task_hash)
+        return completed
 
     def write_manifest(self, phases: list[list[list[dict[str, str]]]]) -> None:
         """Write the phases and tasks to the manifest file."""

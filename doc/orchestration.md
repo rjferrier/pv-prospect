@@ -1,11 +1,12 @@
 # Workflow Orchestration
 
-This document describes the manifest/checkpoint system that coordinates work
+This document describes the manifest/ledger system that coordinates work
 across the extraction and transformation pipelines. The shared logic lives in
 the `pv-prospect-etl` package:
 
-- `pv_prospect.etl.orchestration` — orchestrator manifests + per-task checkpoints
-  for the daily phased workflows.
+- `pv_prospect.etl.orchestration` — orchestrator manifests and the per-task
+  outcome ledger that drives both audit and resumption for the daily phased
+  workflows.
 - `pv_prospect.etl.backfill` — `BackfillScope`, `BackfillCursor`, and the
   plan-commit primitives that extraction and transformation backfills both
   delegate to. Centralising it here means changing a window length in one place
@@ -22,7 +23,7 @@ Each Cloud Run Job task is identified by a deterministic SHA256 hash of its
 environment variables (excluding `TASK_HASH` itself). This hash is:
 
 - Injected into the task's environment as `TASK_HASH` before dispatch.
-- Used as the checkpoint filename on completion.
+- Used as the ledger entry filename for the task.
 - Stable across re-runs with the same parameters, enabling idempotent recovery.
 
 ### Manifests
@@ -39,25 +40,12 @@ written by a `plan_*` job type and read by the Cloud Workflow to drive dispatch.
 
 Manifest path: `resources/manifests/{workflow_name}_{run_date}.json`
 
-### Checkpoints
-
-After each task completes successfully,
-`WorkflowOrchestrator.mark_task_completed()` writes a checkpoint file:
-
-```
-resources/checkpoints/{workflow_name}/{run_date}/{task_hash}.json
-```
-
-On re-run, `filter_remaining_tasks()` scans the checkpoint directory and removes
-already-completed tasks from the manifest, so the workflow resumes from where it
-left off.
-
 ### Task-Outcome Ledger
 
-Alongside checkpoints, each task records a JSONL outcome entry on the
-`log_storage` filesystem via `WorkflowOrchestrator.record_outcome()`. Unlike
-checkpoints (which only mark successes), the ledger records both `completed` and
-`failed` outcomes, giving us a durable audit trail of what each run actually did.
+Each task records its outcome on the `log_storage` filesystem via
+`WorkflowOrchestrator.record_outcome()`. The ledger is the single source of
+truth for both audit (what each run actually did) and resumption (which tasks to
+skip on re-run).
 
 Each entry has the schema:
 
@@ -87,11 +75,11 @@ multiple entries in its file. The end-of-workflow `consolidate_logs` job calls
 `<log_storage>/<run_date>/<run_date>-<HHMMSS>-<workflow>.jsonl` sorted by
 `recorded_at` and deletes the originals.
 
-Currently the ledger runs alongside checkpoints and pipeline write-logs without
-displacing either. The intent is to migrate both onto the ledger over time:
-`mark_task_completed` is redundant once `filter_remaining_tasks` reads the
-ledger, and the per-write `LoggingFileSystem` audit will be subsumed by per-task
-outcome records.
+`filter_remaining_tasks()` consults the ledger (per-task files mid-run, the
+consolidated file post-consolidation) and skips any task whose hash already
+appears with `status='completed'`. Failures alone do not cause skipping —
+a re-run will re-attempt failed tasks. When `log_fs` is not configured (e.g.
+some local dev setups), filtering is disabled and every task is dispatched.
 
 ## Daily Workflows (Extraction and Transformation)
 
@@ -102,13 +90,14 @@ Both the daily extraction (`pv-prospect-extract`) and transformation
    inspects available data and writes a phased manifest to GCS.
 2. **Dispatch** -- The Cloud Workflow reads the manifest, iterates phases, and
    dispatches tasks in parallel. Each dispatched task carries a `TASK_HASH` env
-   var. On completion, the task writes its checkpoint. The workflow retries on
-   429/500/503.
-3. **Consolidate** -- A final `consolidate_logs` job merges micro-log files into
-   date-partitioned consolidated logs and cleans up empty directories.
+   var. On completion (or on failure), the task records a ledger entry. The
+   workflow retries on 429/500/503.
+3. **Consolidate** -- A final `consolidate_logs` job merges micro-log files and
+   per-task ledger entries into date-partitioned consolidated files and cleans
+   up empty directories.
 
 If a workflow is interrupted mid-run, re-triggering it repeats steps 1-3 but the
-checkpoint filter in step 2 ensures already-completed tasks are skipped.
+ledger filter in step 2 ensures already-completed tasks are skipped.
 
 ## Backfill Workflows (Plan-Commit Pattern)
 
@@ -119,7 +108,7 @@ daily workflows because they process a moving window across days:
    computes the next window, and writes a manifest containing both the work items
    and the **next cursor** value.
 2. **Dispatch** -- Cloud Workflow dispatches tasks. The extract-side weather
-   grid backfill additionally maintains a GCS checkpoint tracking completed
+   grid backfill additionally maintains a GCS marker tracking completed
    batches (by index) to allow within-run resumption.
 3. **Commit** -- Only after all tasks succeed, the next cursor is promoted to
    live. This ensures the cursor only advances when work actually completes.
@@ -166,7 +155,7 @@ pattern in a plan-commit envelope. Each run:
    an orchestrator manifest of `clean → prepare → assemble` phases over every
    day in the window.
 3. Executes the phased manifest using the same dispatcher the daily transform
-   uses; per-task checkpoints make re-runs idempotent.
+   uses; per-task ledger entries make re-runs idempotent.
 4. Calls `commit_transform_backfill` to promote the next-cursor — only reached
    if every task succeeded, so a failed run leaves the cursor unchanged for
    tomorrow's scheduled re-plan.

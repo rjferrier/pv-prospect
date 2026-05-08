@@ -187,8 +187,8 @@ sleep so the rate limit is respected. The checkpoint is deleted on success.
 
 The transform backfills (`pv-prospect-transform-pv-sites-backfill` and
 `pv-prospect-transform-weather-grid-backfill`) use the shared
-`WorkflowOrchestrator` per-task checkpoints (keyed by `(workflow_name,
-run_date, task_hash)`) rather than a workflow-level checkpoint file. To resume,
+`WorkflowOrchestrator` task-outcome ledger (keyed by `(workflow_name, run_date,
+task_hash)`) rather than a workflow-level checkpoint file. To resume,
 re-trigger the same workflow:
 
 ```bash
@@ -198,5 +198,5 @@ gcloud workflows run pv-prospect-transform-pv-sites-backfill \
 
 The plan-commit envelope re-derives the same window from the live cursor (which
 was not advanced because the previous run failed before `commit_transform_backfill`),
-re-plans the orchestrator manifest, and the per-task checkpoint filter skips
-already-completed `clean` / `prepare` / `assemble` tasks.
+re-plans the orchestrator manifest, and the ledger filter skips already-completed
+`clean` / `prepare` / `assemble` tasks.

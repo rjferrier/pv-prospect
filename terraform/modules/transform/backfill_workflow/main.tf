@@ -19,9 +19,8 @@
 #   6. consolidate_logs.
 #
 # If any transform job fails the cursor is not advanced, so tomorrow's
-# scheduled run replans the same window. The orchestrator's per-task
-# checkpoints (keyed by workflow + run_date) ensure already-completed
-# tasks are skipped on re-run.
+# scheduled run replans the same window. The orchestrator's task-outcome
+# ledger ensures already-completed tasks are skipped on re-run.
 
 locals {
   workflow_name = "pv-prospect-transform-${var.workflow_name_suffix}-backfill"
@@ -147,7 +146,7 @@ resource "google_workflows_workflow" "transform_backfill" {
                 # Orchestrator manifests are keyed by (workflow, run_date)
                 # — see WorkflowOrchestrator. For the backfill we use
                 # start_date as the run_date so re-triggering the same day
-                # finds the existing checkpoints.
+                # finds the existing manifest and ledger entries.
                 - fetch_orchestrator_manifest:
                     call: googleapis.storage.v1.objects.get
                     args:

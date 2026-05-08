@@ -167,7 +167,8 @@ def main() -> None:
 
     if job_type == 'plan_transform':
         resources_fs = get_filesystem(config.resources_storage)
-        _run_plan_transform(resources_fs)
+        log_fs = get_filesystem(config.log_storage) if config.log_storage else None
+        _run_plan_transform(resources_fs, log_fs)
         return
     elif job_type == 'plan_transform_backfill':
         resources_fs = get_filesystem(config.resources_storage)
@@ -252,8 +253,6 @@ def main() -> None:
         raise
 
     orchestrator.record_outcome(task_hash, descriptor, 'completed')
-    if task_hash:
-        orchestrator.mark_task_completed(task_hash)
 
 
 def _run_transform_step(
@@ -332,7 +331,9 @@ def _run_transform_step(
         sys.exit(1)
 
 
-def _run_plan_transform(resources_fs: FileSystem) -> None:
+def _run_plan_transform(
+    resources_fs: FileSystem, log_fs: FileSystem | None = None
+) -> None:
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-transform')
     start_date_str = (
         os.environ.get('START_DATE')
@@ -344,7 +345,9 @@ def _run_plan_transform(resources_fs: FileSystem) -> None:
     locations = json.loads(os.environ.get('LOCATIONS', '[]'))
     split_by = os.environ.get('SPLIT_BY', '')
 
-    orchestrator = WorkflowOrchestrator(resources_fs, workflow_name, start_date_str)
+    orchestrator = WorkflowOrchestrator(
+        resources_fs, workflow_name, start_date_str, log_fs=log_fs
+    )
 
     phases = []
 

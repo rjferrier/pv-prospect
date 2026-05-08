@@ -16,7 +16,7 @@ This is a Python monorepo with four primary packages and supporting directories:
 | Directory | Purpose |
 |---|---|
 | `pv-prospect-common/` | Shared domain models and utilities |
-| `pv-prospect-etl/` | Storage abstraction (Loader/Extractor protocols) and workflow orchestration (manifests, checkpoints) |
+| `pv-prospect-etl/` | Storage abstraction (Loader/Extractor protocols) and workflow orchestration (manifests, task-outcome ledger) |
 | `pv-prospect-data-sources/` | Shared constants, path builders, source descriptors |
 | `pv-prospect-data-extraction/` | API extraction pipeline (PVOutput + OpenMeteo) with manifest planning and backfill cursors |
 | `pv-prospect-data-transformation/` | Data cleaning and processing pipeline |
@@ -114,14 +114,17 @@ obtain instances.
 ## Architecture: Workflow Orchestration (`pv-prospect-etl`)
 
 The `pv_prospect.etl.orchestration` module provides `WorkflowOrchestrator`, a
-shared manifest/checkpoint system used by both extraction and transformation
+shared manifest/ledger system used by both extraction and transformation
 workflows. It enables safe resumption after failures:
 
 - **Manifests** (`resources/manifests/`): JSON files describing the work plan for
   a run, structured as phases of parallel tasks.
-- **Checkpoints** (`resources/checkpoints/{workflow_name}/{run_date}/`): Per-task
-  completion markers keyed by a deterministic SHA256 hash of task environment
-  variables. On re-run, `filter_remaining_tasks()` skips completed tasks.
+- **Task-outcome ledger** (on `log_storage`,
+  `<run_date>/<workflow>/<task_hash>.jsonl` per task, consolidated to
+  `<run_date>/<run_date>-<HHMMSS>-<workflow>.jsonl` at workflow end): JSONL
+  entries recording each task's outcome (`completed` or `failed`) keyed by a
+  deterministic SHA256 hash of task environment variables. On re-run,
+  `filter_remaining_tasks()` skips tasks whose ledger shows a `completed` entry.
 - **Plan-commit pattern** (backfills): A cursor tracks progress between daily
   runs. Planning writes a manifest with the next cursor; committing promotes it
   only after work succeeds.
@@ -200,3 +203,5 @@ Practices:
   - Otherwise, if the change (1) concerns just one sub-project, document it in an
     appropriate .md file in the `doc/` directory of the appropriate sub-project.
     (Create the directory and file if necessary.)
+- Check all such documentation when modifying or removing functionality, and update it
+  as appropriate.
