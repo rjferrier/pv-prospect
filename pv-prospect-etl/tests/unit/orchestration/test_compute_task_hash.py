@@ -39,6 +39,20 @@ def test_excludes_existing_task_hash_from_computation() -> None:
     assert compute_task_hash(base) == compute_task_hash(with_hash)
 
 
+def test_excludes_run_date_from_computation() -> None:
+    """RUN_DATE is the workflow trigger date — same data-window task run on
+    two different days must hash identically so cross-day resume works."""
+    base = [
+        {'name': 'JOB_TYPE', 'value': 'extract'},
+        {'name': 'START_DATE', 'value': '2025-06-24'},
+    ]
+    monday = base + [{'name': 'RUN_DATE', 'value': '2025-06-23'}]
+    tuesday = base + [{'name': 'RUN_DATE', 'value': '2025-06-24'}]
+
+    assert compute_task_hash(monday) == compute_task_hash(tuesday)
+    assert compute_task_hash(base) == compute_task_hash(monday)
+
+
 def test_different_inputs_produce_different_hashes() -> None:
     a = compute_task_hash([{'name': 'PV_SYSTEM_ID', 'value': '89665'}])
     b = compute_task_hash([{'name': 'PV_SYSTEM_ID', 'value': '12345'}])

@@ -30,13 +30,6 @@ locals {
   # logic emits no spurious tasks of the wrong kind.
   pv_system_ids_json = var.backfill_scope == "pv_sites" ? jsonencode(var.default_pv_system_ids) : "[]"
   locations_json     = var.backfill_scope == "weather_grid" ? jsonencode(var.default_locations) : "[]"
-
-  # Path of the date-window plan produced by plan_transform_backfill.
-  # Mirrors the BackfillPaths constants in
-  # pv_prospect.data_transformation.processing.transform_backfill — the
-  # 'resources/' prefix here is the resources_storage GCS prefix, which
-  # the Python side does not see.
-  backfill_manifest_object = "resources/manifests/todays_${var.backfill_scope}_transform_backfill_manifest.json"
 }
 
 resource "google_workflows_workflow" "transform_backfill" {
@@ -59,7 +52,12 @@ resource "google_workflows_workflow" "transform_backfill" {
               - bucket: "${var.staging_bucket_name}"
               - workflow_name: "${local.workflow_name}"
               - backfill_scope: "${var.backfill_scope}"
-              - backfill_manifest_object: "${local.backfill_manifest_object}"
+              # Workflow trigger date (UTC), pinned once and propagated to every
+              # task as RUN_DATE. The plan_transform_backfill job writes the
+              # backfill manifest at this run_date; the orchestrator manifest
+              # from plan_transform lands under the same run_date.
+              - run_date: $${text.substring(time.format(sys.now()), 0, 10)}
+              - backfill_manifest_object: $${"tracking/manifests/" + run_date + "/" + workflow_name + ".backfill.json"}
               - pv_system_ids: ${local.pv_system_ids_json}
               - locations: ${local.locations_json}
 
@@ -81,6 +79,8 @@ resource "google_workflows_workflow" "transform_backfill" {
                                   value: $${backfill_scope}
                                 - name: WORKFLOW_NAME
                                   value: $${workflow_name}
+                                - name: RUN_DATE
+                                  value: $${run_date}
                     result: plan_backfill_op
                 - wait_plan_backfill_op:
                     call: wait_for_operation
@@ -119,6 +119,8 @@ resource "google_workflows_workflow" "transform_backfill" {
                                   value: plan_transform
                                 - name: WORKFLOW_NAME
                                   value: $${workflow_name}
+                                - name: RUN_DATE
+                                  value: $${run_date}
                                 - name: START_DATE
                                   value: $${start_date}
                                 - name: END_DATE
@@ -143,15 +145,14 @@ resource "google_workflows_workflow" "transform_backfill" {
                       execution_name: $${plan_transform_op_done.response.name}
 
                 # ---------- 4. fetch + execute the orchestrator manifest ----------
-                # Orchestrator manifests are keyed by (workflow, run_date)
-                # — see WorkflowOrchestrator. For the backfill we use
-                # start_date as the run_date so re-triggering the same day
-                # finds the existing manifest and ledger entries.
+                # The orchestrator phases manifest lives at
+                # tracking/manifests/<run_date>/<workflow>.json (alongside
+                # the .backfill.json date-window plan above).
                 - fetch_orchestrator_manifest:
                     call: googleapis.storage.v1.objects.get
                     args:
                       bucket: $${bucket}
-                      object: $${text.url_encode("resources/manifests/" + workflow_name + "_" + start_date + ".json")}
+                      object: $${text.url_encode("tracking/manifests/" + run_date + "/" + workflow_name + ".json")}
                       alt: media
                     result: orchestrator_manifest_raw
                 - decode_orchestrator_manifest:
@@ -225,6 +226,8 @@ resource "google_workflows_workflow" "transform_backfill" {
                                   value: $${backfill_scope}
                                 - name: WORKFLOW_NAME
                                   value: $${workflow_name}
+                                - name: RUN_DATE
+                                  value: $${run_date}
                     result: commit_backfill_op
                 - wait_commit_backfill_op:
                     call: wait_for_operation
@@ -257,6 +260,8 @@ resource "google_workflows_workflow" "transform_backfill" {
                           value: consolidate_logs
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
+                        - name: RUN_DATE
+                          value: $${run_date}
             result: consolidate_logs_op
         - wait_consolidate_op:
             call: wait_for_operation

@@ -8,16 +8,20 @@ PV_SITES default window (28 days) is applied when none is given.
 from datetime import date, timedelta
 
 from pv_prospect.data_extraction.processing.pv_backfill import (
+    WORKFLOW_NAME,
     commit_pv_site_backfill,
     plan_pv_site_backfill,
 )
-from pv_prospect.etl import deserialize_plan, load_cursor
-from pv_prospect.etl.backfill import BackfillPaths
-
-_EXPECTED_PATHS = BackfillPaths(
-    cursor='manifests/pv_backfill_cursor.json',
-    manifest='manifests/todays_pv_backfill_manifest.json',
+from pv_prospect.etl import (
+    cursor_filename,
+    deserialize_plan,
+    load_cursor,
+    manifest_filename,
 )
+
+_RUN_DATE = '2026-05-06'
+_EXPECTED_CURSOR = cursor_filename(WORKFLOW_NAME)
+_EXPECTED_MANIFEST = manifest_filename(WORKFLOW_NAME, _RUN_DATE)
 
 
 class _FakeFileSystem:
@@ -35,40 +39,44 @@ class _FakeFileSystem:
 
 
 def test_plan_writes_manifest_at_expected_path() -> None:
-    fs = _FakeFileSystem()
+    cursors_fs = _FakeFileSystem()
+    manifests_fs = _FakeFileSystem()
 
-    plan_pv_site_backfill(date(2026, 5, 6), fs)
+    plan_pv_site_backfill(date(2026, 5, 6), _RUN_DATE, cursors_fs, manifests_fs)
 
-    assert _EXPECTED_PATHS.manifest in fs.files
+    assert _EXPECTED_MANIFEST in manifests_fs.files
 
 
 def test_plan_uses_28_day_default_window() -> None:
-    fs = _FakeFileSystem()
+    cursors_fs = _FakeFileSystem()
+    manifests_fs = _FakeFileSystem()
     today = date(2026, 5, 6)
 
-    plan = plan_pv_site_backfill(today, fs)
+    plan = plan_pv_site_backfill(today, _RUN_DATE, cursors_fs, manifests_fs)
 
     assert plan.start_date == today - timedelta(days=28)
     assert plan.end_date == today
 
 
 def test_commit_advances_cursor_at_expected_path() -> None:
-    fs = _FakeFileSystem()
+    cursors_fs = _FakeFileSystem()
+    manifests_fs = _FakeFileSystem()
     today = date(2026, 5, 6)
 
-    plan_pv_site_backfill(today, fs)
-    commit_pv_site_backfill(fs)
+    plan_pv_site_backfill(today, _RUN_DATE, cursors_fs, manifests_fs)
+    commit_pv_site_backfill(_RUN_DATE, cursors_fs, manifests_fs)
 
-    assert _EXPECTED_PATHS.cursor in fs.files
-    cursor = load_cursor(fs, _EXPECTED_PATHS, today)
+    assert _EXPECTED_CURSOR in cursors_fs.files
+    cursor = load_cursor(cursors_fs, WORKFLOW_NAME, today)
     assert cursor.next_end_date == today - timedelta(days=28)
 
 
 def test_manifest_contents_round_trip() -> None:
-    fs = _FakeFileSystem()
+    cursors_fs = _FakeFileSystem()
+    manifests_fs = _FakeFileSystem()
     today = date(2026, 5, 6)
 
-    returned = plan_pv_site_backfill(today, fs)
-    persisted, _ = deserialize_plan(fs.files[_EXPECTED_PATHS.manifest])
+    returned = plan_pv_site_backfill(today, _RUN_DATE, cursors_fs, manifests_fs)
+    persisted, _ = deserialize_plan(manifests_fs.files[_EXPECTED_MANIFEST])
 
     assert returned == persisted

@@ -43,7 +43,11 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
               - job_name: "${var.cloud_run_job_name}"
               - workflow_name: "pv-prospect-extract-pv-sites-backfill"
               - bucket: "${var.staging_bucket_name}"
-              - manifest_object: "${var.manifest_object_path}"
+              # Workflow trigger date (UTC), pinned once and propagated to every
+              # task as RUN_DATE. Distinct from manifest.start_date / end_date
+              # (the data window the backfill is processing).
+              - run_date: $${text.substring(time.format(sys.now()), 0, 10)}
+              - manifest_object: $${"tracking/manifests/" + run_date + "/" + workflow_name + ".backfill.json"}
               - checkpoint_object: "${var.checkpoint_object_path}"
               - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
               - pv_data_source: $${default(map.get(args, "pv_data_source"), "${var.pv_data_source}")}
@@ -63,6 +67,8 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                           value: plan_pv_site_backfill
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
+                        - name: RUN_DATE
+                          value: $${run_date}
             result: plan_op
 
         - wait_for_plan_op:
@@ -153,6 +159,8 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                                   value: day
                                 - name: WORKFLOW_NAME
                                   value: $${workflow_name}
+                                - name: RUN_DATE
+                                  value: $${run_date}
                     result: pv_op
                 - wait_for_pv_op:
                     call: wait_for_operation
@@ -213,6 +221,8 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                                           value: $${manifest.end_date}
                                         - name: WORKFLOW_NAME
                                           value: $${workflow_name}
+                                        - name: RUN_DATE
+                                          value: $${run_date}
                             result: weather_op
                         - wait_for_weather_op:
                             call: wait_for_operation
@@ -236,6 +246,8 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                           value: commit_pv_site_backfill
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
+                        - name: RUN_DATE
+                          value: $${run_date}
             result: commit_op
 
         - wait_for_commit_op:
@@ -277,6 +289,8 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                           value: consolidate_logs
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
+                        - name: RUN_DATE
+                          value: $${run_date}
             result: consolidate_logs_op
 
         - wait_for_consolidate_op:

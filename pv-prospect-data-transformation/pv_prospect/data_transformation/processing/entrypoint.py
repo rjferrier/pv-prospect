@@ -110,27 +110,48 @@ def _get_logging_filesystem(
     storage_config: 'AnyStorageConfig',
     log_storage: 'AnyStorageConfig | None',
     workflow_name: str,
+    run_date: str,
     label: str,
 ) -> FileSystem:
     fs: FileSystem = get_filesystem(storage_config)
     if workflow_name and log_storage:
         log_fs = get_filesystem(log_storage)
-        return LoggingFileSystem(fs, log_fs, workflow_name, label)
+        return LoggingFileSystem(fs, log_fs, workflow_name, run_date, label)
     logger.warning(
         'Write-logging disabled for %s (no WORKFLOW_NAME or log_storage)', label
     )
     return fs
 
 
-def _run_consolidate_logs(config: DataTransformationConfig) -> None:
+def _run_consolidate_logs(config: DataTransformationConfig, run_date: str) -> None:
     workflow_name = os.environ.get('WORKFLOW_NAME', '')
-    if not workflow_name or not config.log_storage:
-        logger.warning('consolidate_logs: WORKFLOW_NAME or log_storage not configured')
+    if not workflow_name:
+        logger.warning('consolidate_logs: WORKFLOW_NAME not configured')
         return
-    log_fs = get_filesystem(config.log_storage)
-    today = date.today()
-    consolidate_logs(log_fs, workflow_name, today)
-    consolidate_ledger(log_fs, workflow_name, today)
+    run_date_obj = date.fromisoformat(run_date)
+    if config.log_storage:
+        log_fs = get_filesystem(config.log_storage)
+        consolidate_logs(log_fs, workflow_name, run_date_obj)
+    if config.ledger_storage:
+        ledger_fs = get_filesystem(config.ledger_storage)
+        consolidate_ledger(ledger_fs, workflow_name, run_date_obj)
+
+
+def _resolve_run_date() -> str:
+    """Return the workflow's UTC trigger date.
+
+    Read from ``RUN_DATE`` (set once by the Cloud Workflow ``init`` step
+    and propagated to every task); fall back to ``date.today()`` for
+    local one-off invocations.
+    """
+    return os.environ.get('RUN_DATE') or date.today().isoformat()
+
+
+def _required(fs: FileSystem | None, name: str) -> FileSystem:
+    if fs is None:
+        logger.error('%s is required for this JOB_TYPE but not configured', name)
+        sys.exit(1)
+    return fs
 
 
 def _build_transform_descriptor(
@@ -155,6 +176,7 @@ def _build_transform_descriptor(
 
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
+    run_date = _resolve_run_date()
 
     config = get_config(
         DataTransformationConfig,
@@ -165,21 +187,35 @@ def main() -> None:
         ],
     )
 
+    manifests_fs = (
+        get_filesystem(config.manifests_storage) if config.manifests_storage else None
+    )
+    cursors_fs = (
+        get_filesystem(config.cursors_storage) if config.cursors_storage else None
+    )
+    ledger_fs = get_filesystem(config.ledger_storage) if config.ledger_storage else None
+
     if job_type == 'plan_transform':
-        resources_fs = get_filesystem(config.resources_storage)
-        log_fs = get_filesystem(config.log_storage) if config.log_storage else None
-        _run_plan_transform(resources_fs, log_fs)
+        _run_plan_transform(
+            run_date, _required(manifests_fs, 'manifests_storage'), ledger_fs
+        )
         return
     elif job_type == 'plan_transform_backfill':
-        resources_fs = get_filesystem(config.resources_storage)
-        _run_plan_transform_backfill(resources_fs)
+        _run_plan_transform_backfill(
+            run_date,
+            _required(cursors_fs, 'cursors_storage'),
+            _required(manifests_fs, 'manifests_storage'),
+        )
         return
     elif job_type == 'commit_transform_backfill':
-        resources_fs = get_filesystem(config.resources_storage)
-        _run_commit_transform_backfill(resources_fs)
+        _run_commit_transform_backfill(
+            run_date,
+            _required(cursors_fs, 'cursors_storage'),
+            _required(manifests_fs, 'manifests_storage'),
+        )
         return
     elif job_type == 'consolidate_logs':
-        _run_consolidate_logs(config)
+        _run_consolidate_logs(config, run_date)
         return
 
     transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
@@ -201,20 +237,25 @@ def main() -> None:
 
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
-    log_fs = get_filesystem(config.log_storage) if config.log_storage else None
     cleaned_fs = _get_logging_filesystem(
-        config.staged_cleaned_data_storage, config.log_storage, workflow_name, 'cleaned'
+        config.staged_cleaned_data_storage,
+        config.log_storage,
+        workflow_name,
+        run_date,
+        'cleaned',
     )
     batches_fs = _get_logging_filesystem(
         config.staged_prepared_batches_data_storage,
         config.log_storage,
         workflow_name,
+        run_date,
         'prepared-batches',
     )
     prepared_fs = _get_logging_filesystem(
         config.staged_prepared_data_storage,
         config.log_storage,
         workflow_name,
+        run_date,
         'prepared',
     )
 
@@ -229,9 +270,7 @@ def main() -> None:
     descriptor = _build_transform_descriptor(
         transformation, start_date_str, pv_system_id, location_str
     )
-    orchestrator = WorkflowOrchestrator(
-        resources_fs, workflow_name, start_date_str, log_fs=log_fs
-    )
+    orchestrator = WorkflowOrchestrator(workflow_name, run_date, ledger_fs=ledger_fs)
 
     try:
         _run_transform_step(
@@ -332,7 +371,9 @@ def _run_transform_step(
 
 
 def _run_plan_transform(
-    resources_fs: FileSystem, log_fs: FileSystem | None = None
+    run_date: str,
+    manifests_fs: FileSystem,
+    ledger_fs: FileSystem | None = None,
 ) -> None:
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-transform')
     start_date_str = (
@@ -346,7 +387,7 @@ def _run_plan_transform(
     split_by = os.environ.get('SPLIT_BY', '')
 
     orchestrator = WorkflowOrchestrator(
-        resources_fs, workflow_name, start_date_str, log_fs=log_fs
+        workflow_name, run_date, manifests_fs=manifests_fs, ledger_fs=ledger_fs
     )
 
     phases = []
@@ -361,6 +402,7 @@ def _run_plan_transform(
             START_DATE=start_date_str,
             SPLIT_BY=split_by,
             WORKFLOW_NAME=workflow_name,
+            RUN_DATE=run_date,
         )
         phase0.append(inject_task_hash(env))
 
@@ -371,6 +413,7 @@ def _run_plan_transform(
             START_DATE=start_date_str,
             SPLIT_BY=split_by,
             WORKFLOW_NAME=workflow_name,
+            RUN_DATE=run_date,
         )
         phase0.append(inject_task_hash(env))
 
@@ -382,6 +425,7 @@ def _run_plan_transform(
             START_DATE=start_date_str,
             SPLIT_BY=split_by,
             WORKFLOW_NAME=workflow_name,
+            RUN_DATE=run_date,
         )
         phase0.append(inject_task_hash(env))
 
@@ -397,6 +441,7 @@ def _run_plan_transform(
             START_DATE=start_date_str,
             SPLIT_BY=split_by,
             WORKFLOW_NAME=workflow_name,
+            RUN_DATE=run_date,
         )
         phase1.append(inject_task_hash(env))
 
@@ -407,6 +452,7 @@ def _run_plan_transform(
             START_DATE=start_date_str,
             SPLIT_BY=split_by,
             WORKFLOW_NAME=workflow_name,
+            RUN_DATE=run_date,
         )
         phase1.append(inject_task_hash(env))
 
@@ -418,6 +464,7 @@ def _run_plan_transform(
             START_DATE=start_date_str,
             SPLIT_BY=split_by,
             WORKFLOW_NAME=workflow_name,
+            RUN_DATE=run_date,
         )
         phase1.append(inject_task_hash(env))
 
@@ -433,6 +480,7 @@ def _run_plan_transform(
             START_DATE=start_date_str,
             SPLIT_BY=split_by,
             WORKFLOW_NAME=workflow_name,
+            RUN_DATE=run_date,
         )
         phase2.append(inject_task_hash(env))
 
@@ -442,6 +490,7 @@ def _run_plan_transform(
         START_DATE=start_date_str,
         SPLIT_BY=split_by,
         WORKFLOW_NAME=workflow_name,
+        RUN_DATE=run_date,
     )
     phase2.append(inject_task_hash(env))
 
@@ -462,10 +511,14 @@ def parse_backfill_scope(raw: str) -> BackfillScope:
         ) from e
 
 
-def _run_plan_transform_backfill(resources_fs: FileSystem) -> None:
+def _run_plan_transform_backfill(
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+) -> None:
     scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
     today = date.today()
-    plan = plan_transform_backfill(scope, today, resources_fs)
+    plan = plan_transform_backfill(scope, today, run_date, cursors_fs, manifests_fs)
     logger.info(
         'plan_transform_backfill[%s]: wrote manifest (%s to %s)',
         scope.value,
@@ -474,9 +527,13 @@ def _run_plan_transform_backfill(resources_fs: FileSystem) -> None:
     )
 
 
-def _run_commit_transform_backfill(resources_fs: FileSystem) -> None:
+def _run_commit_transform_backfill(
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+) -> None:
     scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
-    cursor = commit_transform_backfill(scope, resources_fs)
+    cursor = commit_transform_backfill(scope, run_date, cursors_fs, manifests_fs)
     logger.info(
         'commit_transform_backfill[%s]: advanced cursor to %s',
         scope.value,

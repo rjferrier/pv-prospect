@@ -132,7 +132,15 @@ def build_weather_grid_manifest(
     return manifest, updated_cursor
 
 
-WEATHER_GRID_BACKFILL_CURSOR_PATH = 'manifests/weather_grid_backfill_cursor.json'
+WORKFLOW_NAME = 'pv-prospect-extract-weather-grid-backfill'
+
+
+def _cursor_path() -> str:
+    return f'{WORKFLOW_NAME}.json'
+
+
+def _manifest_path(run_date: str) -> str:
+    return f'{run_date}/{WORKFLOW_NAME}.backfill.json'
 
 
 def serialize_cursor(cursor: WeatherGridBackfillCursor) -> str:
@@ -154,21 +162,17 @@ def deserialize_cursor(text: str) -> WeatherGridBackfillCursor:
     )
 
 
-def load_cursor(fs: FileSystem, today: date) -> WeatherGridBackfillCursor:
+def load_cursor(cursors_fs: FileSystem, today: date) -> WeatherGridBackfillCursor:
     """Load the backfill cursor from storage, or create an initial one."""
-    if fs.exists(WEATHER_GRID_BACKFILL_CURSOR_PATH):
-        return deserialize_cursor(fs.read_text(WEATHER_GRID_BACKFILL_CURSOR_PATH))
+    path = _cursor_path()
+    if cursors_fs.exists(path):
+        return deserialize_cursor(cursors_fs.read_text(path))
     return initial_weather_grid_backfill_cursor(today)
 
 
-def save_cursor(fs: FileSystem, cursor: WeatherGridBackfillCursor) -> None:
+def save_cursor(cursors_fs: FileSystem, cursor: WeatherGridBackfillCursor) -> None:
     """Persist the backfill cursor to storage."""
-    fs.write_text(WEATHER_GRID_BACKFILL_CURSOR_PATH, serialize_cursor(cursor))
-
-
-WEATHER_GRID_BACKFILL_MANIFEST_PATH = (
-    'manifests/todays_weather_grid_backfill_manifest.json'
-)
+    cursors_fs.write_text(_cursor_path(), serialize_cursor(cursor))
 
 
 def _serialize_batch(batch: Batch) -> dict[str, str | int]:
@@ -226,36 +230,43 @@ def deserialize_manifest(
 
 def plan_weather_grid_backfill(
     today: date,
+    run_date: str,
     num_sample_files: int,
-    fs: FileSystem,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
     step3_batch_count: int = 8,
 ) -> WeatherGridManifest:
     """Compute today's manifest and persist it to storage.
 
     Reads the current cursor, builds the manifest, and writes both the
     manifest and the *next* cursor to
-    :data:`WEATHER_GRID_BACKFILL_MANIFEST_PATH`. The live cursor at
-    :data:`WEATHER_GRID_BACKFILL_CURSOR_PATH` is **not** advanced -- that
-    happens later via :func:`commit_weather_grid_backfill`, after the
-    batches have been dispatched successfully.
+    ``<run_date>/<workflow_name>.json`` on the manifests filesystem. The
+    live cursor at ``<workflow_name>.json`` on the cursors filesystem is
+    **not** advanced — that happens later via
+    :func:`commit_weather_grid_backfill`, after the batches have been
+    dispatched successfully.
     """
-    cursor = load_cursor(fs, today)
+    cursor = load_cursor(cursors_fs, today)
     manifest, next_cursor = build_weather_grid_manifest(
         today, num_sample_files, cursor, step3_batch_count=step3_batch_count
     )
-    fs.write_text(
-        WEATHER_GRID_BACKFILL_MANIFEST_PATH, serialize_manifest(manifest, next_cursor)
+    manifests_fs.write_text(
+        _manifest_path(run_date), serialize_manifest(manifest, next_cursor)
     )
     return manifest
 
 
-def commit_weather_grid_backfill(fs: FileSystem) -> WeatherGridBackfillCursor:
+def commit_weather_grid_backfill(
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+) -> WeatherGridBackfillCursor:
     """Promote the manifest's next cursor to the live cursor.
 
     Called after all batches dispatched by the workflow have completed.
     """
     _, next_cursor = deserialize_manifest(
-        fs.read_text(WEATHER_GRID_BACKFILL_MANIFEST_PATH)
+        manifests_fs.read_text(_manifest_path(run_date))
     )
-    save_cursor(fs, next_cursor)
+    save_cursor(cursors_fs, next_cursor)
     return next_cursor

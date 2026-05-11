@@ -15,19 +15,13 @@ variable "cloud_run_job_name" {
 
 variable "staging_bucket_name" {
   type        = string
-  description = "Name of the GCS staging bucket; the workflow reads the PV backfill manifest from gs://<bucket>/<manifest_object_path>"
-}
-
-variable "manifest_object_path" {
-  type        = string
-  description = "GCS object path (inside the staging bucket) where plan_pv_site_backfill writes the manifest"
-  default     = "resources/manifests/todays_pv_backfill_manifest.json"
+  description = "Name of the GCS staging bucket; the workflow reads the PV backfill manifest from gs://<bucket>/tracking/manifests/<run_date>/pv-prospect-extract-pv-sites-backfill.json"
 }
 
 variable "checkpoint_object_path" {
   type        = string
   description = "GCS object path (inside the staging bucket) where the workflow persists its per-run resume checkpoint"
-  default     = "resources/manifests/pv_sites_backfill_checkpoint.json"
+  default     = "tracking/checkpoints/pv_sites_backfill.json"
 }
 
 variable "default_pv_system_ids" {

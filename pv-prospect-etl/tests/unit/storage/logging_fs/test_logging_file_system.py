@@ -16,7 +16,9 @@ def _fixed_now() -> datetime:
 def test_write_text_delegates_to_inner() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(
+        inner, log_fs, 'my-workflow', '2025-06-24', 'raw', now=_fixed_now
+    )
 
     fs.write_text('data/file.csv', 'content')
 
@@ -26,7 +28,9 @@ def test_write_text_delegates_to_inner() -> None:
 def test_write_text_creates_log_entry() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(
+        inner, log_fs, 'my-workflow', '2025-06-24', 'raw', now=_fixed_now
+    )
 
     fs.write_text('data/file.csv', 'content')
 
@@ -40,7 +44,9 @@ def test_write_text_creates_log_entry() -> None:
 def test_write_bytes_delegates_to_inner() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(
+        inner, log_fs, 'my-workflow', '2025-06-24', 'raw', now=_fixed_now
+    )
 
     fs.write_bytes('data/file.bin', b'\x00\x01')
 
@@ -50,7 +56,9 @@ def test_write_bytes_delegates_to_inner() -> None:
 def test_write_bytes_creates_log_entry() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(
+        inner, log_fs, 'my-workflow', '2025-06-24', 'raw', now=_fixed_now
+    )
 
     fs.write_bytes('data/file.bin', b'\x00\x01')
 
@@ -62,7 +70,9 @@ def test_write_bytes_creates_log_entry() -> None:
 def test_read_operations_do_not_create_log_entries() -> None:
     inner = FakeFileSystem({'existing.txt': 'hello'})
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(
+        inner, log_fs, 'my-workflow', '2025-06-24', 'raw', now=_fixed_now
+    )
 
     fs.read_text('existing.txt')
     fs.exists('existing.txt')
@@ -73,7 +83,9 @@ def test_read_operations_do_not_create_log_entries() -> None:
 def test_delete_does_not_create_log_entry() -> None:
     inner = FakeFileSystem({'file.txt': 'data'})
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(
+        inner, log_fs, 'my-workflow', '2025-06-24', 'raw', now=_fixed_now
+    )
 
     fs.delete('file.txt')
 
@@ -83,7 +95,9 @@ def test_delete_does_not_create_log_entry() -> None:
 def test_mkdir_does_not_create_log_entry() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(
+        inner, log_fs, 'my-workflow', '2025-06-24', 'raw', now=_fixed_now
+    )
 
     fs.mkdir('some/dir')
 
@@ -93,7 +107,9 @@ def test_mkdir_does_not_create_log_entry() -> None:
 def test_label_is_prepended_to_logged_path() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', 'cleaned', now=_fixed_now)
+    fs = LoggingFileSystem(
+        inner, log_fs, 'my-workflow', '2025-06-24', 'cleaned', now=_fixed_now
+    )
 
     fs.write_text('timeseries/data.csv', 'content')
 
@@ -104,7 +120,9 @@ def test_label_is_prepended_to_logged_path() -> None:
 def test_empty_label_logs_path_without_prefix() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'my-workflow', '', now=_fixed_now)
+    fs = LoggingFileSystem(
+        inner, log_fs, 'my-workflow', '2025-06-24', '', now=_fixed_now
+    )
 
     fs.write_text('data.csv', 'content')
 
@@ -117,7 +135,7 @@ def test_empty_label_logs_path_without_prefix() -> None:
 def test_log_entry_contains_iso_timestamp() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(inner, log_fs, 'wf', '2025-06-24', 'raw', now=_fixed_now)
 
     fs.write_text('file.csv', 'content')
 
@@ -129,7 +147,7 @@ def test_log_entry_contains_iso_timestamp() -> None:
 def test_log_failure_does_not_prevent_write() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(inner, log_fs, 'wf', '2025-06-24', 'raw', now=_fixed_now)
 
     def failing_write(path: str, content: str) -> None:
         raise RuntimeError('log write failed')
@@ -144,7 +162,7 @@ def test_log_failure_does_not_prevent_write() -> None:
 def test_str_delegates_to_inner() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(inner, log_fs, 'wf', '2025-06-24', 'raw', now=_fixed_now)
 
     assert str(fs) == str(inner)
 
@@ -152,7 +170,7 @@ def test_str_delegates_to_inner() -> None:
 def test_list_files_delegates_to_inner() -> None:
     inner = FakeFileSystem({'dir/a.csv': 'a', 'dir/b.csv': 'b'})
     log_fs = FakeFileSystem()
-    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw', now=_fixed_now)
+    fs = LoggingFileSystem(inner, log_fs, 'wf', '2025-06-24', 'raw', now=_fixed_now)
 
     result = fs.list_files('dir', '*.csv')
 
@@ -169,7 +187,9 @@ def test_multiple_writes_with_different_timestamps() -> None:
             datetime(2025, 6, 24, 10, 30, 15, 500000, tzinfo=timezone.utc),
         ]
     )
-    fs = LoggingFileSystem(inner, log_fs, 'wf', 'raw', now=lambda: next(times))
+    fs = LoggingFileSystem(
+        inner, log_fs, 'wf', '2025-06-24', 'raw', now=lambda: next(times)
+    )
 
     fs.write_text('a.csv', 'a')
     fs.write_text('b.csv', 'b')

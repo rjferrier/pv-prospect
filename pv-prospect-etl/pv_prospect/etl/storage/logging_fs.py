@@ -19,9 +19,10 @@ class LoggingFileSystem:
     """FileSystem decorator that records every write to a separate log filesystem.
 
     Each write produces a single-line log entry file at
-    ``<YYYY-MM-DD>/<workflow_name>/<HHMMSSffffff>.txt`` on the *log_fs*.
-    The entry contains the UTC timestamp and the fully-qualified path
-    (``<label>/<relative_path>``) of the written file.
+    ``<run_date>/<workflow_name>/<HHMMSSffffff>.txt`` on the *log_fs*,
+    where ``run_date`` is the workflow's UTC trigger date pinned at the
+    workflow's ``init`` step. The entry contains the UTC timestamp and the
+    fully-qualified path (``<label>/<relative_path>``) of the written file.
     """
 
     def __init__(
@@ -29,12 +30,14 @@ class LoggingFileSystem:
         inner: FileSystem,
         log_fs: FileSystem,
         workflow_name: str,
+        run_date: str,
         label: str,
         now: NowFn = _utc_now,
     ) -> None:
         self._inner = inner
         self._log_fs = log_fs
         self._workflow_name = workflow_name
+        self._run_date = run_date
         self._label = label
         self._now = now
 
@@ -43,10 +46,9 @@ class LoggingFileSystem:
 
     def _log_write(self, path: str) -> None:
         now = self._now()
-        date_str = now.strftime('%Y-%m-%d')
         time_str = now.strftime('%H%M%S%f')
         full_path = f'{self._label}/{path}' if self._label else path
-        log_path = f'{date_str}/{self._workflow_name}/{time_str}.txt'
+        log_path = f'{self._run_date}/{self._workflow_name}/{time_str}.txt'
         log_content = f'{now.isoformat()} CREATED {full_path}\n'
         try:
             self._log_fs.write_text(log_path, log_content)
@@ -91,17 +93,17 @@ class LoggingFileSystem:
 def consolidate_logs(
     log_fs: FileSystem,
     workflow_name: str,
-    log_date: date,
+    run_date: date,
     now: NowFn = _utc_now,
 ) -> None:
     """Merge individual log entry files into a single consolidated log.
 
-    Reads all files under ``<YYYY-MM-DD>/<workflow_name>/``, sorts them
+    Reads all files under ``<run_date>/<workflow_name>/``, sorts them
     by content (which starts with an ISO timestamp), writes a consolidated
-    file at ``<YYYY-MM-DD>/<YYYY-MM-DD-HHMMSS>-<workflow_name>.txt``, and
+    file at ``<run_date>/<run_date>-<HHMMSS>-<workflow_name>.txt``, and
     deletes the individual entry files.
     """
-    date_str = log_date.strftime('%Y-%m-%d')
+    date_str = run_date.strftime('%Y-%m-%d')
     prefix = f'{date_str}/{workflow_name}'
     entries = log_fs.list_files(prefix, '*.txt')
     if not entries:
@@ -124,11 +126,3 @@ def consolidate_logs(
         log_fs.delete(entry.path)
 
     log_fs.rmdir(prefix)
-    # Also try to remove the date directory if it is now empty
-    parent = '/'.join(prefix.split('/')[:-1])
-    if parent:
-        try:
-            log_fs.rmdir(parent)
-        except Exception:  # nosec B110
-            # Ignore if parent is not empty (e.g. other workflows ran today)
-            pass

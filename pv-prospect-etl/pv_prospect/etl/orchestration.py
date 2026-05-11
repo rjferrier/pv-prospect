@@ -1,3 +1,4 @@
+import fnmatch
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -31,10 +32,15 @@ def _has_completed_entry(content: str) -> bool:
 
 
 def compute_task_hash(task_env: list[dict[str, str]]) -> str:
-    """Generate a unique hash for a task based on its environment variables."""
-    # Hash everything except TASK_HASH if it's already there
+    """Generate a unique hash for a task based on its environment variables.
+
+    The hash deliberately excludes ``TASK_HASH`` (so reinjecting one doesn't
+    change the hash) and ``RUN_DATE`` (so two runs of the same data-window task
+    on different days share a hash, enabling cross-day resume).
+    """
+    ignored = {'TASK_HASH', 'RUN_DATE'}
     sorted_items = sorted(
-        (e['name'], e['value']) for e in task_env if e['name'] != 'TASK_HASH'
+        (e['name'], e['value']) for e in task_env if e['name'] not in ignored
     )
     task_str = json.dumps(sorted_items)
     return hashlib.sha256(task_str.encode()).hexdigest()
@@ -55,31 +61,40 @@ def build_env_list(**kwargs: str) -> list[dict[str, str]]:
 
 
 class WorkflowOrchestrator:
-    """Orchestrates job execution by writing manifests and tracking task outcomes
-    via the JSONL ledger on *log_fs*.
+    """Coordinates a single Cloud Workflow execution.
+
+    A workflow execution is identified by its *run date* — the UTC date on
+    which the workflow was triggered, pinned once at the workflow's ``init``
+    step and propagated to every task as ``RUN_DATE``. Both the manifest
+    and the JSONL ledger are keyed by run date, so all artefacts produced
+    by one execution share a single date prefix.
+
+    The run date is distinct from ``START_DATE``/``END_DATE``, which are
+    arguments describing the *data window* being processed. Those live in
+    each ledger entry's ``descriptor`` field, not in the path.
 
     Each task records its outcome (``completed`` or ``failed``) through
-    :meth:`record_outcome`. ``filter_remaining_tasks`` consults the same ledger
-    to skip already-completed tasks on re-run, so the ledger doubles as both
-    audit trail and resumption mechanism.
+    :meth:`record_outcome`. ``filter_remaining_tasks`` consults the ledger
+    (across all past run dates) to skip already-completed tasks on re-run,
+    so the ledger doubles as both audit trail and resumption mechanism.
 
-    When no *log_fs* is configured, ``record_outcome`` is a no-op and
-    ``filter_remaining_tasks`` returns every task — i.e. resumption is disabled
-    but workflows still run.
+    When no ``ledger_fs`` is configured, :meth:`record_outcome` is a no-op
+    and :meth:`filter_remaining_tasks` returns every task — workflows still
+    run but resumption is disabled.
     """
 
     def __init__(
         self,
-        resources_fs: FileSystem,
         workflow_name: str,
         run_date: str,
-        log_fs: FileSystem | None = None,
+        manifests_fs: FileSystem | None = None,
+        ledger_fs: FileSystem | None = None,
     ):
-        self.fs = resources_fs
-        self.log_fs = log_fs
         self.workflow_name = workflow_name
         self.run_date = run_date
-        self.manifest_path = f'manifests/{workflow_name}_{run_date}.json'
+        self.manifests_fs = manifests_fs
+        self.ledger_fs = ledger_fs
+        self.manifest_path = f'{run_date}/{workflow_name}.json'
 
     def record_outcome(
         self,
@@ -103,17 +118,17 @@ class WorkflowOrchestrator:
                 "error": "<repr of exception, only for failed>"
             }
 
-        No-op if no ``log_fs`` was configured or if *task_hash* is empty.
+        No-op if no ``ledger_fs`` was configured or if *task_hash* is empty.
         Idempotent on completed entries: a second 'completed' record for
         the same task hash within the same run is not appended. Failures
         are always appended (a task may be retried in-run and end up with
         multiple 'failed' entries plus a final 'completed').
         """
-        if self.log_fs is None or not task_hash:
+        if self.ledger_fs is None or not task_hash:
             return
         path = ledger_entry_path(self.run_date, self.workflow_name, task_hash)
-        if status == 'completed' and self.log_fs.exists(path):
-            if _has_completed_entry(self.log_fs.read_text(path)):
+        if status == 'completed' and self.ledger_fs.exists(path):
+            if _has_completed_entry(self.ledger_fs.read_text(path)):
                 return
         entry: dict[str, object] = {
             'recorded_at': now().isoformat(),
@@ -125,17 +140,22 @@ class WorkflowOrchestrator:
         }
         if error is not None:
             entry['error'] = error
-        self.log_fs.append_text(path, json.dumps(entry) + '\n')
+        self.ledger_fs.append_text(path, json.dumps(entry) + '\n')
 
     def filter_remaining_tasks(
         self, all_tasks: list[list[dict[str, str]]]
     ) -> list[list[dict[str, str]]]:
         """Filter out tasks whose ledger shows a 'completed' entry.
 
-        Reads both per-task ledger files (``<run_date>/<workflow>/<hash>.jsonl``,
-        present mid-run) and any consolidated ledger files (``<run_date>/
-        <run_date>-<HHMMSS>-<workflow>.jsonl``, present once consolidation has
-        run). When *log_fs* is None, no filtering happens — every task is
+        Scans both per-task ledger files in the current run
+        (``<run_date>/<workflow>/<hash>.jsonl``) and every consolidated
+        ledger file ever produced for this workflow
+        (``<date>/<date>-*-<workflow>.jsonl``). Pooling completed task
+        hashes across all past runs preserves cross-day resume: a task
+        that finished yesterday under a different run_date will not be
+        re-executed today.
+
+        When ``ledger_fs`` is None no filtering happens — every task is
         returned, so the workflow proceeds without resumption.
         """
         completed = self._completed_task_hashes()
@@ -147,17 +167,19 @@ class WorkflowOrchestrator:
         return remaining
 
     def _completed_task_hashes(self) -> set[str]:
-        log_fs = self.log_fs
-        if log_fs is None:
+        ledger_fs = self.ledger_fs
+        if ledger_fs is None:
             return set()
         completed: set[str] = set()
         per_task_dir = ledger_prefix(self.run_date, self.workflow_name)
-        for entry in log_fs.list_files(per_task_dir, '*.jsonl'):
-            if _has_completed_entry(log_fs.read_text(entry.path)):
+        for entry in ledger_fs.list_files(per_task_dir, '*.jsonl'):
+            if _has_completed_entry(ledger_fs.read_text(entry.path)):
                 completed.add(entry.name.removesuffix('.jsonl'))
-        consolidated_pattern = f'{self.run_date}-*-{self.workflow_name}.jsonl'
-        for entry in log_fs.list_files(self.run_date, consolidated_pattern):
-            for line in log_fs.read_text(entry.path).splitlines():
+        consolidated_pattern = f'*-{self.workflow_name}.jsonl'
+        for entry in ledger_fs.list_files('', '*.jsonl', recursive=True):
+            if not fnmatch.fnmatch(entry.name, consolidated_pattern):
+                continue
+            for line in ledger_fs.read_text(entry.path).splitlines():
                 rec = _parse_ledger_line(line)
                 if rec is None:
                     continue
@@ -169,4 +191,8 @@ class WorkflowOrchestrator:
 
     def write_manifest(self, phases: list[list[list[dict[str, str]]]]) -> None:
         """Write the phases and tasks to the manifest file."""
-        self.fs.write_text(self.manifest_path, json.dumps({'phases': phases}))
+        if self.manifests_fs is None:
+            raise RuntimeError(
+                'WorkflowOrchestrator.write_manifest called without manifests_fs'
+            )
+        self.manifests_fs.write_text(self.manifest_path, json.dumps({'phases': phases}))

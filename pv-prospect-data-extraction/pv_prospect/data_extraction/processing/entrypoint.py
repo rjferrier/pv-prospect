@@ -246,7 +246,8 @@ def _execute_extract_and_load(
 def _run_extract_and_load(
     staging_fs: FileSystem,
     resources_fs: FileSystem,
-    log_fs: FileSystem | None,
+    ledger_fs: FileSystem | None,
+    run_date: str,
     data_source: DataSource,
 ) -> None:
     dry_run = _env_bool('DRY_RUN')
@@ -266,9 +267,7 @@ def _run_extract_and_load(
     task_hash = os.environ.get('TASK_HASH', '')
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
     descriptor = _build_extract_descriptor(start_date_str)
-    orchestrator = WorkflowOrchestrator(
-        resources_fs, workflow_name, start_date_str, log_fs=log_fs
-    )
+    orchestrator = WorkflowOrchestrator(workflow_name, run_date, ledger_fs=ledger_fs)
 
     try:
         failures = _execute_extract_and_load(
@@ -295,7 +294,9 @@ def _run_extract_and_load(
 
 
 def _run_plan_extract(
-    resources_fs: FileSystem, log_fs: FileSystem | None = None
+    run_date: str,
+    manifests_fs: FileSystem,
+    ledger_fs: FileSystem | None = None,
 ) -> None:
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
     start_date_str = (
@@ -312,7 +313,7 @@ def _run_plan_extract(
     split_by = os.environ.get('SPLIT_BY', '')
 
     orchestrator = WorkflowOrchestrator(
-        resources_fs, workflow_name, start_date_str, log_fs=log_fs
+        workflow_name, run_date, manifests_fs=manifests_fs, ledger_fs=ledger_fs
     )
     all_tasks = []
 
@@ -327,6 +328,7 @@ def _run_plan_extract(
                 DRY_RUN=dry_run,
                 SPLIT_BY=split_by,
                 WORKFLOW_NAME=workflow_name,
+                RUN_DATE=run_date,
             )
             all_tasks.append(inject_task_hash(env))
 
@@ -341,6 +343,7 @@ def _run_plan_extract(
                 DRY_RUN=dry_run,
                 SPLIT_BY=split_by,
                 WORKFLOW_NAME=workflow_name,
+                RUN_DATE=run_date,
             )
             all_tasks.append(inject_task_hash(env))
 
@@ -353,12 +356,19 @@ def _run_plan_extract(
     )
 
 
-def _run_plan_weather_grid_backfill(resources_fs: FileSystem) -> None:
+def _run_plan_weather_grid_backfill(
+    run_date: str,
+    resources_fs: FileSystem,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+) -> None:
     today = date.today()
     num_sample_files = count_sample_files(resources_fs)
     if num_sample_files == 0:
         raise ValueError('No sample files found on the resources filesystem.')
-    manifest = plan_weather_grid_backfill(today, num_sample_files, resources_fs)
+    manifest = plan_weather_grid_backfill(
+        today, run_date, num_sample_files, cursors_fs, manifests_fs
+    )
     logger.info(
         'plan_weather_grid_backfill: wrote manifest (step2=%s, step3_batches=%d)',
         manifest.step2_batch,
@@ -366,14 +376,22 @@ def _run_plan_weather_grid_backfill(resources_fs: FileSystem) -> None:
     )
 
 
-def _run_commit_weather_grid_backfill(resources_fs: FileSystem) -> None:
-    cursor = commit_weather_grid_backfill(resources_fs)
+def _run_commit_weather_grid_backfill(
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+) -> None:
+    cursor = commit_weather_grid_backfill(run_date, cursors_fs, manifests_fs)
     logger.info('commit_weather_grid_backfill: advanced cursor to %s', cursor)
 
 
-def _run_plan_pv_site_backfill(resources_fs: FileSystem) -> None:
+def _run_plan_pv_site_backfill(
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+) -> None:
     today = date.today()
-    plan = plan_pv_site_backfill(today, resources_fs)
+    plan = plan_pv_site_backfill(today, run_date, cursors_fs, manifests_fs)
     logger.info(
         'plan_pv_site_backfill: wrote manifest (%s to %s)',
         plan.start_date,
@@ -381,8 +399,12 @@ def _run_plan_pv_site_backfill(resources_fs: FileSystem) -> None:
     )
 
 
-def _run_commit_pv_site_backfill(resources_fs: FileSystem) -> None:
-    cursor = commit_pv_site_backfill(resources_fs)
+def _run_commit_pv_site_backfill(
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+) -> None:
+    cursor = commit_pv_site_backfill(run_date, cursors_fs, manifests_fs)
     logger.info('commit_pv_site_backfill: advanced cursor to %s', cursor)
 
 
@@ -390,29 +412,44 @@ def _get_logging_filesystem(
     storage_config: AnyStorageConfig,
     log_storage: AnyStorageConfig | None,
     workflow_name: str,
+    run_date: str,
     label: str,
 ) -> FileSystem:
     fs: FileSystem = get_filesystem(storage_config)
     if workflow_name and log_storage:
         log_fs = get_filesystem(log_storage)
-        return LoggingFileSystem(fs, log_fs, workflow_name, label)
+        return LoggingFileSystem(fs, log_fs, workflow_name, run_date, label)
     return fs
 
 
-def _run_consolidate_logs(config: DataExtractionConfig) -> None:
+def _run_consolidate_logs(config: DataExtractionConfig, run_date: str) -> None:
     workflow_name = os.environ.get('WORKFLOW_NAME', '')
-    if not workflow_name or not config.log_storage:
-        logger.warning('consolidate_logs: WORKFLOW_NAME or log_storage not configured')
+    if not workflow_name:
+        logger.warning('consolidate_logs: WORKFLOW_NAME not configured')
         return
-    log_fs = get_filesystem(config.log_storage)
-    today = date.today()
-    consolidate_logs(log_fs, workflow_name, today)
-    consolidate_ledger(log_fs, workflow_name, today)
+    run_date_obj = date.fromisoformat(run_date)
+    if config.log_storage:
+        log_fs = get_filesystem(config.log_storage)
+        consolidate_logs(log_fs, workflow_name, run_date_obj)
+    if config.ledger_storage:
+        ledger_fs = get_filesystem(config.ledger_storage)
+        consolidate_ledger(ledger_fs, workflow_name, run_date_obj)
+
+
+def _resolve_run_date() -> str:
+    """Return the workflow's UTC trigger date.
+
+    Read from ``RUN_DATE`` (set once by the Cloud Workflow ``init`` step
+    and propagated to every task); fall back to ``date.today()`` for
+    local one-off invocations.
+    """
+    return os.environ.get('RUN_DATE') or date.today().isoformat()
 
 
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
     workflow_name = os.environ.get('WORKFLOW_NAME', '')
+    run_date = _resolve_run_date()
     config = get_config(
         DataExtractionConfig,
         base_config_dirs=[
@@ -430,30 +467,68 @@ def main() -> None:
 
     # Cloud Run always uses GCS — resolve storage backends once.
     staging_fs = _get_logging_filesystem(
-        config.staged_raw_data_storage, config.log_storage, workflow_name, 'raw'
+        config.staged_raw_data_storage,
+        config.log_storage,
+        workflow_name,
+        run_date,
+        'raw',
     )
     resources_fs = get_filesystem(config.resources_storage)
-    log_fs = get_filesystem(config.log_storage) if config.log_storage else None
+    manifests_fs = (
+        get_filesystem(config.manifests_storage) if config.manifests_storage else None
+    )
+    cursors_fs = (
+        get_filesystem(config.cursors_storage) if config.cursors_storage else None
+    )
+    ledger_fs = get_filesystem(config.ledger_storage) if config.ledger_storage else None
 
     if job_type == 'preprocess':
         _run_preprocess(staging_fs, data_source)
     elif job_type == 'plan_extract':
-        _run_plan_extract(resources_fs, log_fs)
+        _run_plan_extract(
+            run_date, _required(manifests_fs, 'manifests_storage'), ledger_fs
+        )
     elif job_type == 'extract_and_load':
-        _run_extract_and_load(staging_fs, resources_fs, log_fs, data_source)
+        _run_extract_and_load(
+            staging_fs, resources_fs, ledger_fs, run_date, data_source
+        )
     elif job_type == 'plan_weather_grid_backfill':
-        _run_plan_weather_grid_backfill(resources_fs)
+        _run_plan_weather_grid_backfill(
+            run_date,
+            resources_fs,
+            _required(cursors_fs, 'cursors_storage'),
+            _required(manifests_fs, 'manifests_storage'),
+        )
     elif job_type == 'commit_weather_grid_backfill':
-        _run_commit_weather_grid_backfill(resources_fs)
+        _run_commit_weather_grid_backfill(
+            run_date,
+            _required(cursors_fs, 'cursors_storage'),
+            _required(manifests_fs, 'manifests_storage'),
+        )
     elif job_type == 'plan_pv_site_backfill':
-        _run_plan_pv_site_backfill(resources_fs)
+        _run_plan_pv_site_backfill(
+            run_date,
+            _required(cursors_fs, 'cursors_storage'),
+            _required(manifests_fs, 'manifests_storage'),
+        )
     elif job_type == 'commit_pv_site_backfill':
-        _run_commit_pv_site_backfill(resources_fs)
+        _run_commit_pv_site_backfill(
+            run_date,
+            _required(cursors_fs, 'cursors_storage'),
+            _required(manifests_fs, 'manifests_storage'),
+        )
     elif job_type == 'consolidate_logs':
-        _run_consolidate_logs(config)
+        _run_consolidate_logs(config, run_date)
     else:
         logger.error('unknown JOB_TYPE=%r', job_type)
         sys.exit(1)
+
+
+def _required(fs: FileSystem | None, name: str) -> FileSystem:
+    if fs is None:
+        logger.error('%s is required for this JOB_TYPE but not configured', name)
+        sys.exit(1)
+    return fs
 
 
 if __name__ == '__main__':

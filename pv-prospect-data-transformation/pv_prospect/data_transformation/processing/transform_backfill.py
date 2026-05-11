@@ -2,8 +2,9 @@
 
 The cursor / plan-commit machinery lives in :mod:`pv_prospect.etl.backfill`
 and is shared with the extraction pipeline. This module is a thin wrapper
-that pins the file paths for each :class:`BackfillScope` so the transform
-backfill can advance independently of the extraction backfill it trails.
+that pins the workflow name for each :class:`BackfillScope` so the
+transform backfill can advance independently of the extraction backfill it
+trails.
 
 Two scopes are tracked independently — one for the PV-site transform
 backfill, one for the weather-grid transform backfill — so each can
@@ -16,7 +17,6 @@ from datetime import date
 
 from pv_prospect.etl import (
     BackfillCursor,
-    BackfillPaths,
     BackfillPlan,
     BackfillScope,
     commit_backfill,
@@ -25,27 +25,23 @@ from pv_prospect.etl import (
 )
 from pv_prospect.etl.storage import FileSystem
 
-_PATHS_BY_SCOPE: dict[BackfillScope, BackfillPaths] = {
-    BackfillScope.PV_SITES: BackfillPaths(
-        cursor='manifests/pv_sites_transform_backfill_cursor.json',
-        manifest='manifests/todays_pv_sites_transform_backfill_manifest.json',
-    ),
-    BackfillScope.WEATHER_GRID: BackfillPaths(
-        cursor='manifests/weather_grid_transform_backfill_cursor.json',
-        manifest='manifests/todays_weather_grid_transform_backfill_manifest.json',
-    ),
+_WORKFLOW_NAME_BY_SCOPE: dict[BackfillScope, str] = {
+    BackfillScope.PV_SITES: 'pv-prospect-transform-pv-sites-backfill',
+    BackfillScope.WEATHER_GRID: 'pv-prospect-transform-weather-grid-backfill',
 }
 
 
-def paths_for(scope: BackfillScope) -> BackfillPaths:
-    """Return the cursor/manifest paths for the transform backfill of *scope*."""
-    return _PATHS_BY_SCOPE[scope]
+def workflow_name_for(scope: BackfillScope) -> str:
+    """Return the workflow name for the transform backfill of *scope*."""
+    return _WORKFLOW_NAME_BY_SCOPE[scope]
 
 
 def plan_transform_backfill(
     scope: BackfillScope,
     today: date,
-    fs: FileSystem,
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
     window_days: int | None = None,
 ) -> BackfillPlan:
     """Plan today's transform-backfill window for *scope* and persist the manifest.
@@ -56,12 +52,21 @@ def plan_transform_backfill(
     """
     if window_days is None:
         window_days = default_window_days(scope)
-    return plan_backfill(fs, paths_for(scope), today, window_days)
+    return plan_backfill(
+        cursors_fs,
+        manifests_fs,
+        workflow_name_for(scope),
+        run_date,
+        today,
+        window_days,
+    )
 
 
 def commit_transform_backfill(
     scope: BackfillScope,
-    fs: FileSystem,
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
 ) -> BackfillCursor:
     """Promote *scope*'s manifest next-cursor to the live cursor."""
-    return commit_backfill(fs, paths_for(scope))
+    return commit_backfill(cursors_fs, manifests_fs, workflow_name_for(scope), run_date)

@@ -1,3 +1,9 @@
+# The staging bucket has three top-level prefixes:
+#   data/      — extracted and processed data
+#   tracking/  — manifests, cursors, ledger entries, and write-audit logs
+#   resources/ — supporting data that has been manually collected and assembled
+# Each second-level prefix below carves out its own subtree.
+
 resources_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-staging'
@@ -6,27 +12,42 @@ resources_storage:
 staged_raw_data_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-staging'
-  prefix: 'raw'
+  prefix: 'data/raw'
 
 staged_cleaned_data_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-staging'
-  prefix: 'cleaned'
+  prefix: 'data/cleaned'
 
 staged_prepared_batches_data_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-staging'
-  prefix: 'prepared-batches'
+  prefix: 'data/prepared-batches'
 
 staged_prepared_data_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-staging'
-  prefix: 'prepared'
+  prefix: 'data/prepared'
+
+manifests_storage:
+  backend: 'gcs'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'tracking/manifests'
+
+cursors_storage:
+  backend: 'gcs'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'tracking/cursors'
+
+ledger_storage:
+  backend: 'gcs'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'tracking/ledger'
 
 log_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-staging'
-  prefix: 'logs'
+  prefix: 'tracking/logs'
 
 versioned_raw_data_storage:
   backend: 'gcs'

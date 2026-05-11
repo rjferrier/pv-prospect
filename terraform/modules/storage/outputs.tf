@@ -5,7 +5,7 @@ output "service_account_email" {
 
 output "staging_bucket_name" {
   value       = google_storage_bucket.staging.name
-  description = "Name of the staging bucket (resources/, raw/, cleaned/, prepared/ prefixes)"
+  description = "Name of the staging bucket (data/ and tracking/ top-level prefixes)"
 }
 
 output "versioned_raw_bucket_name" {

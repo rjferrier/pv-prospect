@@ -42,7 +42,11 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
               - job_name: "${var.cloud_run_job_name}"
               - workflow_name: "pv-prospect-extract-weather-grid-backfill"
               - bucket: "${var.staging_bucket_name}"
-              - manifest_object: "${var.manifest_object_path}"
+              # Workflow trigger date (UTC), pinned once and propagated to every
+              # task as RUN_DATE. Per-batch START_DATEs (each batch's data
+              # window) are separately set from the manifest.
+              - run_date: $${text.substring(time.format(sys.now()), 0, 10)}
+              - manifest_object: $${"tracking/manifests/" + run_date + "/" + workflow_name + ".backfill.json"}
               - checkpoint_object: "${var.checkpoint_object_path}"
               - data_source: $${default(map.get(args, "data_source"), "${var.data_source}")}
               - sleep_seconds: $${default(map.get(args, "sleep_seconds_between_batches"), ${var.sleep_seconds_between_batches})}
@@ -66,6 +70,8 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                                   value: plan_weather_grid_backfill
                                 - name: WORKFLOW_NAME
                                   value: $${workflow_name}
+                                - name: RUN_DATE
+                                  value: $${run_date}
                     result: plan_op
 
                 - wait_for_plan_op:
@@ -188,6 +194,8 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                                           value: $${dry_run}
                                         - name: WORKFLOW_NAME
                                           value: $${workflow_name}
+                                        - name: RUN_DATE
+                                          value: $${run_date}
                             result: batch_op
                         - wait_for_batch_op:
                             call: wait_for_operation
@@ -244,6 +252,8 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                                   value: commit_weather_grid_backfill
                                 - name: WORKFLOW_NAME
                                   value: $${workflow_name}
+                                - name: RUN_DATE
+                                  value: $${run_date}
                     result: commit_op
 
                 - wait_for_commit_op:
@@ -294,6 +304,8 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                           value: consolidate_logs
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
+                        - name: RUN_DATE
+                          value: $${run_date}
             result: consolidate_logs_op
 
         - wait_for_consolidate_op:

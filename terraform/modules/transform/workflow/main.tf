@@ -23,6 +23,9 @@ resource "google_workflows_workflow" "data_transformation" {
               - bucket: "${var.staging_bucket_name}"
               - workflow_name: "pv-prospect-transform"
               - plan_job_type: "plan_transform"
+              # Workflow trigger date (UTC), pinned once and propagated to every
+              # task as RUN_DATE. Distinct from `date` (the data window arg).
+              - run_date: $${text.substring(time.format(sys.now()), 0, 10)}
               - date: $${default(map.get(args, "date"), default(map.get(args, "start_date"), text.substring(time.format(sys.now() - 86400), 0, 10)))}
               - raw_pv_system_ids: $${default(map.get(args, "pv_system_ids"), [])}
               - raw_locations: $${default(map.get(args, "locations"), [])}
@@ -61,6 +64,8 @@ resource "google_workflows_workflow" "data_transformation" {
                                   value: $${plan_job_type}
                                 - name: WORKFLOW_NAME
                                   value: $${workflow_name}
+                                - name: RUN_DATE
+                                  value: $${run_date}
                                 - name: START_DATE
                                   value: $${date}
                                 - name: DATE
@@ -88,7 +93,7 @@ resource "google_workflows_workflow" "data_transformation" {
                     call: googleapis.storage.v1.objects.get
                     args:
                       bucket: $${bucket}
-                      object: $${text.url_encode("resources/manifests/" + workflow_name + "_" + date + ".json")}
+                      object: $${text.url_encode("tracking/manifests/" + run_date + "/" + workflow_name + ".json")}
                       alt: media
                     result: manifest_raw
 
@@ -164,6 +169,8 @@ resource "google_workflows_workflow" "data_transformation" {
                           value: consolidate_logs
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
+                        - name: RUN_DATE
+                          value: $${run_date}
             result: consolidate_logs_op
 
         - wait_consolidate_op:

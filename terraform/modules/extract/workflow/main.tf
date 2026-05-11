@@ -23,6 +23,9 @@ resource "google_workflows_workflow" "data_extraction" {
               - bucket: "${var.staging_bucket_name}"
               - workflow_name: "pv-prospect-extract"
               - plan_job_type: "plan_extract"
+              # Workflow trigger date (UTC), pinned once and propagated to every
+              # task as RUN_DATE. Distinct from `date` (the data window arg).
+              - run_date: $${text.substring(time.format(sys.now()), 0, 10)}
               - pv_model_data_sources: $${default(map.get(args, "pv_model_data_sources"), ${jsonencode(var.default_pv_model_data_sources)})}
               - weather_model_data_sources: $${default(map.get(args, "weather_model_data_sources"), ${jsonencode(var.default_weather_model_data_sources)})}
               - date: $${default(map.get(args, "date"), default(map.get(args, "start_date"), text.substring(time.format(sys.now() - 86400), 0, 10)))}
@@ -64,6 +67,8 @@ resource "google_workflows_workflow" "data_extraction" {
                                   value: $${plan_job_type}
                                 - name: WORKFLOW_NAME
                                   value: $${workflow_name}
+                                - name: RUN_DATE
+                                  value: $${run_date}
                                 - name: START_DATE
                                   value: $${date}
                                 - name: DATE
@@ -97,7 +102,7 @@ resource "google_workflows_workflow" "data_extraction" {
                     call: googleapis.storage.v1.objects.get
                     args:
                       bucket: $${bucket}
-                      object: $${text.url_encode("resources/manifests/" + workflow_name + "_" + date + ".json")}
+                      object: $${text.url_encode("tracking/manifests/" + run_date + "/" + workflow_name + ".json")}
                       alt: media
                     result: manifest_raw
 
@@ -173,6 +178,8 @@ resource "google_workflows_workflow" "data_extraction" {
                           value: consolidate_logs
                         - name: WORKFLOW_NAME
                           value: $${workflow_name}
+                        - name: RUN_DATE
+                          value: $${run_date}
             result: consolidate_logs_op
 
         - wait_consolidate_op:

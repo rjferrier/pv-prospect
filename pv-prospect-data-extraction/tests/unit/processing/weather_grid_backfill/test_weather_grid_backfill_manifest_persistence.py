@@ -3,8 +3,7 @@
 from datetime import date, timedelta
 
 from pv_prospect.data_extraction.processing.weather_grid_backfill import (
-    WEATHER_GRID_BACKFILL_CURSOR_PATH,
-    WEATHER_GRID_BACKFILL_MANIFEST_PATH,
+    WORKFLOW_NAME,
     Batch,
     WeatherGridBackfillCursor,
     WeatherGridManifest,
@@ -14,6 +13,10 @@ from pv_prospect.data_extraction.processing.weather_grid_backfill import (
     plan_weather_grid_backfill,
     serialize_manifest,
 )
+
+_RUN_DATE = '2026-04-09'
+_CURSOR_PATH = f'{WORKFLOW_NAME}.json'
+_MANIFEST_PATH = f'{_RUN_DATE}/{WORKFLOW_NAME}.backfill.json'
 
 _MANIFEST = WeatherGridManifest(
     step2_batch=Batch(
@@ -76,64 +79,98 @@ def test_serialize_manifest_preserves_step3_order() -> None:
 
 
 def test_plan_weather_grid_backfill_writes_manifest_file() -> None:
-    fs = FakeFileSystem()
+    cursors_fs = FakeFileSystem()
+    manifests_fs = FakeFileSystem()
     today = date(2026, 4, 9)
 
-    plan_weather_grid_backfill(today, num_sample_files=32, fs=fs)
+    plan_weather_grid_backfill(
+        today,
+        _RUN_DATE,
+        num_sample_files=32,
+        cursors_fs=cursors_fs,
+        manifests_fs=manifests_fs,
+    )
 
-    assert WEATHER_GRID_BACKFILL_MANIFEST_PATH in fs.files
+    assert _MANIFEST_PATH in manifests_fs.files
 
 
 def test_plan_weather_grid_backfill_does_not_advance_live_cursor() -> None:
-    fs = FakeFileSystem()
+    cursors_fs = FakeFileSystem()
+    manifests_fs = FakeFileSystem()
     today = date(2026, 4, 9)
 
-    plan_weather_grid_backfill(today, num_sample_files=32, fs=fs)
+    plan_weather_grid_backfill(
+        today,
+        _RUN_DATE,
+        num_sample_files=32,
+        cursors_fs=cursors_fs,
+        manifests_fs=manifests_fs,
+    )
 
-    assert WEATHER_GRID_BACKFILL_CURSOR_PATH not in fs.files
+    assert _CURSOR_PATH not in cursors_fs.files
 
 
 def test_plan_weather_grid_backfill_returns_manifest_consistent_with_file() -> None:
-    fs = FakeFileSystem()
+    cursors_fs = FakeFileSystem()
+    manifests_fs = FakeFileSystem()
     today = date(2026, 4, 9)
 
-    returned = plan_weather_grid_backfill(today, num_sample_files=32, fs=fs)
-    persisted, _ = deserialize_manifest(fs.files[WEATHER_GRID_BACKFILL_MANIFEST_PATH])
+    returned = plan_weather_grid_backfill(
+        today,
+        _RUN_DATE,
+        num_sample_files=32,
+        cursors_fs=cursors_fs,
+        manifests_fs=manifests_fs,
+    )
+    persisted, _ = deserialize_manifest(manifests_fs.files[_MANIFEST_PATH])
 
     assert returned == persisted
 
 
 def test_commit_weather_grid_backfill_promotes_next_cursor() -> None:
-    fs = FakeFileSystem()
-    fs.files[WEATHER_GRID_BACKFILL_MANIFEST_PATH] = serialize_manifest(
-        _MANIFEST, _NEXT_CURSOR
-    )
+    cursors_fs = FakeFileSystem()
+    manifests_fs = FakeFileSystem()
+    manifests_fs.files[_MANIFEST_PATH] = serialize_manifest(_MANIFEST, _NEXT_CURSOR)
 
-    committed = commit_weather_grid_backfill(fs)
+    committed = commit_weather_grid_backfill(_RUN_DATE, cursors_fs, manifests_fs)
 
     assert committed == _NEXT_CURSOR
-    assert load_cursor(fs, date(2026, 4, 9)) == _NEXT_CURSOR
+    assert load_cursor(cursors_fs, date(2026, 4, 9)) == _NEXT_CURSOR
 
 
 def test_plan_then_commit_advances_live_cursor() -> None:
-    fs = FakeFileSystem()
+    cursors_fs = FakeFileSystem()
+    manifests_fs = FakeFileSystem()
     today = date(2026, 4, 9)
 
-    plan_weather_grid_backfill(today, num_sample_files=32, fs=fs)
-    commit_weather_grid_backfill(fs)
+    plan_weather_grid_backfill(
+        today,
+        _RUN_DATE,
+        num_sample_files=32,
+        cursors_fs=cursors_fs,
+        manifests_fs=manifests_fs,
+    )
+    commit_weather_grid_backfill(_RUN_DATE, cursors_fs, manifests_fs)
 
-    cursor = load_cursor(fs, today)
+    cursor = load_cursor(cursors_fs, today)
     # With the default 8-batch step 3 plan, the cursor offset advances from
     # 1 to 9 (initial 1 + 8 batches).
     assert cursor.next_sample_offset == 9
 
 
 def test_plan_weather_grid_backfill_without_prior_cursor_uses_initial() -> None:
-    fs = FakeFileSystem()
+    cursors_fs = FakeFileSystem()
+    manifests_fs = FakeFileSystem()
     today = date(2026, 4, 9)
 
-    plan_weather_grid_backfill(today, num_sample_files=32, fs=fs)
-    _, next_cursor = deserialize_manifest(fs.files[WEATHER_GRID_BACKFILL_MANIFEST_PATH])
+    plan_weather_grid_backfill(
+        today,
+        _RUN_DATE,
+        num_sample_files=32,
+        cursors_fs=cursors_fs,
+        manifests_fs=manifests_fs,
+    )
+    _, next_cursor = deserialize_manifest(manifests_fs.files[_MANIFEST_PATH])
 
     # Initial cursor starts at (today - 14). After 8 more 14-day backward
     # steps the next_end_date should be (today - 14 - 8*14) = today - 126.

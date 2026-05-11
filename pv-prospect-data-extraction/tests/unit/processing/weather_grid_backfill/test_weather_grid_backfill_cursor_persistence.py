@@ -3,13 +3,15 @@
 from datetime import date
 
 from pv_prospect.data_extraction.processing.weather_grid_backfill import (
-    WEATHER_GRID_BACKFILL_CURSOR_PATH,
+    WORKFLOW_NAME,
     WeatherGridBackfillCursor,
     deserialize_cursor,
     load_cursor,
     save_cursor,
     serialize_cursor,
 )
+
+_CURSOR_PATH = f'{WORKFLOW_NAME}.json'
 
 
 class FakeFileSystem:
@@ -47,37 +49,37 @@ def test_serialize_produces_json_with_iso_date() -> None:
 
 
 def test_load_cursor_returns_initial_when_file_missing() -> None:
-    fs = FakeFileSystem()
+    cursors_fs = FakeFileSystem()
     today = date(2026, 4, 3)
 
-    cursor = load_cursor(fs, today)
+    cursor = load_cursor(cursors_fs, today)
 
     assert cursor.next_end_date == date(2026, 3, 20)
     assert cursor.next_sample_offset == 1
 
 
 def test_load_cursor_reads_existing_file() -> None:
-    fs = FakeFileSystem()
-    fs._files[WEATHER_GRID_BACKFILL_CURSOR_PATH] = serialize_cursor(_CURSOR)
+    cursors_fs = FakeFileSystem()
+    cursors_fs._files[_CURSOR_PATH] = serialize_cursor(_CURSOR)
 
-    cursor = load_cursor(fs, date(2026, 4, 3))
+    cursor = load_cursor(cursors_fs, date(2026, 4, 3))
 
     assert cursor == _CURSOR
 
 
 def test_save_cursor_writes_to_expected_path() -> None:
-    fs = FakeFileSystem()
+    cursors_fs = FakeFileSystem()
 
-    save_cursor(fs, _CURSOR)
+    save_cursor(cursors_fs, _CURSOR)
 
-    assert WEATHER_GRID_BACKFILL_CURSOR_PATH in fs._files
-    assert deserialize_cursor(fs._files[WEATHER_GRID_BACKFILL_CURSOR_PATH]) == _CURSOR
+    assert _CURSOR_PATH in cursors_fs._files
+    assert deserialize_cursor(cursors_fs._files[_CURSOR_PATH]) == _CURSOR
 
 
 def test_save_then_load_roundtrip() -> None:
-    fs = FakeFileSystem()
+    cursors_fs = FakeFileSystem()
 
-    save_cursor(fs, _CURSOR)
-    result = load_cursor(fs, date(2026, 4, 3))
+    save_cursor(cursors_fs, _CURSOR)
+    result = load_cursor(cursors_fs, date(2026, 4, 3))
 
     assert result == _CURSOR

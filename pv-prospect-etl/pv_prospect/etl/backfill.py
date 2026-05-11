@@ -4,10 +4,12 @@ Both extraction and transformation pipelines run daily backfills that march
 backwards through history one window at a time. They share a common shape:
 
   * a *cursor* records where the last run left off (the exclusive end of
-    the next window to process);
-  * a *plan* describes today's window;
+    the next window to process). Cursors are singleton committed state,
+    stored at ``<workflow_name>.json`` on the *cursors filesystem*.
+  * a *plan* describes the next window's work.
   * the *plan-commit* dance writes today's plan and the *next* cursor into
-    a manifest file, but only promotes the next-cursor to the live cursor
+    a manifest at ``<run_date>/<workflow_name>.json`` on the *manifests
+    filesystem*, but only promotes the next-cursor to the live cursor
     after the run succeeds (so a failed run is safely re-tried tomorrow).
 
 The window length is scope-specific: see :class:`BackfillScope` and
@@ -147,54 +149,79 @@ def deserialize_plan(text: str) -> tuple[BackfillPlan, BackfillCursor]:
 
 
 # ---------------------------------------------------------------------------
-# Persistence + plan-commit (parameterised by file paths)
+# Persistence + plan-commit
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class BackfillPaths:
-    """File-system paths that identify a particular backfill instance.
-
-    Each daily backfill (extraction-side PV, extraction-side weather grid,
-    transformation-side PV-sites, transformation-side weather grid, ...)
-    has its own cursor and manifest files and so its own ``BackfillPaths``.
-    """
-
-    cursor: str
-    manifest: str
+def cursor_filename(workflow_name: str) -> str:
+    """Return the cursor filename (relative to the cursors filesystem) for
+    *workflow_name*."""
+    return f'{workflow_name}.json'
 
 
-def load_cursor(fs: FileSystem, paths: BackfillPaths, today: date) -> BackfillCursor:
-    """Load the cursor at *paths*, or return an initial cursor (== today)."""
-    if fs.exists(paths.cursor):
-        return deserialize_cursor(fs.read_text(paths.cursor))
+def manifest_filename(workflow_name: str, run_date: str) -> str:
+    """Return the per-run-date backfill-plan manifest filename (relative to
+    the manifests filesystem) for *workflow_name* on *run_date*.
+
+    The ``.backfill.json`` suffix distinguishes the backfill date-window
+    plan (start/end/next-cursor) from the orchestrator's phased task
+    manifest (``<run_date>/<workflow>.json``), which a backfill workflow
+    also writes via :class:`WorkflowOrchestrator`."""
+    return f'{run_date}/{workflow_name}.backfill.json'
+
+
+def load_cursor(
+    cursors_fs: FileSystem,
+    workflow_name: str,
+    today: date,
+) -> BackfillCursor:
+    """Load the cursor for *workflow_name*, or return an initial cursor."""
+    path = cursor_filename(workflow_name)
+    if cursors_fs.exists(path):
+        return deserialize_cursor(cursors_fs.read_text(path))
     return initial_backfill_cursor(today)
 
 
-def save_cursor(fs: FileSystem, paths: BackfillPaths, cursor: BackfillCursor) -> None:
-    fs.write_text(paths.cursor, serialize_cursor(cursor))
+def save_cursor(
+    cursors_fs: FileSystem,
+    workflow_name: str,
+    cursor: BackfillCursor,
+) -> None:
+    """Persist *cursor* as the live cursor for *workflow_name*."""
+    cursors_fs.write_text(cursor_filename(workflow_name), serialize_cursor(cursor))
 
 
 def plan_backfill(
-    fs: FileSystem,
-    paths: BackfillPaths,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+    workflow_name: str,
+    run_date: str,
     today: date,
     window_days: int,
 ) -> BackfillPlan:
     """Plan today's window and write the manifest. Live cursor unchanged.
 
-    The manifest at ``paths.manifest`` carries both the plan and the
-    *next* cursor — the latter is later promoted to the live cursor by
-    :func:`commit_backfill` once the run succeeds.
+    Writes ``<run_date>/<workflow_name>.json`` on *manifests_fs* carrying
+    both the plan and the *next* cursor — the latter is later promoted
+    to the live cursor by :func:`commit_backfill` once the run succeeds.
     """
-    cursor = load_cursor(fs, paths, today)
+    cursor = load_cursor(cursors_fs, workflow_name, today)
     plan, next_cursor = build_backfill_plan(cursor, window_days)
-    fs.write_text(paths.manifest, serialize_plan(plan, next_cursor))
+    manifests_fs.write_text(
+        manifest_filename(workflow_name, run_date), serialize_plan(plan, next_cursor)
+    )
     return plan
 
 
-def commit_backfill(fs: FileSystem, paths: BackfillPaths) -> BackfillCursor:
+def commit_backfill(
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+    workflow_name: str,
+    run_date: str,
+) -> BackfillCursor:
     """Promote the manifest's next-cursor to the live cursor."""
-    _, next_cursor = deserialize_plan(fs.read_text(paths.manifest))
-    save_cursor(fs, paths, next_cursor)
+    _, next_cursor = deserialize_plan(
+        manifests_fs.read_text(manifest_filename(workflow_name, run_date))
+    )
+    save_cursor(cursors_fs, workflow_name, next_cursor)
     return next_cursor

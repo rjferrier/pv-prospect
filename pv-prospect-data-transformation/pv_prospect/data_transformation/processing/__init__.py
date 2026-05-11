@@ -17,8 +17,8 @@ from .core import (
 )
 from .transform_backfill import (
     commit_transform_backfill,
-    paths_for,
     plan_transform_backfill,
+    workflow_name_for,
 )
 from .transformation import (
     ALL_TRANSFORMATIONS,
@@ -44,8 +44,8 @@ __all__ = [
     'assemble_prepared_pv',
     'assemble_prepared_weather',
     'commit_transform_backfill',
-    'paths_for',
     'plan_transform_backfill',
+    'workflow_name_for',
     'read_csv',
     'read_metadata',
     'run_clean_pv',

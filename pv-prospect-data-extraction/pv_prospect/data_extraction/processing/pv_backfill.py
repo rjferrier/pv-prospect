@@ -10,7 +10,7 @@ Computes the work plan for a single day's PV-site backfill budget:
 
 The cursor / plan-commit machinery lives in :mod:`pv_prospect.etl.backfill`
 and is shared with the transformation pipeline. This module is just a
-thin wrapper that pins the file paths and the :class:`BackfillScope`
+thin wrapper that pins the workflow name and the :class:`BackfillScope`
 appropriate to the extraction-side PV-site backfill.
 
 The 28-day window is the largest round-week multiple compatible with the
@@ -25,7 +25,6 @@ from datetime import date
 
 from pv_prospect.etl import (
     BackfillCursor,
-    BackfillPaths,
     BackfillPlan,
     BackfillScope,
     commit_backfill,
@@ -34,15 +33,14 @@ from pv_prospect.etl import (
 )
 from pv_prospect.etl.storage import FileSystem
 
-_PATHS = BackfillPaths(
-    cursor='manifests/pv_backfill_cursor.json',
-    manifest='manifests/todays_pv_backfill_manifest.json',
-)
+WORKFLOW_NAME = 'pv-prospect-extract-pv-sites-backfill'
 
 
 def plan_pv_site_backfill(
     today: date,
-    fs: FileSystem,
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
     window_days: int | None = None,
 ) -> BackfillPlan:
     """Plan today's PV-site backfill window and persist the manifest.
@@ -52,12 +50,18 @@ def plan_pv_site_backfill(
     """
     if window_days is None:
         window_days = default_window_days(BackfillScope.PV_SITES)
-    return plan_backfill(fs, _PATHS, today, window_days)
+    return plan_backfill(
+        cursors_fs, manifests_fs, WORKFLOW_NAME, run_date, today, window_days
+    )
 
 
-def commit_pv_site_backfill(fs: FileSystem) -> BackfillCursor:
+def commit_pv_site_backfill(
+    run_date: str,
+    cursors_fs: FileSystem,
+    manifests_fs: FileSystem,
+) -> BackfillCursor:
     """Promote the manifest's next cursor to the live cursor.
 
     Called after all PV + weather extraction jobs for today have completed.
     """
-    return commit_backfill(fs, _PATHS)
+    return commit_backfill(cursors_fs, manifests_fs, WORKFLOW_NAME, run_date)

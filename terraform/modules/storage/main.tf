@@ -1,6 +1,8 @@
 # Cloud Storage resources for data management and DVC
 #
-# - staging: single bucket with resources/, raw/, cleaned/, prepared/ prefixes
+# - staging: single bucket with data/ and tracking/ top-level prefixes
+#       data/      — resources/, raw/, cleaned/, prepared-batches/, prepared/
+#       tracking/  — manifests/, cursors/, ledger/, logs/
 # - versioned-raw: corpus of raw CSV data tracked by DVC
 # - versioned-feature: corpus of model-ready Parquet data tracked by DVC
 
