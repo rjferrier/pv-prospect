@@ -96,7 +96,7 @@ PV power output from POA irradiance and other features. Implemented in
 ## Operational Workflows
 
 The automated pipeline is driven by Cloud Scheduler cron jobs that execute Cloud
-Workflows on a daily basis:
+Workflows on a daily or weekly basis:
 
 * **Daily Extraction (`pv-prospect-extract`)**: Runs at **02:00 UTC**. Triggers
   the data extraction workflow for the previous day.
@@ -130,6 +130,9 @@ Workflows on a daily basis:
   pattern as above but for the grid-point weather backfill (14-day window,
   weather-only task graph). Uses an independent cursor so it can advance
   separately from the PV-sites transform backfill.
+* **Data Versioning (`data-versioner`)**: Runs weekly at **Sunday 23:00 UTC**.
+  Snapshots prepared CSV data and trained model artefacts, producing a versioned
+  dataset for the next training run.
 
 > **Scheduling rationale**: The daily extraction and PV-sites extraction backfill
 > both use the PVOutput API, which rate-limits at 300 requests/hour. With

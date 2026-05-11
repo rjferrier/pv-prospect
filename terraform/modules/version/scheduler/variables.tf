@@ -5,8 +5,8 @@ variable "region" {
 
 variable "schedule" {
   type        = string
-  default     = "0 6 * * 1"
-  description = "Cron schedule (default: Monday 06:00 UTC)"
+  default     = "0 23 * * 0"
+  description = "Cron schedule (default: Sunday 23:00 UTC)"
 }
 
 variable "time_zone" {

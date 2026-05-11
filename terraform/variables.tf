@@ -112,8 +112,8 @@ variable "versioner_image_tag" {
 
 variable "versioner_scheduler_cron" {
   type        = string
-  default     = "0 6 * * 1"
-  description = "Cron schedule for weekly versioning (default: Monday 06:00 UTC)"
+  default     = "0 23 * * 0"
+  description = "Cron schedule for weekly versioning (default: Sunday 23:00 UTC)"
 }
 
 variable "secret_env_vars" {
