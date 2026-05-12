@@ -154,6 +154,29 @@ resource "google_workflows_workflow" "data_extraction" {
                                           initial_delay: 60
                                           max_delay: 600
                                           multiplier: 2
+                                      # After retries are exhausted, branch on the
+                                      # container exit code surfaced by await_job:
+                                      # 2 -> WorkflowTerminatingError, re-raise so
+                                      # the phase loop aborts and consolidate_logs
+                                      # runs without further phases.
+                                      # 1 (or unknown) -> log and swallow so the
+                                      # parallel branch ends cleanly and remaining
+                                      # phases proceed.
+                                      except:
+                                        as: task_err
+                                        steps:
+                                          - extract_exit_code:
+                                              assign:
+                                                - failed_exit_code: $${default(map.get(default(map.get(task_err, "data"), {}), "exit_code"), 1)}
+                                          - branch_on_exit_code:
+                                              switch:
+                                                - condition: $${failed_exit_code == 2}
+                                                  raise: $${task_err}
+                                          - log_task_failure:
+                                              call: sys.log
+                                              args:
+                                                data: '$${"Task failed (exit_code=" + string(failed_exit_code) + "), continuing: " + json.encode_to_string(task_err)}'
+                                                severity: "WARNING"
                         - continue_phase:
                             assign:
                               - _dummy: true
@@ -257,8 +280,43 @@ resource "google_workflows_workflow" "data_extraction" {
               - condition: $${exec.succeededCount == exec.taskCount}
                 return: $${exec}
               - condition: true
-                raise:
-                  message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ")"}'
-                  data: $${exec}
+                steps:
+                  - read_exit_code:
+                      call: fetch_failed_task_exit_code
+                      args:
+                        execution_name: $${execution_name}
+                      result: exit_code
+                  - raise_failure:
+                      raise:
+                        message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ", exit_code: " + string(exit_code) + ")"}'
+                        data:
+                          exec: $${exec}
+                          exit_code: $${exit_code}
+
+    # Reads the failed task's container exit code. Defaults to 1 if the
+    # task list is empty or the exitCode field is absent (e.g. the
+    # container never ran). The exit code drives the outer except's
+    # decision to swallow (1: task failed, workflow continues) or
+    # re-raise (2: WorkflowTerminatingError -- workflow aborts).
+    fetch_failed_task_exit_code:
+      params: [execution_name]
+      steps:
+        - list_tasks:
+            call: googleapis.run.v2.projects.locations.jobs.executions.tasks.list
+            args:
+              parent: $${execution_name}
+            result: tasks_response
+        - check_tasks_present:
+            switch:
+              - condition: $${len(default(map.get(tasks_response, "tasks"), [])) == 0}
+                return: 1
+        - extract_first_task_exit_code:
+            assign:
+              - first_task: $${tasks_response.tasks[0]}
+              - status_obj: $${default(map.get(first_task, "status"), {})}
+              - last_attempt: $${default(map.get(status_obj, "lastAttemptResult"), {})}
+              - exit_code: $${default(map.get(last_attempt, "exitCode"), 1)}
+        - return_exit_code:
+            return: $${exit_code}
   YAML
 }

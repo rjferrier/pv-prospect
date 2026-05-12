@@ -176,6 +176,13 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                     args:
                       data: $${"Starting weather extraction for batch " + string(i+1) + "/" + string(len(batches))}
 
+                # Track whether this batch ultimately succeeded so the
+                # checkpoint and `completed` map are only updated when the
+                # task didn't fail-and-swallow.
+                - init_batch_flag:
+                    assign:
+                      - batch_succeeded: true
+
                 - run_batch:
                     try:
                       steps:
@@ -204,32 +211,71 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                         initial_delay: 60
                         max_delay: 600
                         multiplier: 2
+                    # After retries are exhausted, branch on the container
+                    # exit code surfaced by await_job:
+                    # 2 -> WorkflowTerminatingError, re-raise so the
+                    # run_pipeline try aborts before commit, leaving the
+                    # cursor unchanged.
+                    # 1 (or unknown) -> log, mark this batch as not
+                    # succeeded (so the legacy checkpoint isn't updated),
+                    # and let the loop carry on to the next batch.
+                    except:
+                      as: task_err
+                      steps:
+                        - extract_exit_code:
+                            assign:
+                              - failed_exit_code: $${default(map.get(default(map.get(task_err, "data"), {}), "exit_code"), 1)}
+                        - branch_on_exit_code:
+                            switch:
+                              - condition: $${failed_exit_code == 2}
+                                raise: $${task_err}
+                        - mark_batch_failed:
+                            assign:
+                              - batch_succeeded: false
+                        - log_task_failure:
+                            call: sys.log
+                            args:
+                              data: '$${"Batch failed (exit_code=" + string(failed_exit_code) + "), continuing: " + json.encode_to_string(task_err)}'
+                              severity: "WARNING"
 
-                - mark_done:
-                    assign:
-                      - completed[string(i)]: true
+                # Only update the legacy per-batch checkpoint on success.
+                # A failed batch stays unchecked so a same-day re-trigger
+                # of this workflow run will re-attempt it.
+                - maybe_record_done:
+                    switch:
+                      - condition: $${batch_succeeded}
+                        steps:
+                          - mark_done:
+                              assign:
+                                - completed[string(i)]: true
 
-                - write_checkpoint:
-                    call: http.post
-                    args:
-                      url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
-                      auth:
-                        type: OAuth2
-                      headers:
-                        Content-Type: application/json
-                      body: $${json.encode_to_string(completed)}
+                          - write_checkpoint:
+                              call: http.post
+                              args:
+                                url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
+                                auth:
+                                  type: OAuth2
+                                headers:
+                                  Content-Type: application/json
+                                body: $${json.encode_to_string(completed)}
 
                 - next_batch:
                     assign:
                       - i: $${i + 1}
                     next: dispatch_loop
 
+                # Commit once every batch has been attempted (succeeded or
+                # failed-with-exit-1). Exit-2 failures never reach here --
+                # they re-raise out of run_batch and abort run_pipeline,
+                # skipping the commit. Throttled-early runs leave
+                # i < len(batches) and exit with the "Partial run" return,
+                # so the cursor stays put for the next scheduled trigger.
                 - check_all_done:
                     switch:
-                      - condition: $${len(keys(completed)) == len(batches)}
+                      - condition: $${i == len(batches)}
                         next: commit
                       - condition: true
-                        return: $${"Partially completed (" + string(len(keys(completed))) + "/" + string(len(batches)) + ")"}
+                        return: $${"Partial run -- attempted " + string(i) + "/" + string(len(batches)) + ", remaining for next run"}
 
                 - commit:
                     call: googleapis.run.v2.projects.locations.jobs.run
@@ -374,8 +420,44 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
               - condition: $${exec.succeededCount == exec.taskCount}
                 return: $${exec}
               - condition: true
-                raise:
-                  message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ")"}'
-                  data: $${exec}
+                steps:
+                  - read_exit_code:
+                      call: fetch_failed_task_exit_code
+                      args:
+                        execution_name: $${execution_name}
+                      result: exit_code
+                  - raise_failure:
+                      raise:
+                        message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ", exit_code: " + string(exit_code) + ")"}'
+                        data:
+                          exec: $${exec}
+                          exit_code: $${exit_code}
+
+    # Reads the failed task's container exit code. Defaults to 1 if the
+    # task list is empty or the exitCode field is absent (e.g. the
+    # container never ran). The exit code drives the per-batch except's
+    # decision to swallow (1: task failed, workflow continues) or
+    # re-raise (2: WorkflowTerminatingError -- workflow aborts before the
+    # cursor-commit step, leaving the cursor unchanged for tomorrow).
+    fetch_failed_task_exit_code:
+      params: [execution_name]
+      steps:
+        - list_tasks:
+            call: googleapis.run.v2.projects.locations.jobs.executions.tasks.list
+            args:
+              parent: $${execution_name}
+            result: tasks_response
+        - check_tasks_present:
+            switch:
+              - condition: $${len(default(map.get(tasks_response, "tasks"), [])) == 0}
+                return: 1
+        - extract_first_task_exit_code:
+            assign:
+              - first_task: $${tasks_response.tasks[0]}
+              - status_obj: $${default(map.get(first_task, "status"), {})}
+              - last_attempt: $${default(map.get(status_obj, "lastAttemptResult"), {})}
+              - exit_code: $${default(map.get(last_attempt, "exitCode"), 1)}
+        - return_exit_code:
+            return: $${exit_code}
   YAML
 }

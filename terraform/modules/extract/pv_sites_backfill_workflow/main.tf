@@ -339,8 +339,44 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
               - condition: $${exec.succeededCount == exec.taskCount}
                 return: $${exec}
               - condition: true
-                raise:
-                  message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ")"}'
-                  data: $${exec}
+                steps:
+                  - read_exit_code:
+                      call: fetch_failed_task_exit_code
+                      args:
+                        execution_name: $${execution_name}
+                      result: exit_code
+                  - raise_failure:
+                      raise:
+                        message: '$${"Job execution failed or was cancelled (succeeded: " + string(default(exec.succeededCount, 0)) + "/" + string(exec.taskCount) + ", exit_code: " + string(exit_code) + ")"}'
+                        data:
+                          exec: $${exec}
+                          exit_code: $${exit_code}
+
+    # Reads the failed task's container exit code. Defaults to 1 if the
+    # task list is empty or the exitCode field is absent (e.g. the
+    # container never ran). Currently the PV-site backfill has no
+    # per-task try/except so the exit_code is informational only --
+    # any failure aborts the workflow. Adding per-task swallow-vs-abort
+    # branching here is a follow-up.
+    fetch_failed_task_exit_code:
+      params: [execution_name]
+      steps:
+        - list_tasks:
+            call: googleapis.run.v2.projects.locations.jobs.executions.tasks.list
+            args:
+              parent: $${execution_name}
+            result: tasks_response
+        - check_tasks_present:
+            switch:
+              - condition: $${len(default(map.get(tasks_response, "tasks"), [])) == 0}
+                return: 1
+        - extract_first_task_exit_code:
+            assign:
+              - first_task: $${tasks_response.tasks[0]}
+              - status_obj: $${default(map.get(first_task, "status"), {})}
+              - last_attempt: $${default(map.get(status_obj, "lastAttemptResult"), {})}
+              - exit_code: $${default(map.get(last_attempt, "exitCode"), 1)}
+        - return_exit_code:
+            return: $${exit_code}
   YAML
 }

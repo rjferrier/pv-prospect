@@ -269,8 +269,32 @@ grid does not block PV-sites progress (or vice versa).
 
 ## Error Handling
 
-- Cloud Run Jobs exit with code 1 on failure (not silently swallowed).
-- Workflow `try/except` blocks ensure log consolidation always runs, even on
-  failure.
-- Structured logging includes `status_code`, `url`, and response body for HTTP
-  errors.
+Cloud Run Jobs exit with one of three codes (see
+`pv_prospect.etl.entrypoint`):
+
+| Code | Meaning | Workflow reaction |
+|------|---------|-------------------|
+| 0 | Success — `main()` returned without exception | Task succeeds; ledger records `completed` |
+| 1 | Task-level failure — general exception | Task fails; the surrounding workflow swallows it and continues with other tasks |
+| 2 | Workflow-terminating — `WorkflowTerminatingError` raised | Task fails; the surrounding workflow aborts (skipping any cursor-commit step) |
+
+Application code raises `WorkflowTerminatingError` (from `pv_prospect.etl`)
+for failure modes where continuing other tasks is harmful or pointless --
+for example, sustained rate-limiting from an upstream API or a deployment
+misconfiguration (missing storage, unknown JOB_TYPE). Everything else is
+just an `Exception`, which becomes exit 1.
+
+The workflow YAML side of the policy lives in each workflow's `await_job`
+subworkflow. On failure, it reads the failed task's container exit code
+via the Cloud Run Tasks API and re-raises with `data.exit_code` populated.
+Each per-task `try` clause then branches on `task_err.data.exit_code`:
+swallow on 1, re-raise on 2. For backfill workflows the re-raise abort is
+what gates the cursor-commit step (an exit-2 failure leaves the cursor
+unchanged for tomorrow's retry).
+
+Other notes:
+
+- Workflow `try/except` blocks ensure log consolidation always runs, even
+  on failure.
+- Structured logging includes `status_code`, `url`, and response body for
+  HTTP errors.
