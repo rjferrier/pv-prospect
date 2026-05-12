@@ -216,7 +216,7 @@ resource "google_workflows_workflow" "transform_backfill" {
                                         steps:
                                           - extract_exit_code:
                                               assign:
-                                                - failed_exit_code: $${default(map.get(default(map.get(task_err, "data"), {}), "exit_code"), 1)}
+                                                - failed_exit_code: $${default(map.get(task_err, ["data", "exit_code"]), 1)}
                                           - branch_on_exit_code:
                                               switch:
                                                 - condition: $${failed_exit_code == 2}
@@ -390,9 +390,7 @@ resource "google_workflows_workflow" "transform_backfill" {
         - extract_first_task_exit_code:
             assign:
               - first_task: $${tasks_response.tasks[0]}
-              - status_obj: $${default(map.get(first_task, "status"), {})}
-              - last_attempt: $${default(map.get(status_obj, "lastAttemptResult"), {})}
-              - exit_code: $${default(map.get(last_attempt, "exitCode"), 1)}
+              - exit_code: $${default(map.get(first_task, ["status", "lastAttemptResult", "exitCode"]), 1)}
         - return_exit_code:
             return: $${exit_code}
   YAML
