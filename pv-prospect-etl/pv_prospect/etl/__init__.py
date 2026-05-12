@@ -18,6 +18,13 @@ from .backfill import (
 )
 from .constants import TIMESERIES_FOLDER
 from .date_parsing import DegenerateDateRange, build_date_range, parse_date
+from .entrypoint import (
+    EXIT_OK,
+    EXIT_TASK_FAILED,
+    EXIT_WORKFLOW_TERMINATING,
+    WorkflowTerminatingError,
+    run_entrypoint,
+)
 from .extractor import Extractor
 from .loader import Loader
 from .orchestration import WorkflowOrchestrator, build_env_list, inject_task_hash
@@ -28,10 +35,14 @@ __all__ = [
     'BackfillPlan',
     'BackfillScope',
     'DegenerateDateRange',
+    'EXIT_OK',
+    'EXIT_TASK_FAILED',
+    'EXIT_WORKFLOW_TERMINATING',
     'Extractor',
     'Loader',
     'TIMESERIES_FOLDER',
     'WorkflowOrchestrator',
+    'WorkflowTerminatingError',
     'build_backfill_plan',
     'build_date_range',
     'build_env_list',
@@ -47,6 +58,7 @@ __all__ = [
     'manifest_filename',
     'parse_date',
     'plan_backfill',
+    'run_entrypoint',
     'save_cursor',
     'serialize_cursor',
     'serialize_plan',

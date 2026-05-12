@@ -14,7 +14,6 @@ GITHUB_DEPLOY_KEY
 
 import logging
 import os
-import sys
 from datetime import date
 
 from pv_prospect.common import configure_logging, get_config
@@ -22,6 +21,7 @@ from pv_prospect.data_versioner.config import DataVersionerConfig
 from pv_prospect.data_versioner.core import version_data
 from pv_prospect.data_versioner.resources import get_config_dir as get_dv_config_dir
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
+from pv_prospect.etl import run_entrypoint
 from pv_prospect.etl.storage import get_filesystem
 
 logger = logging.getLogger(__name__)
@@ -54,8 +54,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     configure_logging()
-    try:
-        main()
-    except Exception:
-        logger.exception('Unhandled exception')
-        sys.exit(1)
+    run_entrypoint(main)

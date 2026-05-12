@@ -88,6 +88,7 @@ from pv_prospect.etl import (
     build_date_range,
     build_env_list,
     inject_task_hash,
+    run_entrypoint,
 )
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
@@ -555,8 +556,4 @@ def _required(fs: FileSystem | None, name: str) -> FileSystem:
 
 if __name__ == '__main__':
     configure_logging()
-    try:
-        main()
-    except Exception:
-        logger.exception('Unhandled exception')
-        sys.exit(1)
+    run_entrypoint(main)
