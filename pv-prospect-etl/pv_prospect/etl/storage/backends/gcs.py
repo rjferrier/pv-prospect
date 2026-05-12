@@ -26,10 +26,12 @@ class GcsFileSystem:
     """Thin I/O adapter for Google Cloud Storage."""
 
     def __init__(self, bucket_name: str, prefix: str = '') -> None:
-        from google.cloud import storage as gcs  # noqa: PLC0415
+        import google.cloud.storage as gcs  # noqa: PLC0415
+        import google.cloud.storage_control_v2 as storage_control_v2  # noqa: PLC0415
 
         self._client = gcs.Client()
         self._bucket = self._client.bucket(bucket_name)
+        self._control_client = storage_control_v2.StorageControlClient()
         self._prefix = prefix.strip('/')
 
     def __str__(self) -> str:
@@ -76,15 +78,25 @@ class GcsFileSystem:
         pass  # GCS has a flat namespace
 
     def rmdir(self, path: str) -> None:
-        """Delete a directory marker blob if it exists.
+        """Delete an empty folder.
 
-        Note: GCS is flat, but some tools create zero-byte blobs ending in '/'
-        to represent folders.
+        On HNS-enabled buckets, folders are first-class entities that
+        persist after their last child object is removed; the Object API
+        cannot delete them. This calls the Storage Control API's
+        ``folders.delete`` endpoint, which requires the folder to be
+        empty. NotFound is treated as a no-op so callers can rmdir
+        unconditionally after a sweep.
         """
-        full_path = self._blob_path(path).rstrip('/') + '/'
-        blob = self._bucket.blob(full_path)
-        if blob.exists():
-            blob.delete()
+        from google.api_core.exceptions import NotFound  # noqa: PLC0415
+
+        folder_name = self._blob_path(path).rstrip('/') + '/'
+        full_name = self._control_client.folder_path(
+            '_', self._bucket.name, folder_name
+        )
+        try:
+            self._control_client.delete_folder(name=full_name)
+        except NotFound:
+            pass
 
     def list_files(
         self, prefix: str, pattern: str = '*', recursive: bool = False

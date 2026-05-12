@@ -4,6 +4,7 @@ import logging
 import os
 import tempfile
 from datetime import date
+from typing import Iterable
 
 from pv_prospect.data_versioner.config import DataVersionerConfig
 from pv_prospect.data_versioner.dvc_ops import dvc_add_files, dvc_push
@@ -18,6 +19,20 @@ from pv_prospect.data_versioner.readiness import verify_readiness
 from pv_prospect.etl.storage import FileSystem
 
 logger = logging.getLogger(__name__)
+
+
+def iter_ancestor_dirs(paths: Iterable[str]) -> list[str]:
+    """Return every distinct ancestor directory of *paths*, deepest first.
+
+    The empty (root) prefix is excluded so callers can rmdir the result
+    without removing the FileSystem's base directory.
+    """
+    dirs: set[str] = set()
+    for path in paths:
+        parts = path.split('/')[:-1]
+        for i in range(1, len(parts) + 1):
+            dirs.add('/'.join(parts[:i]))
+    return sorted(dirs, key=lambda d: d.count('/'), reverse=True)
 
 
 def version_data(
@@ -90,9 +105,16 @@ def _clean_staging(
     prepared_fs: FileSystem,
     cleaned_fs: FileSystem,
 ) -> None:
-    """Delete all files from the cleaned and prepared staging prefixes."""
+    """Delete all files from the cleaned and prepared staging prefixes.
+
+    On HNS-enabled GCS buckets, sub-folders persist after their last
+    child object is removed, so rmdir every residual directory deepest
+    first to keep the staging tree from accumulating empty folders.
+    """
     for fs, label in [(prepared_fs, 'prepared'), (cleaned_fs, 'cleaned')]:
         entries = fs.list_files('', recursive=True)
         for entry in entries:
             fs.delete(entry.path)
+        for directory in iter_ancestor_dirs(entry.path for entry in entries):
+            fs.rmdir(directory)
         logger.info('Deleted %d file(s) from %s staging', len(entries), label)
