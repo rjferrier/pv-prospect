@@ -181,13 +181,27 @@ daily workflows because they process a moving window across days:
 1. **Plan** — Reads a live **cursor** at
    `tracking/cursors/<workflow>.json` (tracking where the window left off),
    computes the next window, and writes a backfill plan manifest at
-   `tracking/manifests/<run_date>/<workflow>.backfill.json` containing both the
-   work items and the **next cursor** value.
-2. **Dispatch** — Cloud Workflow dispatches tasks. The extract-side backfills
-   additionally maintain a workflow-level batch/site checkpoint at
-   `tracking/checkpoints/<workflow>.json` to allow within-run resumption.
+   `tracking/manifests/<run_date>/<workflow>.backfill.json` containing the
+   date window, the **next cursor** value, and (on the extract side) a
+   `phases` list in the same shape the daily-extract orchestrator manifest
+   uses — one `extract_and_load` task env per dispatched batch with a
+   precomputed `TASK_HASH`. The Cloud Workflow consumes `phases` verbatim,
+   so every dispatched batch records its outcome in the ledger.
+2. **Dispatch** — Cloud Workflow iterates `phases` and dispatches each task
+   with `env: $${task_env}`. The extract-side backfills additionally maintain
+   a workflow-level batch/site checkpoint at
+   `tracking/checkpoints/<workflow>.json` (keyed by per-task index into
+   `phases[0]`) to allow within-run resumption between the two scheduled
+   triggers when rate limits force a split run.
 3. **Commit** — Only after all tasks succeed, the next cursor is promoted to
    live. This ensures the cursor only advances when work actually completes.
+
+The transformation backfills follow the same skeleton but split planning
+across two jobs: `plan_transform_backfill` writes the date window + cursor,
+and a separate `plan_transform` step writes the orchestrator phases manifest
+at `tracking/manifests/<run_date>/<workflow>.json` (using the same
+plan_transform code path the daily transform uses). The two files coexist;
+`commit_transform_backfill` reads the `.backfill.json` for the cursor.
 
 ### Backfill Scope and Window Configuration
 

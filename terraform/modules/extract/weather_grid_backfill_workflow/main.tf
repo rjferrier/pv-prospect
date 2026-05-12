@@ -72,6 +72,10 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                                   value: $${workflow_name}
                                 - name: RUN_DATE
                                   value: $${run_date}
+                                - name: DATA_SOURCE
+                                  value: $${data_source}
+                                - name: DRY_RUN
+                                  value: $${dry_run}
                     result: plan_op
 
                 - wait_for_plan_op:
@@ -97,9 +101,12 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                     assign:
                       - manifest: $${json.decode(manifest_raw)}
 
+                # The plan job emits the orchestrator phases-shape: a single
+                # phase containing one TASK_HASH-injected env list per batch.
+                # We dispatch each task verbatim — no inline env construction.
                 - collect_batches:
                     assign:
-                      - batches: $${list.concat([manifest.step2_batch], manifest.step3_batches)}
+                      - batches: $${manifest.phases[0]}
 
                 # Load any existing checkpoint so a re-triggered run skips already-done
                 # batches.  If no checkpoint exists the try block raises a 404 and we
@@ -167,7 +174,7 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                 - log_batch_start:
                     call: sys.log
                     args:
-                      data: $${"Starting weather extraction for batch " + string(i+1) + "/" + string(len(batches)) + " (sample_file_index=" + string(batch.sample_file_index) + ")"}
+                      data: $${"Starting weather extraction for batch " + string(i+1) + "/" + string(len(batches))}
 
                 - run_batch:
                     try:
@@ -179,23 +186,7 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                               body:
                                 overrides:
                                   containerOverrides:
-                                    - env:
-                                        - name: JOB_TYPE
-                                          value: extract_and_load
-                                        - name: DATA_SOURCE
-                                          value: $${data_source}
-                                        - name: SAMPLE_FILE_INDEX
-                                          value: $${string(batch.sample_file_index)}
-                                        - name: START_DATE
-                                          value: $${batch.start_date}
-                                        - name: END_DATE
-                                          value: $${batch.end_date}
-                                        - name: DRY_RUN
-                                          value: $${dry_run}
-                                        - name: WORKFLOW_NAME
-                                          value: $${workflow_name}
-                                        - name: RUN_DATE
-                                          value: $${run_date}
+                                    - env: $${batch}
                             result: batch_op
                         - wait_for_batch_op:
                             call: wait_for_operation

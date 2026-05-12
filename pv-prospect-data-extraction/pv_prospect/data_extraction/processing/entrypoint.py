@@ -366,8 +366,16 @@ def _run_plan_weather_grid_backfill(
     num_sample_files = count_sample_files(resources_fs)
     if num_sample_files == 0:
         raise ValueError('No sample files found on the resources filesystem.')
+    data_source = os.environ.get('DATA_SOURCE', 'weather')
+    dry_run = os.environ.get('DRY_RUN', 'false')
     manifest = plan_weather_grid_backfill(
-        today, run_date, num_sample_files, cursors_fs, manifests_fs
+        today,
+        run_date,
+        num_sample_files,
+        data_source,
+        dry_run,
+        cursors_fs,
+        manifests_fs,
     )
     logger.info(
         'plan_weather_grid_backfill: wrote manifest (step2=%s, step3_batches=%d)',
@@ -391,11 +399,25 @@ def _run_plan_pv_site_backfill(
     manifests_fs: FileSystem,
 ) -> None:
     today = date.today()
-    plan = plan_pv_site_backfill(today, run_date, cursors_fs, manifests_fs)
+    pv_system_ids = [int(s) for s in json.loads(os.environ.get('PV_SYSTEM_IDS', '[]'))]
+    pv_data_source = os.environ.get('PV_DATA_SOURCE', 'pv')
+    weather_data_source = os.environ.get('WEATHER_DATA_SOURCE', 'weather')
+    dry_run = os.environ.get('DRY_RUN', 'false')
+    plan = plan_pv_site_backfill(
+        today,
+        run_date,
+        pv_system_ids,
+        pv_data_source,
+        weather_data_source,
+        dry_run,
+        cursors_fs,
+        manifests_fs,
+    )
     logger.info(
-        'plan_pv_site_backfill: wrote manifest (%s to %s)',
+        'plan_pv_site_backfill: wrote manifest (%s to %s, %d PV system(s))',
         plan.start_date,
         plan.end_date,
+        len(pv_system_ids),
     )
 
 

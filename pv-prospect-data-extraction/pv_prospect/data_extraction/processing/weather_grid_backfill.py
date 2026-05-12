@@ -10,13 +10,23 @@ Computes the work plan for a single day's API budget, consisting of:
   covering a 14-day window and marching backwards in time.
 
 A :class:`WeatherGridBackfillCursor` tracks Step 3 progress between runs.
+
+The persisted manifest carries a ``phases`` list in the same shape as the
+daily-extract orchestrator manifest: every batch becomes an
+``extract_and_load`` task env with a precomputed ``TASK_HASH``, so each
+dispatched batch records its outcome in the workflow ledger.
 """
 
 import json
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from pv_prospect.etl import BackfillScope, default_window_days
+from pv_prospect.etl import (
+    BackfillScope,
+    build_env_list,
+    default_window_days,
+    inject_task_hash,
+)
 from pv_prospect.etl.storage import FileSystem
 
 _EPOCH = date(1970, 1, 1)
@@ -175,35 +185,62 @@ def save_cursor(cursors_fs: FileSystem, cursor: WeatherGridBackfillCursor) -> No
     cursors_fs.write_text(_cursor_path(), serialize_cursor(cursor))
 
 
-def _serialize_batch(batch: Batch) -> dict[str, str | int]:
-    return {
-        'sample_file_index': batch.sample_file_index,
-        'start_date': batch.start_date.isoformat(),
-        'end_date': batch.end_date.isoformat(),
-    }
+def batch_to_task_env(
+    batch: Batch,
+    data_source: str,
+    dry_run: str,
+    run_date: str,
+) -> list[dict[str, str]]:
+    """Build the ``extract_and_load`` env list for *batch*, with TASK_HASH.
 
-
-def _deserialize_batch(data: dict[str, str | int]) -> Batch:
-    return Batch(
-        sample_file_index=int(data['sample_file_index']),
-        start_date=date.fromisoformat(str(data['start_date'])),
-        end_date=date.fromisoformat(str(data['end_date'])),
+    The env list is what the Cloud Workflow dispatches as
+    ``containerOverrides.env`` for one Cloud Run Job task. ``TASK_HASH``
+    is computed deterministically from the env (excluding RUN_DATE), so
+    re-runs of the same batch within or across run dates share a hash.
+    """
+    env = build_env_list(
+        JOB_TYPE='extract_and_load',
+        DATA_SOURCE=data_source,
+        SAMPLE_FILE_INDEX=str(batch.sample_file_index),
+        START_DATE=batch.start_date.isoformat(),
+        END_DATE=batch.end_date.isoformat(),
+        DRY_RUN=dry_run,
+        WORKFLOW_NAME=WORKFLOW_NAME,
+        RUN_DATE=run_date,
     )
+    return inject_task_hash(env)
+
+
+def build_phases(
+    manifest: WeatherGridManifest,
+    data_source: str,
+    dry_run: str,
+    run_date: str,
+) -> list[list[list[dict[str, str]]]]:
+    """Convert *manifest*'s batches into the orchestrator ``phases`` shape.
+
+    All batches go into a single phase. Within-phase order is preserved
+    so the Cloud Workflow's pacing loop can dispatch them in sequence
+    under the OpenMeteo rate limit.
+    """
+    batches = [manifest.step2_batch, *manifest.step3_batches]
+    tasks = [batch_to_task_env(b, data_source, dry_run, run_date) for b in batches]
+    return [tasks]
 
 
 def serialize_manifest(
-    manifest: WeatherGridManifest, next_cursor: WeatherGridBackfillCursor
+    phases: list[list[list[dict[str, str]]]],
+    next_cursor: WeatherGridBackfillCursor,
 ) -> str:
-    """Serialize a manifest (plus next cursor) to a JSON string.
+    """Serialize the phased manifest plus its next cursor to JSON.
 
-    The JSON format is consumed by both the Cloud Workflow dispatcher and
-    the ``commit_weather_grid_backfill`` job that promotes ``next_cursor`` to
-    the live cursor after a successful run.
+    Consumed by the Cloud Workflow dispatcher (which iterates ``phases``)
+    and by :func:`commit_weather_grid_backfill` (which reads
+    ``next_cursor`` to advance the live cursor).
     """
     return json.dumps(
         {
-            'step2_batch': _serialize_batch(manifest.step2_batch),
-            'step3_batches': [_serialize_batch(b) for b in manifest.step3_batches],
+            'phases': phases,
             'next_cursor': {
                 'next_end_date': next_cursor.next_end_date.isoformat(),
                 'next_sample_offset': next_cursor.next_sample_offset,
@@ -212,37 +249,39 @@ def serialize_manifest(
     )
 
 
-def deserialize_manifest(
-    text: str,
-) -> tuple[WeatherGridManifest, WeatherGridBackfillCursor]:
-    """Deserialize a manifest (and its next cursor) from a JSON string."""
+def deserialize_next_cursor(text: str) -> WeatherGridBackfillCursor:
+    """Extract the ``next_cursor`` from a serialized manifest.
+
+    The phases are opaque env-list data the Cloud Workflow consumes
+    directly; only the cursor is needed Python-side (by
+    :func:`commit_weather_grid_backfill`).
+    """
     data = json.loads(text)
-    manifest = WeatherGridManifest(
-        step2_batch=_deserialize_batch(data['step2_batch']),
-        step3_batches=[_deserialize_batch(b) for b in data['step3_batches']],
-    )
-    next_cursor = WeatherGridBackfillCursor(
+    return WeatherGridBackfillCursor(
         next_end_date=date.fromisoformat(data['next_cursor']['next_end_date']),
         next_sample_offset=int(data['next_cursor']['next_sample_offset']),
     )
-    return manifest, next_cursor
 
 
 def plan_weather_grid_backfill(
     today: date,
     run_date: str,
     num_sample_files: int,
+    data_source: str,
+    dry_run: str,
     cursors_fs: FileSystem,
     manifests_fs: FileSystem,
     step3_batch_count: int = 8,
 ) -> WeatherGridManifest:
     """Compute today's manifest and persist it to storage.
 
-    Reads the current cursor, builds the manifest, and writes both the
-    manifest and the *next* cursor to
-    ``<run_date>/<workflow_name>.json`` on the manifests filesystem. The
-    live cursor at ``<workflow_name>.json`` on the cursors filesystem is
-    **not** advanced — that happens later via
+    Reads the current cursor, builds the batch plan, converts it to the
+    orchestrator ``phases`` shape (each batch becoming an
+    ``extract_and_load`` task env with a precomputed ``TASK_HASH``), and
+    writes both the phased manifest and the *next* cursor to
+    ``<run_date>/<workflow_name>.backfill.json`` on the manifests
+    filesystem. The live cursor at ``<workflow_name>.json`` on the
+    cursors filesystem is **not** advanced — that happens later via
     :func:`commit_weather_grid_backfill`, after the batches have been
     dispatched successfully.
     """
@@ -250,8 +289,9 @@ def plan_weather_grid_backfill(
     manifest, next_cursor = build_weather_grid_manifest(
         today, num_sample_files, cursor, step3_batch_count=step3_batch_count
     )
+    phases = build_phases(manifest, data_source, dry_run, run_date)
     manifests_fs.write_text(
-        _manifest_path(run_date), serialize_manifest(manifest, next_cursor)
+        _manifest_path(run_date), serialize_manifest(phases, next_cursor)
     )
     return manifest
 
@@ -265,7 +305,7 @@ def commit_weather_grid_backfill(
 
     Called after all batches dispatched by the workflow have completed.
     """
-    _, next_cursor = deserialize_manifest(
+    next_cursor = deserialize_next_cursor(
         manifests_fs.read_text(_manifest_path(run_date))
     )
     save_cursor(cursors_fs, next_cursor)

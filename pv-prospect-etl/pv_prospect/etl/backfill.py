@@ -19,6 +19,7 @@ value in this module and both sides pick it up.
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import Enum
@@ -118,22 +119,30 @@ def deserialize_cursor(text: str) -> BackfillCursor:
     )
 
 
-def serialize_plan(plan: BackfillPlan, next_cursor: BackfillCursor) -> str:
-    """Serialize a plan plus its next cursor to JSON.
+def serialize_plan(
+    plan: BackfillPlan,
+    next_cursor: BackfillCursor,
+    phases: list[list[list[dict[str, str]]]] | None = None,
+) -> str:
+    """Serialize a plan plus its next cursor (and optional phases) to JSON.
 
     The format is consumed by the Cloud Workflow dispatcher (which needs
-    the plan dates) and by :func:`commit_backfill` (which uses the next
-    cursor to advance the live cursor).
+    the plan dates and, when present, the phased task list) and by
+    :func:`commit_backfill` (which uses the next cursor to advance the
+    live cursor). Extra fields are ignored on deserialization, so
+    backfill workflows whose plan job emits ``phases`` can share a single
+    manifest file with :func:`commit_backfill`.
     """
-    return json.dumps(
-        {
-            'start_date': plan.start_date.isoformat(),
-            'end_date': plan.end_date.isoformat(),
-            'next_cursor': {
-                'next_end_date': next_cursor.next_end_date.isoformat(),
-            },
-        }
-    )
+    data: dict[str, object] = {
+        'start_date': plan.start_date.isoformat(),
+        'end_date': plan.end_date.isoformat(),
+        'next_cursor': {
+            'next_end_date': next_cursor.next_end_date.isoformat(),
+        },
+    }
+    if phases is not None:
+        data['phases'] = phases
+    return json.dumps(data)
 
 
 def deserialize_plan(text: str) -> tuple[BackfillPlan, BackfillCursor]:
@@ -191,6 +200,9 @@ def save_cursor(
     cursors_fs.write_text(cursor_filename(workflow_name), serialize_cursor(cursor))
 
 
+PhasesFn = Callable[[BackfillPlan], list[list[list[dict[str, str]]]]]
+
+
 def plan_backfill(
     cursors_fs: FileSystem,
     manifests_fs: FileSystem,
@@ -198,17 +210,24 @@ def plan_backfill(
     run_date: str,
     today: date,
     window_days: int,
+    phases_fn: PhasesFn | None = None,
 ) -> BackfillPlan:
     """Plan today's window and write the manifest. Live cursor unchanged.
 
     Writes ``<run_date>/<workflow_name>.json`` on *manifests_fs* carrying
-    both the plan and the *next* cursor — the latter is later promoted
-    to the live cursor by :func:`commit_backfill` once the run succeeds.
+    the plan, the *next* cursor (later promoted by
+    :func:`commit_backfill` once the run succeeds), and — when
+    *phases_fn* is supplied — the phased task list the Cloud Workflow
+    dispatches. *phases_fn* is called with the freshly-built plan, so
+    callers can enumerate per-task env lists keyed to the chosen window
+    without re-computing the cursor themselves.
     """
     cursor = load_cursor(cursors_fs, workflow_name, today)
     plan, next_cursor = build_backfill_plan(cursor, window_days)
+    phases = phases_fn(plan) if phases_fn is not None else None
     manifests_fs.write_text(
-        manifest_filename(workflow_name, run_date), serialize_plan(plan, next_cursor)
+        manifest_filename(workflow_name, run_date),
+        serialize_plan(plan, next_cursor, phases),
     )
     return plan
 

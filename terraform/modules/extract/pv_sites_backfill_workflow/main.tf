@@ -69,6 +69,14 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                           value: $${workflow_name}
                         - name: RUN_DATE
                           value: $${run_date}
+                        - name: PV_SYSTEM_IDS
+                          value: $${json.encode_to_string(pv_system_ids)}
+                        - name: PV_DATA_SOURCE
+                          value: $${pv_data_source}
+                        - name: WEATHER_DATA_SOURCE
+                          value: $${weather_data_source}
+                        - name: DRY_RUN
+                          value: $${dry_run}
             result: plan_op
 
         - wait_for_plan_op:
@@ -90,13 +98,22 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
               alt: media
             result: manifest_raw
 
+        # The plan job emits the orchestrator phases-shape alongside the
+        # date window and next cursor. phases[0] is the sequential PV
+        # task list (one TASK_HASH-injected env per system), phases[1]
+        # is the parallel weather task list.
         - decode_manifest:
             assign:
               - manifest: $${json.decode(manifest_raw)}
+              - pv_tasks: $${manifest.phases[0]}
+              - weather_tasks: $${manifest.phases[1]}
 
         # Load any existing checkpoint so a re-triggered run skips already-done
-        # sites.  If no checkpoint exists the try block raises a 404 and we
-        # fall through to init_completed, which leaves `completed` as {}.
+        # PV tasks. The checkpoint key is the per-task index into phases[0]
+        # (PV tasks only — weather tasks are dispatched in parallel and not
+        # individually checkpointed). If no checkpoint exists the try block
+        # raises a 404 and we fall through to init_completed, which leaves
+        # `completed` as {}.
         - load_checkpoint:
             try:
               steps:
@@ -113,7 +130,7 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                 - log_resuming:
                     call: sys.log
                     args:
-                      data: $${"Resuming from checkpoint — " + string(len(keys(completed))) + " sites already done"}
+                      data: $${"Resuming from checkpoint — " + string(len(keys(completed))) + " PV tasks already done"}
             except:
               as: checkpoint_err
               steps:
@@ -121,85 +138,72 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                     assign:
                       - completed: {}
 
-        - extract_pv:
-            for:
-              value: pv_system_id
-              in: $${pv_system_ids}
-              steps:
-                # Skip sites that already succeeded in a previous execution.
-                - check_already_done:
-                    switch:
-                      - condition: $${map.get(completed, string(pv_system_id)) == true}
-                        next: next_pv_site
-                - log_pv_site:
-                    call: sys.log
-                    args:
-                      data: $${"Extracting PV system " + string(pv_system_id)}
-                - run_pv_extract:
-                    call: googleapis.run.v2.projects.locations.jobs.run
-                    args:
-                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                      body:
-                        overrides:
-                          containerOverrides:
-                            - env:
-                                - name: JOB_TYPE
-                                  value: extract_and_load
-                                - name: DATA_SOURCE
-                                  value: $${pv_data_source}
-                                - name: PV_SYSTEM_ID
-                                  value: $${string(pv_system_id)}
-                                - name: START_DATE
-                                  value: $${manifest.start_date}
-                                - name: END_DATE
-                                  value: $${manifest.end_date}
-                                - name: DRY_RUN
-                                  value: $${dry_run}
-                                - name: SPLIT_BY
-                                  value: day
-                                - name: WORKFLOW_NAME
-                                  value: $${workflow_name}
-                                - name: RUN_DATE
-                                  value: $${run_date}
-                    result: pv_op
-                - wait_for_pv_op:
-                    call: wait_for_operation
-                    args:
-                      operation_name: $${pv_op.name}
-                    result: pv_op_done
-                - wait_for_pv:
-                    call: await_job
-                    args:
-                      execution_name: $${pv_op_done.response.name}
-                # Mark this site done and persist the checkpoint so a re-run
-                # can skip it without re-extracting.
-                - mark_done:
-                    assign:
-                      - completed[string(pv_system_id)]: true
-                - write_checkpoint:
-                    call: http.post
-                    args:
-                      url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
-                      auth:
-                        type: OAuth2
-                      headers:
-                        Content-Type: application/json
-                      body: $${json.encode_to_string(completed)}
-                - next_pv_site:
-                    assign:
-                      - _: null
+        - extract_pv_init:
+            assign:
+              - i: 0
+        - extract_pv_loop:
+            switch:
+              - condition: $${i >= len(pv_tasks)}
+                next: extract_weather
+        - get_pv_task:
+            assign:
+              - pv_task: $${pv_tasks[i]}
+        - check_pv_already_done:
+            switch:
+              - condition: $${map.get(completed, string(i)) == true}
+                next: next_pv_task
+        - log_pv_start:
+            call: sys.log
+            args:
+              data: $${"Extracting PV task " + string(i+1) + "/" + string(len(pv_tasks))}
+        - run_pv_extract:
+            call: googleapis.run.v2.projects.locations.jobs.run
+            args:
+              name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+              body:
+                overrides:
+                  containerOverrides:
+                    - env: $${pv_task}
+            result: pv_op
+        - wait_for_pv_op:
+            call: wait_for_operation
+            args:
+              operation_name: $${pv_op.name}
+            result: pv_op_done
+        - wait_for_pv:
+            call: await_job
+            args:
+              execution_name: $${pv_op_done.response.name}
+        # Mark this task done and persist the checkpoint so a re-run
+        # can skip it without re-extracting.
+        - mark_pv_done:
+            assign:
+              - completed[string(i)]: true
+        - write_checkpoint:
+            call: http.post
+            args:
+              url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
+              auth:
+                type: OAuth2
+              headers:
+                Content-Type: application/json
+              body: $${json.encode_to_string(completed)}
+        - next_pv_task:
+            assign:
+              - i: $${i + 1}
+            next: extract_pv_loop
 
         - extract_weather:
             steps:
               - log_weather_start:
                   call: sys.log
                   args:
-                    data: $${"Starting parallel weather extraction"}
+                    data: $${"Starting parallel weather extraction (" + string(len(weather_tasks)) + " tasks)"}
               - extract_weather_parallel:
                   parallel:
                     for:
-                      value: pv_system_id
-                      in: $${pv_system_ids}
+                      value: weather_task
+                      in: $${weather_tasks}
                       steps:
                         - run_weather_extract:
                             call: googleapis.run.v2.projects.locations.jobs.run
@@ -208,21 +212,7 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                               body:
                                 overrides:
                                   containerOverrides:
-                                    - env:
-                                        - name: JOB_TYPE
-                                          value: extract_and_load
-                                        - name: DATA_SOURCE
-                                          value: weather
-                                        - name: PV_SYSTEM_ID
-                                          value: $${string(pv_system_id)}
-                                        - name: START_DATE
-                                          value: $${manifest.start_date}
-                                        - name: END_DATE
-                                          value: $${manifest.end_date}
-                                        - name: WORKFLOW_NAME
-                                          value: $${workflow_name}
-                                        - name: RUN_DATE
-                                          value: $${run_date}
+                                    - env: $${weather_task}
                             result: weather_op
                         - wait_for_weather_op:
                             call: wait_for_operation
