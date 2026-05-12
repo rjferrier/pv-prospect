@@ -39,7 +39,6 @@ LOCATION
 import json
 import logging
 import os
-import sys
 from datetime import date
 
 from pv_prospect.common import (
@@ -72,6 +71,7 @@ from pv_prospect.etl import (
     DegenerateDateRange,
     Extractor,
     WorkflowOrchestrator,
+    WorkflowTerminatingError,
     build_date_range,
     build_env_list,
     inject_task_hash,
@@ -150,8 +150,9 @@ def _resolve_run_date() -> str:
 
 def _required(fs: FileSystem | None, name: str) -> FileSystem:
     if fs is None:
-        logger.error('%s is required for this JOB_TYPE but not configured', name)
-        sys.exit(1)
+        raise WorkflowTerminatingError(
+            f'{name} is required for this JOB_TYPE but not configured'
+        )
     return fs
 
 
@@ -233,8 +234,7 @@ def main() -> None:
     try:
         date_range = build_date_range(start_date_str, os.environ.get('END_DATE'))
     except DegenerateDateRange as e:
-        logger.error('%s', e)
-        sys.exit(1)
+        raise WorkflowTerminatingError(str(e)) from e
 
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
@@ -286,8 +286,6 @@ def main() -> None:
             date_range,
             split_by,
         )
-    except SystemExit:
-        raise
     except Exception as e:
         orchestrator.record_outcome(task_hash, descriptor, 'failed', error=repr(e))
         raise
@@ -367,8 +365,7 @@ def _run_transform_step(
         assemble_prepared_pv(batches_fs, prepared_fs, pv_system_id)  # type: ignore[arg-type]
 
     else:
-        logger.error('unknown TRANSFORM_STEP=%s', transformation)
-        sys.exit(1)
+        raise WorkflowTerminatingError(f'unknown TRANSFORM_STEP={transformation}')
 
 
 def _run_plan_transform(

@@ -85,6 +85,7 @@ from pv_prospect.etl import (
     DegenerateDateRange,
     Extractor,
     WorkflowOrchestrator,
+    WorkflowTerminatingError,
     build_date_range,
     build_env_list,
     inject_task_hash,
@@ -262,8 +263,7 @@ def _run_extract_and_load(
             start_date_str, os.environ.get('END_DATE')
         )
     except DegenerateDateRange as e:
-        logger.error('%s', e)
-        sys.exit(1)
+        raise WorkflowTerminatingError(str(e)) from e
 
     task_hash = os.environ.get('TASK_HASH', '')
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
@@ -543,14 +543,14 @@ def main() -> None:
     elif job_type == 'consolidate_logs':
         _run_consolidate_logs(config, run_date)
     else:
-        logger.error('unknown JOB_TYPE=%r', job_type)
-        sys.exit(1)
+        raise WorkflowTerminatingError(f'unknown JOB_TYPE={job_type!r}')
 
 
 def _required(fs: FileSystem | None, name: str) -> FileSystem:
     if fs is None:
-        logger.error('%s is required for this JOB_TYPE but not configured', name)
-        sys.exit(1)
+        raise WorkflowTerminatingError(
+            f'{name} is required for this JOB_TYPE but not configured'
+        )
     return fs
 
 
