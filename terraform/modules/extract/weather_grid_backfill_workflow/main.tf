@@ -344,25 +344,6 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
         - done:
             return: "completed"
 
-    retry_predicate:
-      params: [e]
-      steps:
-        # Use map.get + default so non-HTTP errors (e.g. TimeoutError, OSError)
-        # without a "code" field don't blow up the predicate with a KeyError.
-        - extract_error_code:
-            assign:
-              - error_code: $${default(map.get(e, "code"), 0)}
-        - check_retriable:
-            switch:
-              # Retry on 429 (Too Many Requests), 500, 503, or our own failure message
-              - condition: $${error_code == 429 or error_code == 500 or error_code == 503}
-                return: true
-              - condition: $${text.match_regex(default(e.message, ""), "Job execution failed")}
-                return: true
-              - condition: true
-                return: false
-
-
     wait_for_operation:
       params: [operation_name]
       steps:
