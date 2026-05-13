@@ -9,11 +9,14 @@
 #   1. Invoke the Cloud Run Job with JOB_TYPE=plan_pv_site_backfill, which
 #      writes a JSON manifest to GCS containing the 28-day window to process.
 #   2. Read the manifest from GCS to obtain start_date and end_date.
-#   3. Load the GCS checkpoint (if any) so a re-triggered run skips sites
-#      that already completed in a previous execution.
+#   3. Load a GCS position checkpoint {"next_pv_task_index": N} so a
+#      re-triggered run resumes at PV task N rather than re-running
+#      already-attempted ones. Per-site ledger entries from the container
+#      handle within-task idempotency for the parallel weather phase.
 #   4. Dispatch PV extraction jobs *sequentially* per PV system (PVOutput
 #      rate-limits at 300 requests/hour; 10 sites × 28 days = 280 calls).
-#      After each site succeeds the checkpoint is updated in GCS.
+#      The checkpoint advances after each dispatch (success or exit-1
+#      crash), so the workflow marches forward at a predictable cadence.
 #   5. Dispatch weather extraction jobs in *parallel* per PV system (OpenMeteo
 #      rate limits are generous enough for 10–20 concurrent calls).
 #   6. Invoke the Cloud Run Job with JOB_TYPE=commit_pv_site_backfill, which
@@ -21,16 +24,15 @@
 #   7. Delete the checkpoint (successful run) and consolidate logs.
 #
 # Failures branch on the container exit code surfaced by await_job:
-#   exit 1 (general task failure)        -- log, swallow, continue the
-#       loop / parallel branch. The cursor commit at the end still runs,
-#       so tomorrow's run advances. Failed PV tasks are *not* recorded in
-#       the legacy checkpoint, so a same-day re-trigger will re-attempt
-#       them.
+#   exit 1 (container crash)             -- log, swallow, continue. The
+#       checkpoint advances and the cursor commit at the end still runs,
+#       so tomorrow's run moves on rather than retrying the failure.
+#       Per-site outcomes (success or fail) are recorded in the ledger
+#       inside the container; transiently-failed sites become small
+#       per-window holes rather than perpetual retries.
 #   exit 2 (WorkflowTerminatingError)    -- re-raise. The outer
 #       run_pipeline try aborts before the commit step, leaving the
 #       cursor unchanged for tomorrow. consolidate_logs still runs.
-# Re-triggering today's run manually will skip already-completed sites
-# (those persisted in the checkpoint).
 
 resource "google_workflows_workflow" "pv_sites_backfill" {
   name                = "pv-prospect-extract-pv-sites-backfill"
@@ -61,7 +63,7 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
               - pv_data_source: $${default(map.get(args, "pv_data_source"), "${var.pv_data_source}")}
               - weather_data_source: $${default(map.get(args, "weather_data_source"), "${var.weather_data_source}")}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
-              - completed: {}
+              - next_pv_task_index: 0
 
         - run_pipeline:
             try:
@@ -119,12 +121,12 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                       - pv_tasks: $${manifest.phases[0]}
                       - weather_tasks: $${manifest.phases[1]}
 
-                # Load any existing checkpoint so a re-triggered run skips already-done
-                # PV tasks. The checkpoint key is the per-task index into phases[0]
-                # (PV tasks only — weather tasks are dispatched in parallel and not
-                # individually checkpointed). If no checkpoint exists the try block
-                # raises a 404 and we fall through to init_completed, which leaves
-                # `completed` as {}.
+                # Load the position checkpoint so a re-triggered run resumes
+                # at the PV task index where the previous run stopped. The
+                # object stores {"next_pv_task_index": N}. 404 (no prior
+                # run) is treated as N=0. The parallel weather phase is not
+                # checkpointed; per-site ledger filtering inside each
+                # weather container handles same-day re-trigger redundancy.
                 - load_checkpoint:
                     try:
                       steps:
@@ -137,21 +139,21 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                             result: checkpoint_raw
                         - decode_checkpoint:
                             assign:
-                              - completed: $${json.decode(checkpoint_raw)}
+                              - next_pv_task_index: $${default(map.get(json.decode(checkpoint_raw), "next_pv_task_index"), 0)}
                         - log_resuming:
                             call: sys.log
                             args:
-                              data: $${"Resuming from checkpoint — " + string(len(keys(completed))) + " PV tasks already done"}
+                              data: $${"Resuming from checkpoint — starting at PV task " + string(next_pv_task_index)}
                     except:
                       as: checkpoint_err
                       steps:
-                        - init_completed:
+                        - init_next_index:
                             assign:
-                              - completed: {}
+                              - next_pv_task_index: 0
 
                 - extract_pv_init:
                     assign:
-                      - i: 0
+                      - i: $${next_pv_task_index}
                 - extract_pv_loop:
                     switch:
                       - condition: $${i >= len(pv_tasks)}
@@ -159,21 +161,16 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                 - get_pv_task:
                     assign:
                       - pv_task: $${pv_tasks[i]}
-                - check_pv_already_done:
-                    switch:
-                      - condition: $${map.get(completed, string(i)) == true}
-                        next: next_pv_task
                 - log_pv_start:
                     call: sys.log
                     args:
                       data: $${"Extracting PV task " + string(i+1) + "/" + string(len(pv_tasks))}
 
-                # Track whether this task ultimately succeeded so the legacy
-                # checkpoint is only updated when the run didn't fail-and-swallow.
-                - init_pv_succeeded:
-                    assign:
-                      - pv_task_succeeded: true
-
+                # With the container's per-site idempotency and exit-0-on-
+                # site-failure policy, the workflow no longer retries at
+                # this layer. Exit 1 (container crash) is logged and the
+                # checkpoint still advances. Exit 2 re-raises so the cursor
+                # commit is skipped.
                 - run_pv_task:
                     try:
                       steps:
@@ -195,18 +192,6 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                             call: await_job
                             args:
                               execution_name: $${pv_op_done.response.name}
-                    retry:
-                      predicate: $${retry_predicate}
-                      max_retries: 3
-                      backoff:
-                        initial_delay: 60
-                        max_delay: 600
-                        multiplier: 2
-                    # After retries are exhausted, branch on the container exit
-                    # code surfaced by await_job: 2 -> re-raise so the workflow
-                    # aborts before the commit step; 1 (or unknown) -> log, mark
-                    # this PV task as not succeeded (so the legacy checkpoint
-                    # isn't updated), and let the loop carry on to the next task.
                     except:
                       as: task_err
                       steps:
@@ -217,34 +202,25 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                             switch:
                               - condition: $${failed_exit_code == 2}
                                 raise: $${task_err}
-                        - mark_pv_task_failed:
-                            assign:
-                              - pv_task_succeeded: false
                         - log_task_failure:
                             call: sys.log
                             args:
-                              data: '$${"PV task failed (exit_code=" + string(failed_exit_code) + "), continuing: " + json.encode_to_string(task_err)}'
+                              data: '$${"PV task crashed (exit_code=" + string(failed_exit_code) + "), advancing anyway: " + json.encode_to_string(task_err)}'
                               severity: "WARNING"
 
-                # Mark this task done and persist the checkpoint so a re-run
-                # can skip it without re-extracting -- only on success, so
-                # a swallowed exit-1 failure stays retriable on re-trigger.
-                - maybe_record_pv_done:
-                    switch:
-                      - condition: $${pv_task_succeeded}
-                        steps:
-                          - mark_pv_done:
-                              assign:
-                                - completed[string(i)]: true
-                          - write_checkpoint:
-                              call: http.post
-                              args:
-                                url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
-                                auth:
-                                  type: OAuth2
-                                headers:
-                                  Content-Type: application/json
-                                body: $${json.encode_to_string(completed)}
+                # Advance the position checkpoint unconditionally after
+                # every dispatched PV task. Per-site outcomes are in the
+                # ledger; the workflow's role here is just progress
+                # tracking for same-day re-triggers.
+                - advance_pv_checkpoint:
+                    call: http.post
+                    args:
+                      url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
+                      auth:
+                        type: OAuth2
+                      headers:
+                        Content-Type: application/json
+                      body: '$${"{\"next_pv_task_index\": " + string(i + 1) + "}"}'
 
                 - next_pv_task:
                     assign:
@@ -284,16 +260,9 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                                             call: await_job
                                             args:
                                               execution_name: $${weather_op_done.response.name}
-                                    retry:
-                                      predicate: $${retry_predicate}
-                                      max_retries: 3
-                                      backoff:
-                                        initial_delay: 60
-                                        max_delay: 600
-                                        multiplier: 2
-                                    # See PV-task except above. Weather tasks
-                                    # aren't checkpointed, so on swallow we just
-                                    # log and let the parallel branch end.
+                                    # Same exit-code policy as the PV phase.
+                                    # No workflow-level retry; per-site
+                                    # idempotency lives in the container.
                                     except:
                                       as: task_err
                                       steps:
@@ -307,7 +276,7 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
                                         - log_weather_task_failure:
                                             call: sys.log
                                             args:
-                                              data: '$${"Weather task failed (exit_code=" + string(failed_exit_code) + "), continuing: " + json.encode_to_string(task_err)}'
+                                              data: '$${"Weather task crashed (exit_code=" + string(failed_exit_code) + "), parallel branch ending: " + json.encode_to_string(task_err)}'
                                               severity: "WARNING"
 
                 - commit:
@@ -391,24 +360,6 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
 
         - done:
             return: "completed"
-
-    retry_predicate:
-      params: [e]
-      steps:
-        # Use map.get + default so non-HTTP errors (e.g. TimeoutError, OSError)
-        # without a "code" field don't blow up the predicate with a KeyError.
-        - extract_error_code:
-            assign:
-              - error_code: $${default(map.get(e, "code"), 0)}
-        - check_retriable:
-            switch:
-              # Retry on 429 (Too Many Requests), 500, 503, or our own failure message
-              - condition: $${error_code == 429 or error_code == 500 or error_code == 503}
-                return: true
-              - condition: $${text.match_regex(default(e.message, ""), "Job execution failed")}
-                return: true
-              - condition: true
-                return: false
 
     wait_for_operation:
       params: [operation_name]

@@ -3,25 +3,29 @@
 # This workflow is manifest-driven:
 #
 #   1. It invokes the Cloud Run Job with JOB_TYPE=plan_weather_grid_backfill,
-#      which writes a JSON manifest to GCS describing the day's work.
+#      which writes a JSON manifest to GCS describing the day's work. Each
+#      batch's env carries the resolved LOCATIONS list for one
+#      (sample_file × window) pair; per-site ledger entries are recorded by
+#      the container as it iterates.
 #   2. It reads the manifest from GCS to obtain the ordered list of batches.
-#   3. It loads a GCS checkpoint (if any) so that a re-triggered run skips
-#      batches that already completed in a previous execution.
+#   3. It loads a GCS position checkpoint {"next_batch_index": N} (if any) so
+#      that a re-triggered run resumes where the previous run stopped.
 #   4. It dispatches one extract_and_load Cloud Run Job per batch, sleeping
 #      between dispatches to stay under OpenMeteo's per-hour rate limit.
-#      After each batch succeeds the checkpoint is updated in GCS.
+#      The checkpoint is advanced unconditionally after each dispatch
+#      (success or exit-1 swallowed crash), so the workflow always marches
+#      forward at a predictable cadence rather than retrying failures.
 #      NOTE: To fully respect the 5k/hr limit, the workflow accepts a
 #      `max_batches_per_run` parameter and is triggered twice by Cloud Scheduler.
 #      Run 1 processes the first few batches and exits early; Run 2 resumes
 #      from the checkpoint to finish the remaining batches.
-#   5. After all batches in the manifest succeed, it invokes the Cloud Run Job with
-#      JOB_TYPE=commit_weather_grid_backfill, which advances the live cursor
-#      so that tomorrow's run picks up from the next point in the backfill.
-#   6. Deletes the checkpoint (successful run) and consolidates logs.
-#
-# If any batch fails, the workflow aborts without committing the cursor, so
-# tomorrow's plan job will re-derive the same manifest and retry.
-# Re-triggering today's run manually will skip already-completed batches.
+#   5. After all batches in the manifest are attempted, it invokes the Cloud
+#      Run Job with JOB_TYPE=commit_weather_grid_backfill, which advances
+#      the live cursor so that tomorrow's run picks up from the next point
+#      in the backfill.
+#   6. Deletes the checkpoint (full run) and consolidates logs. Partial runs
+#      skip commit + checkpoint deletion but still consolidate logs so the
+#      ledger is always finalised.
 
 resource "google_workflows_workflow" "weather_grid_backfill" {
   name                = "pv-prospect-extract-weather-grid-backfill"
@@ -53,7 +57,7 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
               - max_batches_per_run: $${default(map.get(args, "max_batches_per_run"), 100)}
               - run_count: 0
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
-              - completed: {}
+              - next_batch_index: 0
 
         - run_pipeline:
             try:
@@ -108,9 +112,10 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                     assign:
                       - batches: $${manifest.phases[0]}
 
-                # Load any existing checkpoint so a re-triggered run skips already-done
-                # batches.  If no checkpoint exists the try block raises a 404 and we
-                # fall through to init_completed, which leaves `completed` as {}.
+                # Load the position checkpoint so a re-triggered run resumes
+                # from where the previous run stopped. The object stores a
+                # single integer {"next_batch_index": N}. 404 (no prior run)
+                # is treated as N=0.
                 - load_checkpoint:
                     try:
                       steps:
@@ -123,21 +128,21 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                             result: checkpoint_raw
                         - decode_checkpoint:
                             assign:
-                              - completed: $${json.decode(checkpoint_raw)}
+                              - next_batch_index: $${default(map.get(json.decode(checkpoint_raw), "next_batch_index"), 0)}
                         - log_resuming:
                             call: sys.log
                             args:
-                              data: $${"Resuming from checkpoint — " + string(len(keys(completed))) + " batches already done"}
+                              data: $${"Resuming from checkpoint — starting at batch " + string(next_batch_index)}
                     except:
                       as: checkpoint_err
                       steps:
-                        - init_completed:
+                        - init_next_index:
                             assign:
-                              - completed: {}
+                              - next_batch_index: 0
 
                 - dispatch_init:
                     assign:
-                      - i: 0
+                      - i: $${next_batch_index}
 
                 - dispatch_loop:
                     switch:
@@ -147,11 +152,6 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                 - get_batch:
                     assign:
                       - batch: $${batches[i]}
-
-                - check_already_done:
-                    switch:
-                      - condition: $${map.get(completed, string(i)) == true}
-                        next: next_batch
 
                 - check_run_limit:
                     switch:
@@ -176,13 +176,13 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                     args:
                       data: $${"Starting weather extraction for batch " + string(i+1) + "/" + string(len(batches))}
 
-                # Track whether this batch ultimately succeeded so the
-                # checkpoint and `completed` map are only updated when the
-                # task didn't fail-and-swallow.
-                - init_batch_flag:
-                    assign:
-                      - batch_succeeded: true
-
+                # With the container's per-site idempotency and exit-0-on-
+                # site-failure policy, the workflow no longer retries at
+                # this layer. Exit 1 (container crash) is logged and the
+                # checkpoint still advances — the workflow marches forward
+                # rather than retrying. Exit 2 (WorkflowTerminatingError)
+                # re-raises out of run_pipeline so the cursor commit is
+                # skipped.
                 - run_batch:
                     try:
                       steps:
@@ -204,21 +204,6 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                             call: await_job
                             args:
                               execution_name: $${batch_op_done.response.name}
-                    retry:
-                      predicate: $${retry_predicate}
-                      max_retries: 3
-                      backoff:
-                        initial_delay: 60
-                        max_delay: 600
-                        multiplier: 2
-                    # After retries are exhausted, branch on the container
-                    # exit code surfaced by await_job:
-                    # 2 -> WorkflowTerminatingError, re-raise so the
-                    # run_pipeline try aborts before commit, leaving the
-                    # cursor unchanged.
-                    # 1 (or unknown) -> log, mark this batch as not
-                    # succeeded (so the legacy checkpoint isn't updated),
-                    # and let the loop carry on to the next batch.
                     except:
                       as: task_err
                       steps:
@@ -229,53 +214,46 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                             switch:
                               - condition: $${failed_exit_code == 2}
                                 raise: $${task_err}
-                        - mark_batch_failed:
-                            assign:
-                              - batch_succeeded: false
                         - log_task_failure:
                             call: sys.log
                             args:
-                              data: '$${"Batch failed (exit_code=" + string(failed_exit_code) + "), continuing: " + json.encode_to_string(task_err)}'
+                              data: '$${"Batch crashed (exit_code=" + string(failed_exit_code) + "), advancing anyway: " + json.encode_to_string(task_err)}'
                               severity: "WARNING"
 
-                # Only update the legacy per-batch checkpoint on success.
-                # A failed batch stays unchecked so a same-day re-trigger
-                # of this workflow run will re-attempt it.
-                - maybe_record_done:
-                    switch:
-                      - condition: $${batch_succeeded}
-                        steps:
-                          - mark_done:
-                              assign:
-                                - completed[string(i)]: true
-
-                          - write_checkpoint:
-                              call: http.post
-                              args:
-                                url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
-                                auth:
-                                  type: OAuth2
-                                headers:
-                                  Content-Type: application/json
-                                body: $${json.encode_to_string(completed)}
+                # Advance the position checkpoint unconditionally after
+                # every dispatched batch. The container records per-site
+                # outcomes in the ledger; the workflow's role here is just
+                # to track "how far through the manifest are we?" so a
+                # same-day re-trigger picks up cleanly.
+                - advance_checkpoint:
+                    call: http.post
+                    args:
+                      url: $${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?uploadType=media&name=" + text.url_encode(checkpoint_object)}
+                      auth:
+                        type: OAuth2
+                      headers:
+                        Content-Type: application/json
+                      body: '$${"{\"next_batch_index\": " + string(i + 1) + "}"}'
 
                 - next_batch:
                     assign:
                       - i: $${i + 1}
                     next: dispatch_loop
 
-                # Commit once every batch has been attempted (succeeded or
-                # failed-with-exit-1). Exit-2 failures never reach here --
-                # they re-raise out of run_batch and abort run_pipeline,
-                # skipping the commit. Throttled-early runs leave
-                # i < len(batches) and exit with the "Partial run" return,
-                # so the cursor stays put for the next scheduled trigger.
+                # Commit once every batch in the manifest has been attempted
+                # (success or exit-1 swallowed crash). Exit-2 failures never
+                # reach here — they re-raise out of run_batch and abort
+                # run_pipeline, skipping the commit. Throttled-early runs
+                # (max_batches_per_run hit) jump past commit/delete to
+                # pipeline_complete so the cursor stays put for the next
+                # trigger; either path then falls through to consolidate_logs
+                # so the ledger is always finalised.
                 - check_all_done:
                     switch:
                       - condition: $${i == len(batches)}
                         next: commit
                       - condition: true
-                        return: $${"Partial run -- attempted " + string(i) + "/" + string(len(batches)) + ", remaining for next run"}
+                        next: pipeline_complete
 
                 - commit:
                     call: googleapis.run.v2.projects.locations.jobs.run
@@ -319,6 +297,13 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                         - ignore_delete_error:
                             assign:
                               - _: null
+
+                # Sentinel for partial runs to land on without committing
+                # the cursor or deleting the checkpoint. Falls through to
+                # the end of run_pipeline.try so consolidate_logs runs.
+                - pipeline_complete:
+                    assign:
+                      - _: null
             except:
               as: workflow_err
               steps:
