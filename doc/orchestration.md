@@ -34,7 +34,7 @@ gs://pv-prospect-staging/
 │   ├── ledger/<run_date>/<run_date>-<HHMMSS>-<workflow>.jsonl  (consolidated, post-consolidation)
 │   ├── logs/<run_date>/<workflow>/<HHMMSSffffff>.txt           (LoggingFileSystem write-audit, mid-run)
 │   ├── logs/<run_date>/<run_date>-<HHMMSS>-<workflow>.txt      (consolidated)
-│   └── checkpoints/<workflow>.json                    (workflow-level batch/site checkpoint; backfill workflows only)
+│   └── checkpoints/<workflow>.json                    (workflow-level position checkpoint; backfill workflows only)
 └── resources/             (CSVs, sample files — see terraform/modules/seed_resources)
 ```
 
@@ -66,7 +66,12 @@ environment variables, excluding `TASK_HASH` and `RUN_DATE` (so the same
 data-window task across two trigger dates hashes identically — preserving
 cross-day resume). The hash is:
 
-- Injected into the task's environment as `TASK_HASH` before dispatch.
+- Computed on demand by `compute_task_hash(env)`, called from both
+  `filter_remaining_tasks` (plan time) and the container's per-site loop
+  (run time). Planners no longer pre-inject `TASK_HASH` as an env entry;
+  the helper `inject_task_hash` remains available for callers that still
+  want to attach it, but the orchestrator's identity contract is the
+  computed hash.
 - Used as the ledger entry filename for the task.
 - Stable across re-runs with the same parameters, enabling idempotent recovery.
 
@@ -131,7 +136,10 @@ its file. The end-of-workflow `consolidate_logs` job calls
 `recorded_at` and deletes the originals.
 
 `filter_remaining_tasks()` consults the ledger and skips any task whose hash
-appears with `status='completed'`. It scans:
+appears with `status='completed'`. Task identity is computed by
+`compute_task_hash(env)` over each task's env at filter time, so neither the
+planner nor the container needs to pre-inject a `TASK_HASH` env entry.
+`filter_remaining_tasks` scans:
 
 1. The current run's per-task files under `<run_date>/<workflow>/`.
 2. Every consolidated ledger file ever produced for this workflow
@@ -140,6 +148,27 @@ appears with `status='completed'`. It scans:
 Failures alone do not cause skipping — a re-run will re-attempt failed tasks.
 When `ledger_fs` is not configured (e.g. some local dev setups), filtering is
 disabled and every task is dispatched.
+
+`completed_task_hashes()` exposes the same set directly. The container's
+per-site loop uses it to skip sites the ledger already records as completed
+before fetching them again (e.g. during a Cloud Run task-attempt retry after
+a mid-batch container crash).
+
+### Planner Divergence: Daily Extract vs. Backfills
+
+The two extraction workflows use `filter_remaining_tasks` differently, by
+design:
+
+- **Daily extract** (`pv-prospect-extract`) calls `filter_remaining_tasks`
+  at plan time. A task that failed today is re-emitted by tomorrow's plan,
+  so today's data eventually gets fetched even if a transient API failure
+  bit it on the first attempt.
+- **Backfill workflows** (`pv-prospect-extract-pv-sites-backfill` and
+  `pv-prospect-extract-weather-grid-backfill`) deliberately do **not** call
+  `filter_remaining_tasks`. The backfill cursor advances on schedule each
+  day; a transiently-failed site becomes a small per-window hole rather
+  than a perpetual retry. This is the "predictable cadence" trade-off the
+  backfills opt into.
 
 ### Write-Audit Logs
 
@@ -161,9 +190,13 @@ Both the daily extraction (`pv-prospect-extract`) and transformation
    inspects available data and writes a phased manifest to
    `tracking/manifests/<run_date>/<workflow>.json`.
 2. **Dispatch** — The Cloud Workflow reads the manifest, iterates phases,
-   and dispatches tasks in parallel. Each dispatched task carries `TASK_HASH`
-   and `RUN_DATE` env vars. On completion (or on failure), the task records a
-   ledger entry. The workflow retries on 429/500/503.
+   and dispatches tasks in parallel. Each dispatched task carries
+   `RUN_DATE` (and the site-identifying env vars) in its env; the
+   container computes `TASK_HASH` locally per site. On completion (or
+   on failure), the task records a ledger entry. Per-site transient HTTP
+   failures (429, 5xx, timeouts, connection resets) retry inside the
+   container via `retry_on_transient_http_error` rather than at the
+   workflow layer.
 3. **Consolidate** — A final `consolidate_logs` job merges write-audit log
    files and per-task ledger entries into per-run consolidated files and
    cleans up empty directories.
@@ -184,17 +217,29 @@ daily workflows because they process a moving window across days:
    `tracking/manifests/<run_date>/<workflow>.backfill.json` containing the
    date window, the **next cursor** value, and (on the extract side) a
    `phases` list in the same shape the daily-extract orchestrator manifest
-   uses — one `extract_and_load` task env per dispatched batch with a
-   precomputed `TASK_HASH`. The Cloud Workflow consumes `phases` verbatim,
-   so every dispatched batch records its outcome in the ledger.
+   uses — one `extract_and_load` task env per dispatched batch. Task
+   identity is computed inside each container via `compute_task_hash`, so
+   no `TASK_HASH` is pre-injected. For the weather-grid backfill, each
+   batch env carries a `LOCATIONS` JSON array of grid-point lat,lon
+   strings; the container's per-site loop records one ledger entry per
+   `(site, window)` pair.
 2. **Dispatch** — Cloud Workflow iterates `phases` and dispatches each task
    with `env: $${task_env}`. The extract-side backfills additionally maintain
-   a workflow-level batch/site checkpoint at
-   `tracking/checkpoints/<workflow>.json` (keyed by per-task index into
-   `phases[0]`) to allow within-run resumption between the two scheduled
-   triggers when rate limits force a split run.
-3. **Commit** — Only after all tasks succeed, the next cursor is promoted to
-   live. This ensures the cursor only advances when work actually completes.
+   a workflow-level **position checkpoint** at
+   `tracking/checkpoints/<workflow>.json` — a single integer indicating the
+   next index into the dispatch list to attempt
+   (`{"next_batch_index": N}` for weather-grid, `{"next_pv_task_index": N}`
+   for pv-sites). The checkpoint advances unconditionally after every
+   dispatched task so a same-day re-trigger picks up where the previous
+   run stopped rather than retrying failures. The parallel weather phase
+   of pv-sites is *not* checkpointed; per-site ledger filtering inside the
+   container handles same-day re-trigger redundancy.
+3. **Commit** — Only after every task in the manifest has been *attempted*
+   (success or exit-1 swallowed crash), the next cursor is promoted to
+   live. Exit-2 (`WorkflowTerminatingError`) re-raises out of the run
+   pipeline and skips the commit, leaving the cursor unchanged for
+   tomorrow. Partial runs (max-batches-per-run hit) flow through
+   `consolidate_logs` without committing.
 
 The transformation backfills follow the same skeleton but split planning
 across two jobs: `plan_transform_backfill` writes the date window + cursor,
@@ -231,8 +276,10 @@ their own pace.
 
 The weather-grid extraction backfill is split into two scheduled Cloud Scheduler
 runs (03:20 and 04:30 UTC) to stay within OpenMeteo's 5,000 requests/hour limit.
-Run 1 processes 4 batches and exits cleanly. Run 2 resumes from the workflow
-checkpoint, processes the remaining batches, and commits the cursor.
+Run 1 attempts 4 batches and exits early, leaving `next_batch_index` pointing
+at the first un-attempted batch. Run 2 reads the checkpoint, attempts the
+remaining batches, and commits the cursor. Failed sites within an attempted
+batch are recorded in the ledger but not retried — the cursor still advances.
 
 ### Transformation Backfills
 
