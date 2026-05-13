@@ -8,7 +8,7 @@ import requests  # type: ignore[import-untyped]
 from pv_prospect.common import VarMapping, map_from_env
 from pv_prospect.common.domain import Period, PVSite
 from pv_prospect.data_extraction import TimeSeries
-from pv_prospect.data_extraction.util import retry_on_429
+from pv_prospect.data_extraction.util import retry_on_transient_http_error
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ class PVOutputExtractor:
         )
         return extractor
 
-    @retry_on_429
+    @retry_on_transient_http_error
     def extract(
         self,
         sites: Collection[PVSite],

@@ -13,7 +13,10 @@ and is shared with the transformation pipeline. This module is the
 extraction-side wrapper that pins the workflow name and the
 :class:`BackfillScope`, and additionally enumerates the per-site PV and
 weather tasks into the orchestrator ``phases`` shape so the Cloud
-Workflow dispatcher gets a TASK_HASH-injected env list for every batch.
+Workflow dispatcher gets an env list for every task. Per-site task
+identity is computed inside the container by
+:func:`pv_prospect.etl.compute_task_hash` against each task's env, so
+no ``TASK_HASH`` is pre-injected here.
 
 The 28-day window is the largest round-week multiple compatible with the
 PVOutput rate limit. PVOutput's ``getstatus.jsp`` endpoint is single-date
@@ -32,7 +35,6 @@ from pv_prospect.etl import (
     build_env_list,
     commit_backfill,
     default_window_days,
-    inject_task_hash,
     plan_backfill,
 )
 from pv_prospect.etl.storage import FileSystem
@@ -48,7 +50,7 @@ def _pv_task_env(
     dry_run: str,
     run_date: str,
 ) -> list[dict[str, str]]:
-    env = build_env_list(
+    return build_env_list(
         JOB_TYPE='extract_and_load',
         DATA_SOURCE=pv_data_source,
         PV_SYSTEM_ID=str(pv_system_id),
@@ -59,7 +61,6 @@ def _pv_task_env(
         WORKFLOW_NAME=WORKFLOW_NAME,
         RUN_DATE=run_date,
     )
-    return inject_task_hash(env)
 
 
 def _weather_task_env(
@@ -69,7 +70,7 @@ def _weather_task_env(
     end_date: date,
     run_date: str,
 ) -> list[dict[str, str]]:
-    env = build_env_list(
+    return build_env_list(
         JOB_TYPE='extract_and_load',
         DATA_SOURCE=weather_data_source,
         PV_SYSTEM_ID=str(pv_system_id),
@@ -78,7 +79,6 @@ def _weather_task_env(
         WORKFLOW_NAME=WORKFLOW_NAME,
         RUN_DATE=run_date,
     )
-    return inject_task_hash(env)
 
 
 def build_phases(
@@ -136,7 +136,7 @@ def plan_pv_site_backfill(
 
     The persisted manifest includes the date window, the next cursor,
     and a ``phases`` list — the latter giving the Cloud Workflow one
-    TASK_HASH-injected env list per dispatched ``extract_and_load`` task.
+    env list per dispatched ``extract_and_load`` task.
 
     The live cursor is not advanced — that happens later via
     :func:`commit_pv_site_backfill`, after the extraction jobs succeed.

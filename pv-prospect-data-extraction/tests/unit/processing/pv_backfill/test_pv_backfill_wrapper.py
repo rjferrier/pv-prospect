@@ -3,7 +3,8 @@
 The cursor / plan-commit logic itself is tested in pv-prospect-etl. These
 tests cover only what the wrapper adds: the right paths are used, the
 PV_SITES default window (28 days) is applied when none is given, and the
-persisted manifest carries phased TASK_HASH-injected task envs.
+persisted manifest carries phased per-task envs (one env per
+(pv_system_id, window) pair, with no pre-injected TASK_HASH).
 """
 
 import json
@@ -16,6 +17,7 @@ from pv_prospect.data_extraction.processing.pv_backfill import (
 )
 from pv_prospect.etl import (
     BackfillPlan,
+    compute_task_hash,
     cursor_filename,
     deserialize_plan,
     load_cursor,
@@ -140,7 +142,10 @@ def _env_value(task_env: list[dict[str, str]], name: str) -> str | None:
     return next((e['value'] for e in task_env if e['name'] == name), None)
 
 
-def test_every_task_has_non_empty_task_hash() -> None:
+def test_no_task_carries_a_pre_injected_task_hash() -> None:
+    """Per-site task identity is computed inside the container via
+    ``compute_task_hash`` against the env, not injected at plan time.
+    Regression guard for the predictable-cadence design."""
     cursors_fs = _FakeFileSystem()
     manifests_fs = _FakeFileSystem()
 
@@ -149,8 +154,7 @@ def test_every_task_has_non_empty_task_hash() -> None:
 
     for phase in data['phases']:
         for task in phase:
-            task_hash = _env_value(task, 'TASK_HASH')
-            assert task_hash is not None and task_hash != ''
+            assert _env_value(task, 'TASK_HASH') is None
 
 
 def test_pv_task_carries_pv_data_source() -> None:
@@ -175,7 +179,10 @@ def test_weather_task_carries_weather_data_source() -> None:
     assert _env_value(weather_task, 'DATA_SOURCE') == _WEATHER_DATA_SOURCE
 
 
-def test_same_inputs_produce_same_task_hashes() -> None:
+def test_same_inputs_produce_envs_with_same_computed_hashes() -> None:
+    """Container-computed task identity is deterministic given the same
+    planning inputs: planning twice yields envs whose
+    ``compute_task_hash`` values match position-by-position."""
     fs_a_c, fs_a_m = _FakeFileSystem(), _FakeFileSystem()
     fs_b_c, fs_b_m = _FakeFileSystem(), _FakeFileSystem()
 
@@ -183,7 +190,7 @@ def test_same_inputs_produce_same_task_hashes() -> None:
     _plan(fs_b_c, fs_b_m)
     data_a = json.loads(fs_a_m.files[_EXPECTED_MANIFEST])
     data_b = json.loads(fs_b_m.files[_EXPECTED_MANIFEST])
-    hashes_a = [_env_value(t, 'TASK_HASH') for p in data_a['phases'] for t in p]
-    hashes_b = [_env_value(t, 'TASK_HASH') for p in data_b['phases'] for t in p]
+    hashes_a = [compute_task_hash(t) for p in data_a['phases'] for t in p]
+    hashes_b = [compute_task_hash(t) for p in data_b['phases'] for t in p]
 
     assert hashes_a == hashes_b

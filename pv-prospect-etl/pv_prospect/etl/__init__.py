@@ -27,7 +27,12 @@ from .entrypoint import (
 )
 from .extractor import Extractor
 from .loader import Loader
-from .orchestration import WorkflowOrchestrator, build_env_list, inject_task_hash
+from .orchestration import (
+    WorkflowOrchestrator,
+    build_env_list,
+    compute_task_hash,
+    inject_task_hash,
+)
 from .resources import get_config_dir
 
 __all__ = [
@@ -47,6 +52,7 @@ __all__ = [
     'build_date_range',
     'build_env_list',
     'commit_backfill',
+    'compute_task_hash',
     'cursor_filename',
     'default_window_days',
     'deserialize_cursor',

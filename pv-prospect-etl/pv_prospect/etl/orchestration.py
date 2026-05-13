@@ -147,16 +147,12 @@ class WorkflowOrchestrator:
     ) -> list[list[dict[str, str]]]:
         """Filter out tasks whose ledger shows a 'completed' entry.
 
-        Tasks without a ``TASK_HASH`` env entry are always included.
-        See :meth:`completed_task_hashes` for the ledger scan semantics.
+        Identifies each task by :func:`compute_task_hash` over its env
+        (excluding any pre-injected ``TASK_HASH`` and the run date). See
+        :meth:`completed_task_hashes` for the ledger scan semantics.
         """
         completed = self.completed_task_hashes()
-        remaining = []
-        for task in all_tasks:
-            thash = next((e['value'] for e in task if e['name'] == 'TASK_HASH'), None)
-            if not thash or thash not in completed:
-                remaining.append(task)
-        return remaining
+        return [task for task in all_tasks if compute_task_hash(task) not in completed]
 
     def completed_task_hashes(self) -> set[str]:
         """Return the set of task hashes recorded as ``completed``.

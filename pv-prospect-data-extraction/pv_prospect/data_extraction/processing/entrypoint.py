@@ -36,7 +36,6 @@ For **extract_and_load**:
 import json
 import logging
 import os
-import sys
 from datetime import date
 
 from pv_prospect.common import (
@@ -49,6 +48,7 @@ from pv_prospect.common.domain import (
     AnySite,
     DateRange,
     Period,
+    PVSite,
 )
 from pv_prospect.data_extraction import (
     DataSource,
@@ -88,7 +88,7 @@ from pv_prospect.etl import (
     WorkflowTerminatingError,
     build_date_range,
     build_env_list,
-    inject_task_hash,
+    compute_task_hash,
     run_entrypoint,
 )
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
@@ -125,8 +125,19 @@ def _resolve_sites(
     data_source: DataSource,
     resources_fs: FileSystem,
 ) -> list[AnySite]:
+    """Resolve the sites a single ``extract_and_load`` task should process.
+
+    Accepts (in order of precedence):
+      - ``LOCATIONS``: JSON array of ``lat,lon`` strings.
+      - ``LOCATION``: a single ``lat,lon`` string.
+      - ``SAMPLE_FILE_INDEX``: integer; resolves to every grid point in
+        the sample file at that index. Retained for one-off local
+        invocations; deployed pipelines use ``LOCATIONS``.
+      - ``PV_SYSTEM_ID``: integer; resolves to a single PV site.
+    """
     pv_system_id = _env_int('PV_SYSTEM_ID')
     location = os.environ.get('LOCATION')
+    locations_json = os.environ.get('LOCATIONS')
     sample_file_index = _env_int('SAMPLE_FILE_INDEX')
 
     def _resolve_sample_file(idx: int) -> list[str]:
@@ -135,9 +146,15 @@ def _resolve_sites(
 
     sites: list[AnySite] = []
 
+    explicit_locations: list[str] | str | None
+    if locations_json:
+        explicit_locations = json.loads(locations_json)
+    else:
+        explicit_locations = location
+
     location_strings = resolve_location_strings(
         resolve_sample_file=_resolve_sample_file,
-        location_strings=location,
+        location_strings=explicit_locations,
         sample_file_index=sample_file_index,
     )
 
@@ -156,92 +173,58 @@ def _resolve_sites(
         )
     else:
         raise ValueError(
-            'Could not resolve any targets (need PV_SYSTEM_ID, LOCATION, or SAMPLE_FILE_INDEX).'
+            'Could not resolve any targets '
+            '(need PV_SYSTEM_ID, LOCATION, LOCATIONS, or SAMPLE_FILE_INDEX).'
         )
 
     return sites
 
 
-def _build_extract_descriptor(start_date_str: str) -> dict[str, str]:
-    descriptor: dict[str, str] = {
-        'data_source': os.environ.get('DATA_SOURCE', ''),
-        'start_date': start_date_str,
-    }
-    for env_name, key in (
-        ('END_DATE', 'end_date'),
-        ('PV_SYSTEM_ID', 'pv_system_id'),
-        ('LOCATION', 'location'),
-        ('SAMPLE_FILE_INDEX', 'sample_file_index'),
-    ):
-        value = os.environ.get(env_name)
-        if value:
-            descriptor[key] = value
-    return descriptor
+def _site_locator(site: AnySite) -> tuple[str, str]:
+    """Return the ``(env_name, env_value)`` pair that identifies *site*."""
+    if isinstance(site, PVSite):
+        return ('PV_SYSTEM_ID', str(site.pvo_sys_id))
+    return ('LOCATION', site.location.to_coordinate_string())
 
 
-def _execute_extract_and_load(
-    staging_fs: FileSystem,
-    resources_fs: FileSystem,
-    data_source: DataSource,
+def _final_ranges(
     complete_date_range: DateRange,
+    data_source: DataSource,
     split_by: str | None,
-    dry_run: bool,
-) -> list[str]:
-    """Run extraction across the resolved sites and split date ranges.
-
-    Returns a list of failure descriptions (empty when every per-site,
-    per-range extraction succeeded). The empty-range case logs a warning
-    and returns an empty list — there is no work to fail.
-    """
-    resources_extractor = Extractor(resources_fs)
-    build_pv_site_repo(resources_extractor.read_file(core.PV_SITES_CSV_FILE))
-
-    sites = _resolve_sites(data_source, resources_fs)
-
-    logger.info(
-        'extract_and_load: %s, %d sites, %s, split_by=%s',
-        data_source,
-        len(sites),
-        complete_date_range,
-        split_by,
-    )
-
+) -> list[DateRange]:
+    """Split *complete_date_range* per the data source's API semantics."""
     split_period = (
         Period[split_by.upper()] if split_by else default_split_period(data_source)
     )
-    if split_period:
-        sub_date_ranges = complete_date_range.split_by(split_period)
-        if split_period == Period.WEEK and not supports_multi_date(data_source):
-            final_ranges = []
-            for dr in sub_date_ranges:
-                final_ranges.extend(dr.split_by(Period.DAY))
-        else:
-            final_ranges = sub_date_ranges
-    else:
-        final_ranges = [complete_date_range]
+    if split_period is None:
+        return [complete_date_range]
+    sub_date_ranges = complete_date_range.split_by(split_period)
+    if split_period == Period.WEEK and not supports_multi_date(data_source):
+        return [d for dr in sub_date_ranges for d in dr.split_by(Period.DAY)]
+    return sub_date_ranges
 
-    if not final_ranges:
-        logger.warning(
-            'extract_and_load: %s — no dates to process in %s',
-            data_source,
-            complete_date_range,
-        )
-        return []
 
+def _extract_one_site(
+    staging_fs: FileSystem,
+    data_source: DataSource,
+    site: AnySite,
+    final_ranges: list[DateRange],
+    dry_run: bool,
+) -> list[str]:
+    """Extract *site* over each sub-range. Returns per-range failure strings."""
     failures: list[str] = []
-    for site in sites:
-        for dr in final_ranges:
-            result = core.extract_and_load(
-                get_extractor,
-                data_source,
-                staging_fs,
-                site,
-                dr,
-                dry_run,
-            )
-            logger.info('%s %s: %s', site, dr, result.type.value)
-            if result.type == ResultType.FAILURE:
-                failures.append(f'{site} {dr}')
+    for dr in final_ranges:
+        result = core.extract_and_load(
+            get_extractor,
+            data_source,
+            staging_fs,
+            site,
+            dr,
+            dry_run,
+        )
+        logger.info('%s %s: %s', site, dr, result.type.value)
+        if result.type == ResultType.FAILURE:
+            failures.append(f'{site} {dr}')
     return failures
 
 
@@ -252,46 +235,104 @@ def _run_extract_and_load(
     run_date: str,
     data_source: DataSource,
 ) -> None:
+    """Run ``extract_and_load`` for every site this task is responsible for.
+
+    Each resolved site is a sub-task with its own ledger entry, keyed by
+    a hash computed from its per-site env. Sites whose hash is already
+    in the ledger as ``completed`` are skipped (handles Cloud Run task-
+    retry idempotency and same-day workflow re-triggers). Per-site API
+    failures are recorded as ``failed`` ledger entries and the process
+    still exits 0 — the workflow advances its checkpoint regardless of
+    per-site outcomes. ``WorkflowTerminatingError`` still propagates to
+    abort the workflow before the cursor commit.
+    """
     dry_run = _env_bool('DRY_RUN')
     split_by = os.environ.get('SPLIT_BY')
+    end_date_str = os.environ.get('END_DATE') or ''
 
     try:
         start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
         if not start_date_str:
             raise ValueError('START_DATE (or DATE) must be set.')
-        complete_date_range = build_date_range(
-            start_date_str, os.environ.get('END_DATE')
-        )
+        complete_date_range = build_date_range(start_date_str, end_date_str or None)
     except DegenerateDateRange as e:
         raise WorkflowTerminatingError(str(e)) from e
 
-    task_hash = os.environ.get('TASK_HASH', '')
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
-    descriptor = _build_extract_descriptor(start_date_str)
     orchestrator = WorkflowOrchestrator(workflow_name, run_date, ledger_fs=ledger_fs)
 
-    try:
-        failures = _execute_extract_and_load(
-            staging_fs,
-            resources_fs,
+    resources_extractor = Extractor(resources_fs)
+    build_pv_site_repo(resources_extractor.read_file(core.PV_SITES_CSV_FILE))
+    sites = _resolve_sites(data_source, resources_fs)
+
+    final_ranges = _final_ranges(complete_date_range, data_source, split_by)
+    if not final_ranges:
+        logger.warning(
+            'extract_and_load: %s — no dates to process in %s',
             data_source,
             complete_date_range,
-            split_by,
-            dry_run,
         )
-    except Exception as e:
-        orchestrator.record_outcome(task_hash, descriptor, 'failed', error=repr(e))
-        raise
+        return
 
-    if failures:
-        error_summary = f'{len(failures)} task(s) failed: ' + ', '.join(failures)
-        orchestrator.record_outcome(
-            task_hash, descriptor, 'failed', error=error_summary
-        )
-        logger.error('extract_and_load: %s', error_summary)
-        sys.exit(1)
+    logger.info(
+        'extract_and_load: %s, %d sites, %s, split_by=%s',
+        data_source,
+        len(sites),
+        complete_date_range,
+        split_by,
+    )
 
-    orchestrator.record_outcome(task_hash, descriptor, 'completed')
+    completed = orchestrator.completed_task_hashes()
+
+    base_env: dict[str, str] = {
+        'JOB_TYPE': 'extract_and_load',
+        'DATA_SOURCE': os.environ.get('DATA_SOURCE', ''),
+        'START_DATE': start_date_str,
+        'DRY_RUN': os.environ.get('DRY_RUN', 'false'),
+        'WORKFLOW_NAME': workflow_name,
+        'RUN_DATE': run_date,
+    }
+    if end_date_str:
+        base_env['END_DATE'] = end_date_str
+    if split_by:
+        base_env['SPLIT_BY'] = split_by
+
+    for site in sites:
+        locator_name, locator_value = _site_locator(site)
+        site_env = build_env_list(**{**base_env, locator_name: locator_value})
+        site_hash = compute_task_hash(site_env)
+
+        descriptor: dict[str, str] = {
+            'data_source': base_env['DATA_SOURCE'],
+            'start_date': start_date_str,
+            locator_name.lower(): locator_value,
+        }
+        if end_date_str:
+            descriptor['end_date'] = end_date_str
+
+        if site_hash in completed:
+            logger.info('%s: skipped (ledger has completed entry)', site)
+            continue
+
+        try:
+            site_failures = _extract_one_site(
+                staging_fs, data_source, site, final_ranges, dry_run
+            )
+        except WorkflowTerminatingError:
+            raise
+        except Exception as e:
+            orchestrator.record_outcome(site_hash, descriptor, 'failed', error=repr(e))
+            logger.exception('%s: failed with exception', site)
+            continue
+
+        if site_failures:
+            error_summary = '; '.join(site_failures)
+            orchestrator.record_outcome(
+                site_hash, descriptor, 'failed', error=error_summary
+            )
+            logger.error('%s: failed (%s)', site, error_summary)
+        else:
+            orchestrator.record_outcome(site_hash, descriptor, 'completed')
 
 
 def _run_plan_extract(
@@ -320,33 +361,35 @@ def _run_plan_extract(
 
     for pv_id in pv_system_ids:
         for ds in pv_sources:
-            env = build_env_list(
-                JOB_TYPE='extract_and_load',
-                DATA_SOURCE=ds,
-                PV_SYSTEM_ID=str(pv_id),
-                DATE=start_date_str,
-                START_DATE=start_date_str,
-                DRY_RUN=dry_run,
-                SPLIT_BY=split_by,
-                WORKFLOW_NAME=workflow_name,
-                RUN_DATE=run_date,
+            all_tasks.append(
+                build_env_list(
+                    JOB_TYPE='extract_and_load',
+                    DATA_SOURCE=ds,
+                    PV_SYSTEM_ID=str(pv_id),
+                    DATE=start_date_str,
+                    START_DATE=start_date_str,
+                    DRY_RUN=dry_run,
+                    SPLIT_BY=split_by,
+                    WORKFLOW_NAME=workflow_name,
+                    RUN_DATE=run_date,
+                )
             )
-            all_tasks.append(inject_task_hash(env))
 
     for loc in locations:
         for ds in weather_sources:
-            env = build_env_list(
-                JOB_TYPE='extract_and_load',
-                DATA_SOURCE=ds,
-                LOCATION=loc,
-                DATE=start_date_str,
-                START_DATE=start_date_str,
-                DRY_RUN=dry_run,
-                SPLIT_BY=split_by,
-                WORKFLOW_NAME=workflow_name,
-                RUN_DATE=run_date,
+            all_tasks.append(
+                build_env_list(
+                    JOB_TYPE='extract_and_load',
+                    DATA_SOURCE=ds,
+                    LOCATION=loc,
+                    DATE=start_date_str,
+                    START_DATE=start_date_str,
+                    DRY_RUN=dry_run,
+                    SPLIT_BY=split_by,
+                    WORKFLOW_NAME=workflow_name,
+                    RUN_DATE=run_date,
+                )
             )
-            all_tasks.append(inject_task_hash(env))
 
     remaining = orchestrator.filter_remaining_tasks(all_tasks)
     orchestrator.write_manifest([remaining])
