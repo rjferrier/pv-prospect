@@ -147,18 +147,10 @@ class WorkflowOrchestrator:
     ) -> list[list[dict[str, str]]]:
         """Filter out tasks whose ledger shows a 'completed' entry.
 
-        Scans both per-task ledger files in the current run
-        (``<run_date>/<workflow>/<hash>.jsonl``) and every consolidated
-        ledger file ever produced for this workflow
-        (``<date>/<date>-*-<workflow>.jsonl``). Pooling completed task
-        hashes across all past runs preserves cross-day resume: a task
-        that finished yesterday under a different run_date will not be
-        re-executed today.
-
-        When ``ledger_fs`` is None no filtering happens — every task is
-        returned, so the workflow proceeds without resumption.
+        Tasks without a ``TASK_HASH`` env entry are always included.
+        See :meth:`completed_task_hashes` for the ledger scan semantics.
         """
-        completed = self._completed_task_hashes()
+        completed = self.completed_task_hashes()
         remaining = []
         for task in all_tasks:
             thash = next((e['value'] for e in task if e['name'] == 'TASK_HASH'), None)
@@ -166,7 +158,20 @@ class WorkflowOrchestrator:
                 remaining.append(task)
         return remaining
 
-    def _completed_task_hashes(self) -> set[str]:
+    def completed_task_hashes(self) -> set[str]:
+        """Return the set of task hashes recorded as ``completed``.
+
+        Scans both per-task ledger files in the current run
+        (``<run_date>/<workflow>/<hash>.jsonl``) and every consolidated
+        ledger file ever produced for this workflow
+        (``<date>/<date>-*-<workflow>.jsonl``). Pooling completed task
+        hashes across all past runs preserves cross-day resume: a task
+        that finished yesterday under a different ``run_date`` is still
+        reflected here today.
+
+        Returns an empty set when ``ledger_fs`` is None or no ledger
+        files exist.
+        """
         ledger_fs = self.ledger_fs
         if ledger_fs is None:
             return set()
