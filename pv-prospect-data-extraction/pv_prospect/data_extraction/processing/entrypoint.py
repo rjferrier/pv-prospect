@@ -420,6 +420,7 @@ def _run_plan_weather_grid_backfill(
         dry_run,
         cursors_fs,
         manifests_fs,
+        resources_fs,
     )
     logger.info(
         'plan_weather_grid_backfill: wrote manifest (step2=%s, step3_batches=%d)',

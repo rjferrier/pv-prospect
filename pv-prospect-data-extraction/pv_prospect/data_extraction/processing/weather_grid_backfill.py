@@ -12,20 +12,26 @@ Computes the work plan for a single day's API budget, consisting of:
 A :class:`WeatherGridBackfillCursor` tracks Step 3 progress between runs.
 
 The persisted manifest carries a ``phases`` list in the same shape as the
-daily-extract orchestrator manifest: every batch becomes an
-``extract_and_load`` task env with a precomputed ``TASK_HASH``, so each
-dispatched batch records its outcome in the workflow ledger.
+daily-extract orchestrator manifest. Each batch becomes an
+``extract_and_load`` task env carrying the concrete list of grid-point
+locations (``LOCATIONS``) the container should process. Per-site task
+identity is computed inside the container via
+:func:`pv_prospect.etl.compute_task_hash` so the workflow ledger records
+one entry per ``(site, window)`` pair rather than per batch.
 """
 
 import json
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from pv_prospect.data_extraction.processing.sample_file import (
+    read_sample_file,
+    sample_file_path,
+)
 from pv_prospect.etl import (
     BackfillScope,
     build_env_list,
     default_window_days,
-    inject_task_hash,
 )
 from pv_prospect.etl.storage import FileSystem
 
@@ -187,44 +193,58 @@ def save_cursor(cursors_fs: FileSystem, cursor: WeatherGridBackfillCursor) -> No
 
 def batch_to_task_env(
     batch: Batch,
+    locations: list[str],
     data_source: str,
     dry_run: str,
     run_date: str,
 ) -> list[dict[str, str]]:
-    """Build the ``extract_and_load`` env list for *batch*, with TASK_HASH.
+    """Build the ``extract_and_load`` env list for *batch*.
 
     The env list is what the Cloud Workflow dispatches as
-    ``containerOverrides.env`` for one Cloud Run Job task. ``TASK_HASH``
-    is computed deterministically from the env (excluding RUN_DATE), so
-    re-runs of the same batch within or across run dates share a hash.
+    ``containerOverrides.env`` for one Cloud Run Job task. The
+    sample-file index is resolved to its concrete list of ``lat,lon``
+    strings at plan time and passed as the ``LOCATIONS`` env var (a
+    JSON array). Per-site ``TASK_HASH`` values are computed inside the
+    container; nothing is injected here.
     """
-    env = build_env_list(
+    return build_env_list(
         JOB_TYPE='extract_and_load',
         DATA_SOURCE=data_source,
-        SAMPLE_FILE_INDEX=str(batch.sample_file_index),
         START_DATE=batch.start_date.isoformat(),
         END_DATE=batch.end_date.isoformat(),
+        LOCATIONS=json.dumps(locations),
         DRY_RUN=dry_run,
         WORKFLOW_NAME=WORKFLOW_NAME,
         RUN_DATE=run_date,
     )
-    return inject_task_hash(env)
 
 
 def build_phases(
     manifest: WeatherGridManifest,
+    resources_fs: FileSystem,
     data_source: str,
     dry_run: str,
     run_date: str,
 ) -> list[list[list[dict[str, str]]]]:
     """Convert *manifest*'s batches into the orchestrator ``phases`` shape.
 
-    All batches go into a single phase. Within-phase order is preserved
-    so the Cloud Workflow's pacing loop can dispatch them in sequence
+    Each sample-file index in *manifest* is resolved to its concrete
+    list of grid-point ``lat,lon`` strings via *resources_fs*. All
+    batches go into a single phase. Within-phase order is preserved so
+    the Cloud Workflow's pacing loop can dispatch them in sequence
     under the OpenMeteo rate limit.
     """
     batches = [manifest.step2_batch, *manifest.step3_batches]
-    tasks = [batch_to_task_env(b, data_source, dry_run, run_date) for b in batches]
+    tasks = [
+        batch_to_task_env(
+            b,
+            read_sample_file(resources_fs, sample_file_path(b.sample_file_index)),
+            data_source,
+            dry_run,
+            run_date,
+        )
+        for b in batches
+    ]
     return [tasks]
 
 
@@ -271,25 +291,31 @@ def plan_weather_grid_backfill(
     dry_run: str,
     cursors_fs: FileSystem,
     manifests_fs: FileSystem,
+    resources_fs: FileSystem,
     step3_batch_count: int = 8,
 ) -> WeatherGridManifest:
     """Compute today's manifest and persist it to storage.
 
-    Reads the current cursor, builds the batch plan, converts it to the
-    orchestrator ``phases`` shape (each batch becoming an
-    ``extract_and_load`` task env with a precomputed ``TASK_HASH``), and
-    writes both the phased manifest and the *next* cursor to
-    ``<run_date>/<workflow_name>.backfill.json`` on the manifests
-    filesystem. The live cursor at ``<workflow_name>.json`` on the
-    cursors filesystem is **not** advanced — that happens later via
+    Reads the current cursor, builds the batch plan, resolves each
+    sample-file index to its concrete list of grid-point locations via
+    *resources_fs*, and writes both the phased manifest and the *next*
+    cursor to ``<run_date>/<workflow_name>.backfill.json`` on the
+    manifests filesystem. The live cursor at
+    ``<workflow_name>.json`` on the cursors filesystem is **not**
+    advanced — that happens later via
     :func:`commit_weather_grid_backfill`, after the batches have been
     dispatched successfully.
+
+    The planner does not consult the ledger to skip already-completed
+    sites: the workflow's role is to advance the cursor at a predictable
+    cadence, accepting that transiently-failed sites become small holes
+    rather than perpetual retries.
     """
     cursor = load_cursor(cursors_fs, today)
     manifest, next_cursor = build_weather_grid_manifest(
         today, num_sample_files, cursor, step3_batch_count=step3_batch_count
     )
-    phases = build_phases(manifest, data_source, dry_run, run_date)
+    phases = build_phases(manifest, resources_fs, data_source, dry_run, run_date)
     manifests_fs.write_text(
         _manifest_path(run_date), serialize_manifest(phases, next_cursor)
     )
