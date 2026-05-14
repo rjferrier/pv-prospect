@@ -106,28 +106,16 @@ def run_clean_weather(
     weather_data_source: DataSource,
     site: AnySite,
     date_range: DateRange,
-    by_week: bool = False,
 ) -> None:
-    """Clean raw weather CSVs for a date range.
+    """Clean the raw weather file covering *date_range* into per-day CSVs.
 
-    Splits *date_range* by ``Period.WEEK`` (when *by_week*) or
-    ``Period.DAY``.  Each chunk reads one raw file keyed by the chunk's
-    start date (matching the extraction naming convention) and writes one
-    cleaned CSV per day.
+    The raw file is read as a single unit; its name is derived from the
+    full *date_range*, so this transparently handles both the daily
+    pipeline's single-date files (``..._YYYYMMDD.csv``) and the backfill's
+    window-spanning range files (``..._YYYYMMDD_YYYYMMDD.csv``). One
+    cleaned CSV (plus its metadata companion) is written per day in the
+    range.
     """
-    split_period = Period.WEEK if by_week else Period.DAY
-    for chunk in date_range.split_by(split_period):
-        _clean_weather_chunk(raw_fs, cleaned_fs, weather_data_source, site, chunk)
-
-
-def _clean_weather_chunk(
-    raw_fs: FileSystem,
-    cleaned_fs: FileSystem,
-    weather_data_source: DataSource,
-    site: AnySite,
-    date_range: DateRange,
-) -> None:
-    """Clean a single raw weather file and write per-day cleaned CSVs."""
     in_path = build_time_series_csv_file_path(
         TIMESERIES_FOLDER, weather_data_source, site, date_range
     )

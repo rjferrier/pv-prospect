@@ -22,10 +22,6 @@ START_DATE
 END_DATE
     ISO date ``YYYY-MM-DD``, exclusive (optional; defaults to
     START_DATE + 1 day)
-SPLIT_BY
-    ``day`` or ``week`` (omit to use the full date range as a single chunk).
-    When ``week``, ``clean_weather`` reads a single raw file spanning the
-    week and writes per-day cleaned files.  Other steps always iterate per day.
 PV_SYSTEM_ID
     (Optional) integer system id; required for pv steps. For weather steps,
     accepted as an alternative to ``LOCATION`` — the location is
@@ -223,7 +219,6 @@ def main() -> None:
     transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
     workflow_name = os.environ.get('WORKFLOW_NAME', '')
 
-    split_by = os.environ.get('SPLIT_BY')
     pv_system_id = _env_int('PV_SYSTEM_ID')
     location_str = os.environ.get('LOCATION')
 
@@ -265,7 +260,7 @@ def main() -> None:
     if transformation in TRANSFORMATIONS_NEEDING_PV_SITE and pv_system_id is None:
         raise ValueError('PV_SYSTEM_ID must be set for PV steps.')
 
-    logger.info('Starting %s for %s, split_by=%s', transformation, date_range, split_by)
+    logger.info('Starting %s for %s', transformation, date_range)
 
     task_hash = os.environ.get('TASK_HASH', '')
     descriptor = _build_transform_descriptor(
@@ -284,7 +279,6 @@ def main() -> None:
             pv_system_id,
             location_str,
             date_range,
-            split_by,
         )
     except Exception as e:
         orchestrator.record_outcome(task_hash, descriptor, 'failed', error=repr(e))
@@ -303,7 +297,6 @@ def _run_transform_step(
     pv_system_id: int | None,
     location_str: str | None,
     date_range: DateRange,
-    split_by: str | None,
 ) -> None:
     if transformation is Transformation.CLEAN_WEATHER:
         site = resolve_site(
@@ -318,7 +311,6 @@ def _run_transform_step(
             config.data_sources.weather,
             site,
             date_range,
-            split_by == 'week',
         )
 
     elif transformation is Transformation.CLEAN_PV:
@@ -372,7 +364,6 @@ def _transform_task_env(
     transform_step: str,
     start_date_str: str,
     end_date_str: str | None,
-    split_by: str,
     workflow_name: str,
     run_date: str,
     pv_system_id: int | None = None,
@@ -389,7 +380,6 @@ def _transform_task_env(
         'TRANSFORM_STEP': transform_step,
         'DATE': start_date_str,
         'START_DATE': start_date_str,
-        'SPLIT_BY': split_by,
         'WORKFLOW_NAME': workflow_name,
         'RUN_DATE': run_date,
     }
@@ -408,7 +398,6 @@ def build_transform_phases(
     end_date_str: str | None,
     pv_system_ids: list[int],
     locations: list[str],
-    split_by: str,
     run_date: str,
 ) -> list[list[list[dict[str, str]]]]:
     """Enumerate the clean / prepare / assemble phases for a transform run.
@@ -429,7 +418,6 @@ def build_transform_phases(
             transform_step,
             start_date_str,
             end_date_str,
-            split_by,
             workflow_name,
             run_date,
             pv_system_id=pv_system_id,
@@ -470,7 +458,6 @@ def _run_plan_transform(
 
     pv_system_ids = json.loads(os.environ.get('PV_SYSTEM_IDS', '[]'))
     locations = json.loads(os.environ.get('LOCATIONS', '[]'))
-    split_by = os.environ.get('SPLIT_BY', '')
 
     orchestrator = WorkflowOrchestrator(
         workflow_name, run_date, manifests_fs=manifests_fs, ledger_fs=ledger_fs
@@ -482,7 +469,6 @@ def _run_plan_transform(
         end_date_str,
         pv_system_ids,
         locations,
-        split_by,
         run_date,
     )
     filtered = [orchestrator.filter_remaining_tasks(phase) for phase in phases]

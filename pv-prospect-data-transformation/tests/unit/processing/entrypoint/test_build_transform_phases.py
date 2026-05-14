@@ -24,7 +24,6 @@ def test_end_date_propagated_to_every_task_when_given() -> None:
         '2026-04-15',
         [4708, 24667],
         [],
-        'day',
         '2026-05-14',
     )
     for task in _all_tasks(phases):
@@ -40,7 +39,6 @@ def test_end_date_omitted_from_every_task_when_none() -> None:
         None,
         [4708],
         [],
-        'day',
         '2026-05-14',
     )
     for task in _all_tasks(phases):
@@ -54,7 +52,6 @@ def test_window_start_date_set_on_every_task() -> None:
         '2026-04-15',
         [4708],
         [],
-        'day',
         '2026-05-14',
     )
     for task in _all_tasks(phases):
@@ -70,7 +67,6 @@ def test_phases_are_clean_then_prepare_then_assemble() -> None:
         '2026-04-15',
         [4708, 24667],
         [],
-        'day',
         '2026-05-14',
     )
     clean, prepare, assemble = phases
@@ -95,7 +91,6 @@ def test_locations_produce_weather_only_tasks() -> None:
         '2026-04-29',
         [],
         ['50.49,-3.54', '51.00,-4.00'],
-        'day',
         '2026-05-14',
     )
     clean, prepare, assemble = phases
