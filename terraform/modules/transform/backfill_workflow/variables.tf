@@ -15,7 +15,7 @@ variable "cloud_run_job_name" {
 
 variable "staging_bucket_name" {
   type        = string
-  description = "GCS staging bucket; the workflow reads the backfill manifest from gs://<bucket>/tracking/manifests/<run_date>/<workflow_name>.backfill.json and the orchestrator manifest from gs://<bucket>/tracking/manifests/<run_date>/<workflow_name>.json"
+  description = "GCS staging bucket; the workflow reads the orchestrator manifest from gs://<bucket>/tracking/manifests/<run_date>/<workflow_name>.json (written directly by plan_transform_backfill)"
 }
 
 variable "backfill_scope" {
@@ -33,14 +33,8 @@ variable "workflow_name_suffix" {
   description = "Hyphenated scope suffix used in the workflow name (e.g. 'pv-sites', 'weather-grid')"
 }
 
-variable "default_pv_system_ids" {
-  type        = list(number)
-  default     = []
-  description = "PV system IDs to transform. Used only when backfill_scope == 'pv_sites'."
-}
-
-variable "default_locations" {
-  type        = list(string)
-  default     = []
-  description = "Grid-point locations (lat,lon strings) to transform. Used only when backfill_scope == 'weather_grid'."
+variable "max_extract_runs" {
+  type        = number
+  default     = 4
+  description = "MAX_EXTRACT_RUNS env-var value: how many unconsumed extraction consolidated ledgers one transform-backfill run may consume. Weather-grid extraction emits 2 consolidated ledgers/day and pv-sites 1, so the default of 4 lets a once-daily transform backfill keep pace with weather-grid and burn down a modest pv-sites backlog."
 }

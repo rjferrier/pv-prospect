@@ -294,7 +294,6 @@ module "transformer_pv_sites_backfill_workflow" {
   staging_bucket_name   = module.storage.staging_bucket_name
   backfill_scope        = "pv_sites"
   workflow_name_suffix  = "pv-sites"
-  default_pv_system_ids = var.default_pv_system_ids
 
   depends_on = [google_project_service.apis, module.cloud_run_transform]
 }
@@ -320,7 +319,6 @@ module "transformer_weather_grid_backfill_workflow" {
   staging_bucket_name   = module.storage.staging_bucket_name
   backfill_scope        = "weather_grid"
   workflow_name_suffix  = "weather-grid"
-  default_locations     = var.default_locations
 
   depends_on = [google_project_service.apis, module.cloud_run_transform]
 }

@@ -1,35 +1,34 @@
-# Cloud Workflows orchestration for the daily transform backfill.
+# Cloud Workflows orchestration for the transform backfill.
 #
 # A single, scope-parameterised module; instantiate twice (once for each
-# BackfillScope: pv_sites and weather_grid). The workflow trails the
-# corresponding extraction-side backfill, transforming the same date
-# window the extraction backfill produced raw data for.
+# BackfillScope: pv_sites and weather_grid). The workflow plans from the
+# corresponding extraction backfill's committed task-outcome ledger — it
+# transforms exactly what extraction recorded as harvested, so it cannot
+# drift onto a window extraction never produced raw data for.
 #
 # Execution flow:
 #
-#   1. plan_transform_backfill: writes today's date-window plan + next
-#      cursor to the scope's backfill manifest in GCS.
-#   2. Read that manifest to obtain start_date and end_date.
-#   3. plan_transform: builds the orchestrator phased manifest for
-#      [start_date, end_date) and the chosen PV systems / locations.
-#   4. Iterate phases, dispatching clean → prepare → assemble tasks in
+#   1. plan_transform_backfill: reads the scope's consumed-through marker,
+#      takes the next MAX_EXTRACT_RUNS unconsumed extraction consolidated
+#      ledgers, and writes the orchestrator phased manifest directly
+#      (plus a <workflow>.marker.json next-marker sidecar).
+#   2. Read that orchestrator manifest.
+#   3. Iterate phases, dispatching clean -> prepare -> assemble tasks in
 #      parallel within each phase (same shape as the daily transform).
-#   5. commit_transform_backfill: promotes the next-cursor to the live
-#      cursor only if all transform jobs succeeded.
-#   6. consolidate_logs.
+#   4. commit_transform_backfill: promotes the sidecar's next_marker to
+#      the live marker.
 #
-# If any transform job fails the cursor is not advanced, so tomorrow's
-# scheduled run replans the same window. The orchestrator's task-outcome
-# ledger ensures already-completed tasks are skipped on re-run.
+# Failures branch on the container exit code surfaced by await_job:
+#   exit 1 (container crash)          -- log, swallow, continue. The
+#       commit step still runs, so the marker advances and a
+#       transiently-failed task becomes a recorded hole rather than a
+#       perpetual retry.
+#   exit 2 (WorkflowTerminatingError) -- re-raise. The run_pipeline try
+#       aborts before the commit step, leaving the marker unchanged so
+#       the next run re-derives the same plan. consolidate_logs still runs.
 
 locals {
   workflow_name = "pv-prospect-transform-${var.workflow_name_suffix}-backfill"
-
-  # Scope-specific selector for what the orchestrator manifests cover.
-  # Empty for the inapplicable scope so the daily-transform planning
-  # logic emits no spurious tasks of the wrong kind.
-  pv_system_ids_json = var.backfill_scope == "pv_sites" ? jsonencode(var.default_pv_system_ids) : "[]"
-  locations_json     = var.backfill_scope == "weather_grid" ? jsonencode(var.default_locations) : "[]"
 }
 
 resource "google_workflows_workflow" "transform_backfill" {
@@ -38,7 +37,7 @@ resource "google_workflows_workflow" "transform_backfill" {
   service_account     = var.service_account_email
   deletion_protection = false
   call_log_level      = "LOG_ALL_CALLS"
-  description         = "Orchestrates daily ${var.backfill_scope} transform backfill via plan-commit cursor"
+  description         = "Orchestrates the ${var.backfill_scope} transform backfill, planning from the extraction backfill's ledger"
 
   source_contents = <<-YAML
     main:
@@ -54,17 +53,16 @@ resource "google_workflows_workflow" "transform_backfill" {
               - backfill_scope: "${var.backfill_scope}"
               # Workflow trigger date (UTC), pinned once and propagated to every
               # task as RUN_DATE. The plan_transform_backfill job writes the
-              # backfill manifest at this run_date; the orchestrator manifest
-              # from plan_transform lands under the same run_date.
+              # orchestrator manifest and its next-marker sidecar at this
+              # run_date.
               - run_date: $${text.substring(time.format(sys.now()), 0, 10)}
-              - backfill_manifest_object: $${"tracking/manifests/" + run_date + "/" + workflow_name + ".backfill.json"}
-              - pv_system_ids: ${local.pv_system_ids_json}
-              - locations: ${local.locations_json}
 
         - run_pipeline:
             try:
               steps:
                 # ---------- 1. plan_transform_backfill ----------
+                # Plans from the extraction backfill's consolidated ledger
+                # and writes the orchestrator manifest directly.
                 - run_plan_backfill:
                     call: googleapis.run.v2.projects.locations.jobs.run
                     args:
@@ -81,6 +79,8 @@ resource "google_workflows_workflow" "transform_backfill" {
                                   value: $${workflow_name}
                                 - name: RUN_DATE
                                   value: $${run_date}
+                                - name: MAX_EXTRACT_RUNS
+                                  value: "${var.max_extract_runs}"
                     result: plan_backfill_op
                 - wait_plan_backfill_op:
                     call: wait_for_operation
@@ -92,62 +92,7 @@ resource "google_workflows_workflow" "transform_backfill" {
                     args:
                       execution_name: $${plan_backfill_op_done.response.name}
 
-                # ---------- 2. fetch the window from the backfill manifest ----------
-                - fetch_backfill_manifest:
-                    call: googleapis.storage.v1.objects.get
-                    args:
-                      bucket: $${bucket}
-                      object: $${text.url_encode(backfill_manifest_object)}
-                      alt: media
-                    result: backfill_manifest_raw
-                - decode_backfill_manifest:
-                    assign:
-                      - backfill_manifest: $${json.decode(backfill_manifest_raw)}
-                      - start_date: $${backfill_manifest.start_date}
-                      - end_date: $${backfill_manifest.end_date}
-
-                # ---------- 3. plan_transform across the window ----------
-                - run_plan_transform:
-                    call: googleapis.run.v2.projects.locations.jobs.run
-                    args:
-                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                      body:
-                        overrides:
-                          containerOverrides:
-                            - env:
-                                - name: JOB_TYPE
-                                  value: plan_transform
-                                - name: WORKFLOW_NAME
-                                  value: $${workflow_name}
-                                - name: RUN_DATE
-                                  value: $${run_date}
-                                - name: START_DATE
-                                  value: $${start_date}
-                                - name: END_DATE
-                                  value: $${end_date}
-                                - name: DATE
-                                  value: $${start_date}
-                                - name: PV_SYSTEM_IDS
-                                  value: $${json.encode_to_string(pv_system_ids)}
-                                - name: LOCATIONS
-                                  value: $${json.encode_to_string(locations)}
-                                - name: SPLIT_BY
-                                  value: day
-                    result: plan_transform_op
-                - wait_plan_transform_op:
-                    call: wait_for_operation
-                    args:
-                      operation_name: $${plan_transform_op.name}
-                    result: plan_transform_op_done
-                - wait_plan_transform:
-                    call: await_job
-                    args:
-                      execution_name: $${plan_transform_op_done.response.name}
-
-                # ---------- 4. fetch + execute the orchestrator manifest ----------
-                # The orchestrator phases manifest lives at
-                # tracking/manifests/<run_date>/<workflow>.json (alongside
-                # the .backfill.json date-window plan above).
+                # ---------- 2. fetch + execute the orchestrator manifest ----------
                 - fetch_orchestrator_manifest:
                     call: googleapis.storage.v1.objects.get
                     args:
@@ -196,21 +141,15 @@ resource "google_workflows_workflow" "transform_backfill" {
                                               call: await_job
                                               args:
                                                 execution_name: $${task_op_done.response.name}
-                                      retry:
-                                        predicate: $${retry_predicate}
-                                        max_retries: 3
-                                        backoff:
-                                          initial_delay: 60
-                                          max_delay: 600
-                                          multiplier: 2
-                                      # After retries are exhausted, branch on the
+                                      # No workflow-level retry — in line with
+                                      # the extraction backfills. Branch on the
                                       # container exit code surfaced by await_job:
                                       # 2 -> WorkflowTerminatingError, re-raise so
                                       # the run_pipeline try aborts before the
-                                      # commit step, leaving the cursor unchanged.
+                                      # commit step, leaving the marker unchanged.
                                       # 1 (or unknown) -> log and swallow so the
-                                      # cursor still advances despite the per-task
-                                      # failure (ledger records the failure).
+                                      # run still reaches commit (predictable
+                                      # cadence; the ledger records the failure).
                                       except:
                                         as: task_err
                                         steps:
@@ -230,11 +169,11 @@ resource "google_workflows_workflow" "transform_backfill" {
                             assign:
                               - _dummy: true
 
-                # ---------- 5. commit_transform_backfill ----------
-                # Only reached if every phase succeeded — a failure in
-                # the try block above skips this and falls through to
-                # consolidate_logs, leaving the cursor unchanged for
-                # tomorrow to retry.
+                # ---------- 3. commit_transform_backfill ----------
+                # Promotes the next-marker sidecar to the live marker.
+                # Reached after every exit-1 failure is swallowed, so it
+                # runs on partial-failure runs too; an exit-2 re-raise
+                # above skips it, leaving the marker unchanged.
                 - run_commit_backfill:
                     call: googleapis.run.v2.projects.locations.jobs.run
                     args:
@@ -270,7 +209,7 @@ resource "google_workflows_workflow" "transform_backfill" {
                       data: '$${"Backfill workflow encountered an error - proceeding to log consolidation. Error: " + json.encode_to_string(workflow_err)}'
                       severity: "ERROR"
 
-        # ---------- 6. consolidate_logs (always runs) ----------
+        # ---------- 4. consolidate_logs (always runs) ----------
         - consolidate_logs:
             call: googleapis.run.v2.projects.locations.jobs.run
             args:
@@ -298,21 +237,6 @@ resource "google_workflows_workflow" "transform_backfill" {
 
         - done:
             return: "completed"
-
-    retry_predicate:
-      params: [e]
-      steps:
-        - extract_error_code:
-            assign:
-              - error_code: $${default(map.get(e, "code"), 0)}
-        - check_retriable:
-            switch:
-              - condition: $${error_code == 429 or error_code == 500 or error_code == 503}
-                return: true
-              - condition: $${text.match_regex(default(e.message, ""), "Job execution failed")}
-                return: true
-              - condition: true
-                return: false
 
     wait_for_operation:
       params: [operation_name]
@@ -374,7 +298,7 @@ resource "google_workflows_workflow" "transform_backfill" {
     # container never ran). The exit code drives the outer except's
     # decision to swallow (1: task failed, workflow continues) or
     # re-raise (2: WorkflowTerminatingError -- workflow aborts before the
-    # cursor-commit step, leaving the cursor unchanged for tomorrow).
+    # commit step, leaving the marker unchanged for the next run).
     fetch_failed_task_exit_code:
       params: [execution_name]
       steps:
