@@ -368,6 +368,93 @@ def _run_transform_step(
         raise WorkflowTerminatingError(f'unknown TRANSFORM_STEP={transformation}')
 
 
+def _transform_task_env(
+    transform_step: str,
+    start_date_str: str,
+    end_date_str: str | None,
+    split_by: str,
+    workflow_name: str,
+    run_date: str,
+    pv_system_id: int | None = None,
+    location: str | None = None,
+) -> list[dict[str, str]]:
+    """Build the env list for one transform task, with TASK_HASH injected.
+
+    ``END_DATE`` is included only when *end_date_str* is set, so the
+    container processes the whole ``[START_DATE, END_DATE)`` window. When
+    omitted the container falls back to a single day — the daily-transform
+    behaviour.
+    """
+    env: dict[str, str] = {
+        'TRANSFORM_STEP': transform_step,
+        'DATE': start_date_str,
+        'START_DATE': start_date_str,
+        'SPLIT_BY': split_by,
+        'WORKFLOW_NAME': workflow_name,
+        'RUN_DATE': run_date,
+    }
+    if end_date_str:
+        env['END_DATE'] = end_date_str
+    if pv_system_id is not None:
+        env['PV_SYSTEM_ID'] = str(pv_system_id)
+    if location is not None:
+        env['LOCATION'] = location
+    return inject_task_hash(build_env_list(**env))
+
+
+def build_transform_phases(
+    workflow_name: str,
+    start_date_str: str,
+    end_date_str: str | None,
+    pv_system_ids: list[int],
+    locations: list[str],
+    split_by: str,
+    run_date: str,
+) -> list[list[list[dict[str, str]]]]:
+    """Enumerate the clean / prepare / assemble phases for a transform run.
+
+    Every task env carries the full ``[START_DATE, END_DATE)`` window so the
+    container transforms the whole range rather than only the start date;
+    ``END_DATE`` is omitted only when *end_date_str* is falsy, which the
+    container reads as a single day. The returned phases are unfiltered —
+    the caller applies :meth:`WorkflowOrchestrator.filter_remaining_tasks`.
+    """
+
+    def task(
+        transform_step: str,
+        pv_system_id: int | None = None,
+        location: str | None = None,
+    ) -> list[dict[str, str]]:
+        return _transform_task_env(
+            transform_step,
+            start_date_str,
+            end_date_str,
+            split_by,
+            workflow_name,
+            run_date,
+            pv_system_id=pv_system_id,
+            location=location,
+        )
+
+    clean: list[list[dict[str, str]]] = []
+    prepare: list[list[dict[str, str]]] = []
+    for pv_id in pv_system_ids:
+        clean.append(task('clean_pv', pv_system_id=pv_id))
+        clean.append(task('clean_weather', pv_system_id=pv_id))
+        prepare.append(task('prepare_pv', pv_system_id=pv_id))
+        prepare.append(task('prepare_weather', pv_system_id=pv_id))
+    for loc in locations:
+        clean.append(task('clean_weather', location=loc))
+        prepare.append(task('prepare_weather', location=loc))
+
+    assemble: list[list[dict[str, str]]] = [
+        task('assemble_pv', pv_system_id=pv_id) for pv_id in pv_system_ids
+    ]
+    assemble.append(task('assemble_weather'))
+
+    return [clean, prepare, assemble]
+
+
 def _run_plan_transform(
     run_date: str,
     manifests_fs: FileSystem,
@@ -379,6 +466,7 @@ def _run_plan_transform(
         or os.environ.get('DATE')
         or date.today().isoformat()
     )
+    end_date_str = os.environ.get('END_DATE')
 
     pv_system_ids = json.loads(os.environ.get('PV_SYSTEM_IDS', '[]'))
     locations = json.loads(os.environ.get('LOCATIONS', '[]'))
@@ -388,114 +476,18 @@ def _run_plan_transform(
         workflow_name, run_date, manifests_fs=manifests_fs, ledger_fs=ledger_fs
     )
 
-    phases = []
-
-    # Phase 0: Clean
-    phase0 = []
-    for pv_id in pv_system_ids:
-        env = build_env_list(
-            TRANSFORM_STEP='clean_pv',
-            PV_SYSTEM_ID=str(pv_id),
-            DATE=start_date_str,
-            START_DATE=start_date_str,
-            SPLIT_BY=split_by,
-            WORKFLOW_NAME=workflow_name,
-            RUN_DATE=run_date,
-        )
-        phase0.append(inject_task_hash(env))
-
-        env = build_env_list(
-            TRANSFORM_STEP='clean_weather',
-            PV_SYSTEM_ID=str(pv_id),
-            DATE=start_date_str,
-            START_DATE=start_date_str,
-            SPLIT_BY=split_by,
-            WORKFLOW_NAME=workflow_name,
-            RUN_DATE=run_date,
-        )
-        phase0.append(inject_task_hash(env))
-
-    for loc in locations:
-        env = build_env_list(
-            TRANSFORM_STEP='clean_weather',
-            LOCATION=loc,
-            DATE=start_date_str,
-            START_DATE=start_date_str,
-            SPLIT_BY=split_by,
-            WORKFLOW_NAME=workflow_name,
-            RUN_DATE=run_date,
-        )
-        phase0.append(inject_task_hash(env))
-
-    phases.append(orchestrator.filter_remaining_tasks(phase0))
-
-    # Phase 1: Prepare
-    phase1 = []
-    for pv_id in pv_system_ids:
-        env = build_env_list(
-            TRANSFORM_STEP='prepare_pv',
-            PV_SYSTEM_ID=str(pv_id),
-            DATE=start_date_str,
-            START_DATE=start_date_str,
-            SPLIT_BY=split_by,
-            WORKFLOW_NAME=workflow_name,
-            RUN_DATE=run_date,
-        )
-        phase1.append(inject_task_hash(env))
-
-        env = build_env_list(
-            TRANSFORM_STEP='prepare_weather',
-            PV_SYSTEM_ID=str(pv_id),
-            DATE=start_date_str,
-            START_DATE=start_date_str,
-            SPLIT_BY=split_by,
-            WORKFLOW_NAME=workflow_name,
-            RUN_DATE=run_date,
-        )
-        phase1.append(inject_task_hash(env))
-
-    for loc in locations:
-        env = build_env_list(
-            TRANSFORM_STEP='prepare_weather',
-            LOCATION=loc,
-            DATE=start_date_str,
-            START_DATE=start_date_str,
-            SPLIT_BY=split_by,
-            WORKFLOW_NAME=workflow_name,
-            RUN_DATE=run_date,
-        )
-        phase1.append(inject_task_hash(env))
-
-    phases.append(orchestrator.filter_remaining_tasks(phase1))
-
-    # Phase 2: Assemble
-    phase2 = []
-    for pv_id in pv_system_ids:
-        env = build_env_list(
-            TRANSFORM_STEP='assemble_pv',
-            PV_SYSTEM_ID=str(pv_id),
-            DATE=start_date_str,
-            START_DATE=start_date_str,
-            SPLIT_BY=split_by,
-            WORKFLOW_NAME=workflow_name,
-            RUN_DATE=run_date,
-        )
-        phase2.append(inject_task_hash(env))
-
-    env = build_env_list(
-        TRANSFORM_STEP='assemble_weather',
-        DATE=start_date_str,
-        START_DATE=start_date_str,
-        SPLIT_BY=split_by,
-        WORKFLOW_NAME=workflow_name,
-        RUN_DATE=run_date,
+    phases = build_transform_phases(
+        workflow_name,
+        start_date_str,
+        end_date_str,
+        pv_system_ids,
+        locations,
+        split_by,
+        run_date,
     )
-    phase2.append(inject_task_hash(env))
-
-    phases.append(orchestrator.filter_remaining_tasks(phase2))
-
-    orchestrator.write_manifest(phases)
-    logger.info('plan_transform: wrote manifest with %d phases', len(phases))
+    filtered = [orchestrator.filter_remaining_tasks(phase) for phase in phases]
+    orchestrator.write_manifest(filtered)
+    logger.info('plan_transform: wrote manifest with %d phases', len(filtered))
 
 
 def parse_backfill_scope(raw: str) -> BackfillScope:
