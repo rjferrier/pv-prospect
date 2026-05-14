@@ -1,11 +1,14 @@
-import fnmatch
 import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Callable, Literal, Mapping
 
 from pv_prospect.etl.storage import FileSystem
-from pv_prospect.etl.storage.ledger import ledger_entry_path, ledger_prefix
+from pv_prospect.etl.storage.ledger import (
+    ledger_entry_path,
+    ledger_prefix,
+    list_consolidated_ledgers,
+)
 
 NowFn = Callable[[], datetime]
 TaskStatus = Literal['completed', 'failed']
@@ -176,10 +179,7 @@ class WorkflowOrchestrator:
         for entry in ledger_fs.list_files(per_task_dir, '*.jsonl'):
             if _has_completed_entry(ledger_fs.read_text(entry.path)):
                 completed.add(entry.name.removesuffix('.jsonl'))
-        consolidated_pattern = f'*-{self.workflow_name}.jsonl'
-        for entry in ledger_fs.list_files('', '*.jsonl', recursive=True):
-            if not fnmatch.fnmatch(entry.name, consolidated_pattern):
-                continue
+        for entry in list_consolidated_ledgers(ledger_fs, self.workflow_name):
             for line in ledger_fs.read_text(entry.path).splitlines():
                 rec = _parse_ledger_line(line)
                 if rec is None:

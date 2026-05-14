@@ -17,12 +17,13 @@ The schema of each entry is documented at
 ``WorkflowOrchestrator.record_outcome``.
 """
 
+import fnmatch
 import json
 import logging
 from datetime import date, datetime, timezone
 from typing import Callable
 
-from pv_prospect.etl.storage.base import FileSystem
+from pv_prospect.etl.storage.base import FileEntry, FileSystem
 
 logger = logging.getLogger(__name__)
 
@@ -94,3 +95,54 @@ def consolidate_ledger(
         ledger_fs.delete(entry.path)
 
     ledger_fs.rmdir(prefix)
+
+
+def list_consolidated_ledgers(
+    ledger_fs: FileSystem, workflow_name: str
+) -> list[FileEntry]:
+    """Return every consolidated ledger file for *workflow_name*, name-sorted.
+
+    Consolidated files are named
+    ``<run_date>/<run_date>-<HHMMSS>-<workflow_name>.jsonl`` (see
+    :func:`consolidate_ledger`). Because the run date leads the filename,
+    a lexical sort by name is also a chronological sort. Per-task ledger
+    files (``<run_date>/<workflow_name>/<task_hash>.jsonl``) do not carry
+    the ``-<workflow_name>.jsonl`` suffix and so are excluded, as are the
+    consolidated files of other workflows whose name is a prefix of this
+    one (e.g. ``pv-prospect-extract`` vs
+    ``pv-prospect-extract-pv-sites-backfill``).
+    """
+    pattern = f'*-{workflow_name}.jsonl'
+    entries = [
+        entry
+        for entry in ledger_fs.list_files('', '*.jsonl', recursive=True)
+        if fnmatch.fnmatch(entry.name, pattern)
+    ]
+    return sorted(entries, key=lambda entry: entry.name)
+
+
+def read_completed_descriptors(
+    ledger_fs: FileSystem, path: str
+) -> list[dict[str, str]]:
+    """Return the ``descriptor`` of every ``completed`` entry in one ledger.
+
+    Parses a single consolidated ledger file line by line; ``failed``
+    entries and malformed lines are skipped. Each returned dict is the
+    opaque per-workflow ``descriptor`` recorded by
+    :meth:`WorkflowOrchestrator.record_outcome`.
+    """
+    descriptors: list[dict[str, str]] = []
+    for line in ledger_fs.read_text(path).splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            logger.warning('Skipping malformed ledger line in %s', path)
+            continue
+        if not isinstance(rec, dict) or rec.get('status') != 'completed':
+            continue
+        descriptor = rec.get('descriptor')
+        if isinstance(descriptor, dict):
+            descriptors.append(descriptor)
+    return descriptors
