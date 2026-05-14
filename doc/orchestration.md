@@ -8,9 +8,13 @@ the `pv-prospect-etl` package:
   outcome ledger that drives both audit and resumption for the daily phased
   workflows.
 - `pv_prospect.etl.backfill` — `BackfillScope`, `BackfillCursor`, and the
-  plan-commit primitives that extraction and transformation backfills both
-  delegate to. Centralising it here means changing a window length in one place
-  updates both pipelines.
+  plan-commit primitives the **extraction** backfills delegate to. The
+  transformation backfills do not use a cursor — they plan from the extraction
+  backfill's committed ledger instead (see
+  [Transformation Backfills](#transformation-backfills)).
+- `pv_prospect.etl.storage.ledger` — `list_consolidated_ledgers` and
+  `read_completed_descriptors`, the consolidated-ledger readers the
+  transformation backfill planner builds its plan from.
 
 The Cloud Workflows in `terraform/modules/` consume the manifests these modules
 produce.
@@ -28,8 +32,9 @@ gs://pv-prospect-staging/
 │   └── prepared/          (parquet)
 ├── tracking/
 │   ├── manifests/<run_date>/<workflow>.json           (orchestrator phases manifest)
-│   ├── manifests/<run_date>/<workflow>.backfill.json  (backfill date-window plan; only backfill workflows)
-│   ├── cursors/<workflow>.json                        (live committed backfill cursors)
+│   ├── manifests/<run_date>/<workflow>.backfill.json  (extraction backfill date-window plan)
+│   ├── manifests/<run_date>/<workflow>.marker.json    (transformation backfill next-marker sidecar)
+│   ├── cursors/<workflow>.json                        (extraction backfill cursors / transformation backfill consumed-through markers — same path, different schema)
 │   ├── ledger/<run_date>/<workflow>/<task_hash>.jsonl (per-task ledger entries, mid-run)
 │   ├── ledger/<run_date>/<run_date>-<HHMMSS>-<workflow>.jsonl  (consolidated, post-consolidation)
 │   ├── logs/<run_date>/<workflow>/<HHMMSSffffff>.txt           (LoggingFileSystem write-audit, mid-run)
@@ -90,10 +95,13 @@ dispatch.
 
 Manifest path: `tracking/manifests/<run_date>/<workflow_name>.json`
 
-A backfill workflow additionally writes a date-window plan (start_date,
-end_date, next_cursor) at
+An **extraction** backfill workflow additionally writes a date-window plan
+(start_date, end_date, next_cursor) at
 `tracking/manifests/<run_date>/<workflow_name>.backfill.json` — distinct from
-the orchestrator phases manifest above.
+the orchestrator phases manifest above. A **transformation** backfill writes
+the orchestrator phases manifest directly (its planner derives the plan from
+the extraction ledger rather than a cursor) plus a small
+`<workflow_name>.marker.json` next-marker sidecar.
 
 ### Task-Outcome Ledger
 
@@ -170,6 +178,12 @@ design:
   than a perpetual retry. This is the "predictable cadence" trade-off the
   backfills opt into.
 
+The transformation side mirrors this split: the daily transform
+(`pv-prospect-transform`) self-filters, while the transformation backfills do
+not — their consumed-through marker (see
+[Transformation Backfills](#transformation-backfills)) plays the
+cadence-bounding role the extraction backfills' cursor plays.
+
 ### Write-Audit Logs
 
 `LoggingFileSystem` decorates the staged data filesystems and records a
@@ -206,10 +220,11 @@ the ledger filter in step 2 ensures already-completed tasks are skipped — even
 across run dates, so a manual re-trigger the following day for the same
 `START_DATE` finds yesterday's completions and skips them.
 
-## Backfill Workflows (Plan-Commit Pattern)
+## Extraction Backfill Workflows (Plan-Commit Pattern)
 
-The extraction and transformation backfills use a different pattern from the
-daily workflows because they process a moving window across days:
+The **extraction** backfills use a different pattern from the daily workflows
+because they process a moving window across days (the transformation backfills
+use yet another pattern — see [Transformation Backfills](#transformation-backfills)):
 
 1. **Plan** — Reads a live **cursor** at
    `tracking/cursors/<workflow>.json` (tracking where the window left off),
@@ -241,36 +256,33 @@ daily workflows because they process a moving window across days:
    tomorrow. Partial runs (max-batches-per-run hit) flow through
    `consolidate_logs` without committing.
 
-The transformation backfills follow the same skeleton but split planning
-across two jobs: `plan_transform_backfill` writes the date window + cursor,
-and a separate `plan_transform` step writes the orchestrator phases manifest
-at `tracking/manifests/<run_date>/<workflow>.json` (using the same
-plan_transform code path the daily transform uses). The two files coexist;
-`commit_transform_backfill` reads the `.backfill.json` for the cursor.
-
 ### Backfill Scope and Window Configuration
 
 `BackfillScope` (defined in `pv_prospect.etl.backfill`) names the two backfill
-axes the project tracks. `default_window_days(scope)` returns the cadence both
-extraction and transformation use for that scope:
+axes the project tracks. `default_window_days(scope)` returns the **extraction**
+cadence for that scope. The transformation backfills have no window config of
+their own — they inherit each task's window from whatever the extraction ledger
+recorded.
 
 | Scope | Default window | Why |
 |---|---|---|
 | `PV_SITES` | 28 days | PVOutput's `getstatus.jsp` is single-date only (one HTTP call per system per day) and rate-limits at 300/hour; 10 sites × 28 days = 280 calls is the largest round-week multiple that fits with retry headroom. |
 | `WEATHER_GRID` | 14 days | OpenMeteo's natural single-request window for the historical-forecast endpoint. |
 
-### Cursor Files
+### Cursor and Marker Files
 
-Each backfill instance has its own workflow name. Extraction and transformation
-cursors for the same scope are independent so the two pipelines can advance at
-their own pace.
+Each backfill instance has its own workflow name. The **extraction** backfills
+keep a live cursor; the **transformation** backfills keep a consumed-through
+marker at the same path (different schema — see
+[Transformation Backfills](#transformation-backfills)). All four are
+independent so the pipelines advance at their own pace.
 
-| Workflow | Cursor path |
-|---|---|
-| PV-sites extraction backfill | `tracking/cursors/pv-prospect-extract-pv-sites-backfill.json` |
-| Weather-grid extraction backfill | `tracking/cursors/pv-prospect-extract-weather-grid-backfill.json` |
-| PV-sites transformation backfill | `tracking/cursors/pv-prospect-transform-pv-sites-backfill.json` |
-| Weather-grid transformation backfill | `tracking/cursors/pv-prospect-transform-weather-grid-backfill.json` |
+| Workflow | Path | Type |
+|---|---|---|
+| PV-sites extraction backfill | `tracking/cursors/pv-prospect-extract-pv-sites-backfill.json` | cursor |
+| Weather-grid extraction backfill | `tracking/cursors/pv-prospect-extract-weather-grid-backfill.json` | cursor |
+| PV-sites transformation backfill | `tracking/cursors/pv-prospect-transform-pv-sites-backfill.json` | consumed-through marker |
+| Weather-grid transformation backfill | `tracking/cursors/pv-prospect-transform-weather-grid-backfill.json` | consumed-through marker |
 
 ### Weather-Grid Extraction Backfill: Two-Run Split
 
@@ -283,23 +295,38 @@ batch are recorded in the ledger but not retried — the cursor still advances.
 
 ### Transformation Backfills
 
-The transformation backfills wrap the daily-transform plan-execute-phases
-pattern in a plan-commit envelope. Each run:
+The transformation backfills do **not** use the cursor/plan-commit pattern. A
+transformation is a recomputable derivative of the durable extraction harvest,
+so rather than marching a cursor of their own they plan from the extraction
+backfill's committed record. Each run:
 
-1. Calls `plan_transform_backfill` (with `BACKFILL_SCOPE`) to advance the
-   scope-specific cursor by one window. Writes the date-window plan at
-   `tracking/manifests/<run_date>/<workflow>.backfill.json`.
-2. Calls `plan_transform` with the resulting `[start_date, end_date)` to
-   produce an orchestrator manifest at
-   `tracking/manifests/<run_date>/<workflow>.json` containing
-   `clean → prepare → assemble` phases over every day in the window.
-3. Executes the phased manifest using the same dispatcher the daily transform
-   uses; per-task ledger entries make re-runs idempotent.
-4. Calls `commit_transform_backfill` to promote the next-cursor — only
-   reached if every task succeeded, so a failed run leaves the cursor
-   unchanged for tomorrow's scheduled re-plan.
+1. Calls `plan_transform_backfill` (with `BACKFILL_SCOPE`). It loads the
+   scope's **consumed-through marker** from `tracking/cursors/<workflow>.json`,
+   lists the corresponding extraction backfill's consolidated ledgers, and
+   takes the oldest `MAX_EXTRACT_RUNS` (default 4) whose filename sorts above
+   the marker. Every `completed` extraction entry becomes a transform unit
+   `(data_source, identifier, window)`; `failed` entries are skipped — no raw
+   data means no transform task, correctly leaving a hole. The resulting
+   `clean → prepare → assemble` phases are written straight to the orchestrator
+   manifest at `tracking/manifests/<run_date>/<workflow>.json`, alongside a
+   `<workflow>.marker.json` sidecar recording the `next_marker`.
+2. Executes the phased manifest using the same dispatcher the daily transform
+   uses; per-task ledger entries record each outcome.
+3. Calls `commit_transform_backfill`, which promotes the sidecar's
+   `next_marker` to the live marker. This is **unconditional** — it runs even
+   after swallowed per-task (exit-1) failures, so the marker advances at a
+   predictable cadence and a transiently-failed transform task is a recorded
+   hole, not a perpetual retry. An exit-2 `WorkflowTerminatingError` aborts the
+   run before commit, leaving the marker unchanged for the next run to
+   re-derive.
 
-The two scopes use independent cursors, so a hiccup transforming the weather
+Because the plan is a pure function of the extraction ledger and the marker,
+the backfill planner does not self-filter against its own ledger (unlike the
+daily transform). Resetting the marker to the empty string re-derives every
+transform task from the oldest extraction ledger forward — the supported way
+to re-transform after a feature-spec change.
+
+The two scopes use independent markers, so a hiccup transforming the weather
 grid does not block PV-sites progress (or vice versa).
 
 ## Retry and Rate-Limit Handling
@@ -323,7 +350,7 @@ Cloud Run Jobs exit with one of three codes (see
 |------|---------|-------------------|
 | 0 | Success — `main()` returned without exception | Task succeeds; ledger records `completed` |
 | 1 | Task-level failure — general exception | Task fails; the surrounding workflow swallows it and continues with other tasks |
-| 2 | Workflow-terminating — `WorkflowTerminatingError` raised | Task fails; the surrounding workflow aborts (skipping any cursor-commit step) |
+| 2 | Workflow-terminating — `WorkflowTerminatingError` raised | Task fails; the surrounding workflow aborts (skipping any cursor- or marker-commit step) |
 
 Application code raises `WorkflowTerminatingError` (from `pv_prospect.etl`)
 for failure modes where continuing other tasks is harmful or pointless --
@@ -336,8 +363,8 @@ subworkflow. On failure, it reads the failed task's container exit code
 via the Cloud Run Tasks API and re-raises with `data.exit_code` populated.
 Each per-task `try` clause then branches on `task_err.data.exit_code`:
 swallow on 1, re-raise on 2. For backfill workflows the re-raise abort is
-what gates the cursor-commit step (an exit-2 failure leaves the cursor
-unchanged for tomorrow's retry).
+what gates the commit step (an exit-2 failure leaves the extraction cursor —
+or the transformation consumed-through marker — unchanged for the next run).
 
 Other notes:
 

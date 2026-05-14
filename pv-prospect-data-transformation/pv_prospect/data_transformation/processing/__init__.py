@@ -16,10 +16,16 @@ from .core import (
     write_metadata,
 )
 from .transform_backfill import (
+    ConsumedMarker,
     TransformUnit,
     build_transform_phases,
     commit_transform_backfill,
+    deserialize_marker,
+    extract_workflow_name_for,
+    load_marker,
     plan_transform_backfill,
+    save_marker,
+    serialize_marker,
     workflow_name_for,
 )
 from .transformation import (
@@ -34,6 +40,7 @@ from .transformation import (
 __all__ = [
     'ALL_TRANSFORMATIONS',
     'CLEANING_TRANSFORMATIONS',
+    'ConsumedMarker',
     'PREPARED_WEATHER_PATH',
     'PREPARING_TRANSFORMATIONS',
     'PV_BATCH_PREFIX',
@@ -48,7 +55,12 @@ __all__ = [
     'assemble_prepared_weather',
     'build_transform_phases',
     'commit_transform_backfill',
+    'deserialize_marker',
+    'extract_workflow_name_for',
+    'load_marker',
     'plan_transform_backfill',
+    'save_marker',
+    'serialize_marker',
     'workflow_name_for',
     'read_csv',
     'read_metadata',

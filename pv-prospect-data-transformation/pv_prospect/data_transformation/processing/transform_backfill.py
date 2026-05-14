@@ -1,42 +1,71 @@
 """Transform-backfill planning for the data-transformation pipeline.
 
-This module owns the transform side's planning logic: the
-:class:`TransformUnit` value type, :func:`build_transform_phases` (shared
-with the daily transform), and — still cursor-based for now — the
-per-:class:`BackfillScope` plan/commit wrappers.
+The transform backfill plans from the *extraction* backfill's durable
+record rather than from a cursor of its own. The extraction backfill's
+consolidated ledger already enumerates exactly which ``(site/location,
+data_source, window)`` tuples have raw data; this module reads those
+``completed`` entries and turns them into transform tasks. There is no
+transform cursor — the :class:`BackfillCursor` vs
+``WeatherGridBackfillCursor`` shape divergence is purely an extraction
+concern and does not reach the transform side at all.
 
-Two scopes are tracked independently — one for the PV-site transform
-backfill, one for the weather-grid transform backfill — so each can
-advance at the cadence of its corresponding extraction backfill without
-being held back by the other. Window lengths come from
-:func:`default_window_days` and so always match the extraction side.
+What this module owns:
+
+  * the :class:`TransformUnit` value type and
+    :func:`build_transform_phases` (shared with the daily transform);
+  * :class:`ConsumedMarker` — a small high-water mark over extraction
+    consolidated-ledger filenames that bounds each run's work and
+    advances unconditionally, replacing the old transform cursor;
+  * :func:`plan_transform_backfill` / :func:`commit_transform_backfill`,
+    the per-:class:`BackfillScope` plan/commit pair.
+
+Resetting the marker re-derives every transform task from the durable
+extraction record — the supported way to re-transform after a
+feature-spec change.
 """
 
+import json
 from dataclasses import dataclass
-from datetime import date
 from typing import Literal
 
+from pv_prospect.data_sources import DataSource
 from pv_prospect.etl import (
-    BackfillCursor,
-    BackfillPlan,
     BackfillScope,
+    WorkflowOrchestrator,
     build_env_list,
-    commit_backfill,
-    default_window_days,
     inject_task_hash,
-    plan_backfill,
 )
-from pv_prospect.etl.storage import FileSystem
+from pv_prospect.etl.storage import (
+    FileSystem,
+    list_consolidated_ledgers,
+    read_completed_descriptors,
+)
 
 _WORKFLOW_NAME_BY_SCOPE: dict[BackfillScope, str] = {
     BackfillScope.PV_SITES: 'pv-prospect-transform-pv-sites-backfill',
     BackfillScope.WEATHER_GRID: 'pv-prospect-transform-weather-grid-backfill',
 }
 
+# The extraction backfill workflow each transform scope plans from. Its
+# consolidated ledger is the transform planner's sole input.
+_EXTRACT_WORKFLOW_NAME_BY_SCOPE: dict[BackfillScope, str] = {
+    BackfillScope.PV_SITES: 'pv-prospect-extract-pv-sites-backfill',
+    BackfillScope.WEATHER_GRID: 'pv-prospect-extract-weather-grid-backfill',
+}
+
 
 def workflow_name_for(scope: BackfillScope) -> str:
     """Return the workflow name for the transform backfill of *scope*."""
     return _WORKFLOW_NAME_BY_SCOPE[scope]
+
+
+def extract_workflow_name_for(scope: BackfillScope) -> str:
+    """Return the extraction backfill workflow name for *scope*.
+
+    This is the workflow whose consolidated ledger the transform backfill
+    of *scope* plans from.
+    """
+    return _EXTRACT_WORKFLOW_NAME_BY_SCOPE[scope]
 
 
 # ---------------------------------------------------------------------------
@@ -160,37 +189,168 @@ def build_transform_phases(
     return [clean, prepare, assemble]
 
 
+# ---------------------------------------------------------------------------
+# Consumed-through marker
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConsumedMarker:
+    """High-water mark over extraction consolidated-ledger filenames.
+
+    ``consumed_through`` is the name of the most recent extraction
+    consolidated ledger this transform backfill has already planned from.
+    Ledger names (``<run_date>-<HHMMSS>-<workflow>.jsonl``) sort lexically
+    and so chronologically, so a plain string comparison decides what is
+    new. The initial value — marker file absent — is the empty string,
+    which sorts before every real ledger name, so the first run consumes
+    from the oldest extraction ledger forward.
+    """
+
+    consumed_through: str = ''
+
+
+def serialize_marker(marker: ConsumedMarker) -> str:
+    return json.dumps({'consumed_through': marker.consumed_through})
+
+
+def deserialize_marker(text: str) -> ConsumedMarker:
+    data = json.loads(text)
+    return ConsumedMarker(consumed_through=data.get('consumed_through', ''))
+
+
+def _marker_filename(workflow_name: str) -> str:
+    """Live-marker path, relative to the cursors filesystem.
+
+    Reuses the path the old transform cursor occupied — same path, new
+    schema — so migration is a one-line overwrite.
+    """
+    return f'{workflow_name}.json'
+
+
+def _marker_sidecar_path(workflow_name: str, run_date: str) -> str:
+    """Next-marker sidecar path, relative to the manifests filesystem.
+
+    Written by :func:`plan_transform_backfill` alongside the orchestrator
+    manifest and read by :func:`commit_transform_backfill`.
+    """
+    return f'{run_date}/{workflow_name}.marker.json'
+
+
+def load_marker(cursors_fs: FileSystem, workflow_name: str) -> ConsumedMarker:
+    """Load the live marker for *workflow_name*, or an initial empty one."""
+    path = _marker_filename(workflow_name)
+    if cursors_fs.exists(path):
+        return deserialize_marker(cursors_fs.read_text(path))
+    return ConsumedMarker()
+
+
+def save_marker(
+    cursors_fs: FileSystem, workflow_name: str, marker: ConsumedMarker
+) -> None:
+    """Persist *marker* as the live marker for *workflow_name*."""
+    cursors_fs.write_text(_marker_filename(workflow_name), serialize_marker(marker))
+
+
+# ---------------------------------------------------------------------------
+# Plan / commit
+# ---------------------------------------------------------------------------
+
+
+def _descriptor_to_unit(descriptor: dict[str, str]) -> TransformUnit | None:
+    """Map one extraction ledger descriptor to a :class:`TransformUnit`.
+
+    The extraction backfill records, per completed task, a descriptor of
+    ``{data_source, start_date, end_date?, pv_system_id | location}``.
+    ``DataSource.PVOUTPUT`` is PV data; every OpenMeteo source is weather.
+    Returns ``None`` for a descriptor missing its dates or an identifier
+    so a malformed entry becomes a skipped hole rather than a crash.
+    """
+    start_date = descriptor.get('start_date')
+    if not start_date:
+        return None
+    end_date = descriptor.get('end_date')
+    kind: Literal['pv', 'weather'] = (
+        'pv'
+        if descriptor.get('data_source') == DataSource.PVOUTPUT.value
+        else 'weather'
+    )
+    pv_system_id = descriptor.get('pv_system_id')
+    if pv_system_id is not None:
+        return TransformUnit(kind, start_date, end_date, pv_system_id=int(pv_system_id))
+    location = descriptor.get('location')
+    if location is not None:
+        return TransformUnit(kind, start_date, end_date, location=location)
+    return None
+
+
 def plan_transform_backfill(
     scope: BackfillScope,
-    today: date,
     run_date: str,
-    cursors_fs: FileSystem,
+    ledger_fs: FileSystem,
     manifests_fs: FileSystem,
-    window_days: int | None = None,
-) -> BackfillPlan:
-    """Plan today's transform-backfill window for *scope* and persist the manifest.
+    cursors_fs: FileSystem,
+    max_extract_runs: int,
+) -> str:
+    """Plan *scope*'s transform backfill from extraction's committed ledger.
 
-    The live cursor is not advanced — that happens later via
-    :func:`commit_transform_backfill`, after the transform jobs succeed.
-    When ``window_days`` is ``None`` the scope's default window is used.
+    Lists the extraction backfill's consolidated ledgers, keeps those
+    above the live marker, takes the oldest *max_extract_runs* of them,
+    and turns every ``completed`` entry into a :class:`TransformUnit`
+    (``failed`` extraction entries are skipped — no raw data means no
+    transform task, correctly leaving a hole). The resulting clean →
+    prepare → assemble phases are written straight to the orchestrator
+    manifest at ``<run_date>/<workflow>.json``; a sidecar
+    ``<run_date>/<workflow>.marker.json`` records the ``next_marker``.
+
+    The planner does **not** self-filter against the transform's own
+    ledger — the marker already prevents re-consuming a completed run,
+    and not self-filtering keeps the plan a pure function of the
+    extraction record. Returns the chosen ``next_marker``.
     """
-    if window_days is None:
-        window_days = default_window_days(scope)
-    return plan_backfill(
-        cursors_fs,
-        manifests_fs,
-        workflow_name_for(scope),
-        run_date,
-        today,
-        window_days,
+    workflow_name = workflow_name_for(scope)
+    marker = load_marker(cursors_fs, workflow_name)
+
+    ledgers = list_consolidated_ledgers(ledger_fs, extract_workflow_name_for(scope))
+    unconsumed = [entry for entry in ledgers if entry.name > marker.consumed_through]
+    chosen = unconsumed[:max_extract_runs]
+
+    units: list[TransformUnit] = []
+    for entry in chosen:
+        for descriptor in read_completed_descriptors(ledger_fs, entry.path):
+            unit = _descriptor_to_unit(descriptor)
+            if unit is not None:
+                units.append(unit)
+
+    phases = build_transform_phases(units, workflow_name, run_date)
+    WorkflowOrchestrator(
+        workflow_name, run_date, manifests_fs=manifests_fs
+    ).write_manifest(phases)
+
+    next_marker = chosen[-1].name if chosen else marker.consumed_through
+    manifests_fs.write_text(
+        _marker_sidecar_path(workflow_name, run_date),
+        json.dumps({'next_marker': next_marker}),
     )
+    return next_marker
 
 
 def commit_transform_backfill(
     scope: BackfillScope,
     run_date: str,
-    cursors_fs: FileSystem,
     manifests_fs: FileSystem,
-) -> BackfillCursor:
-    """Promote *scope*'s manifest next-cursor to the live cursor."""
-    return commit_backfill(cursors_fs, manifests_fs, workflow_name_for(scope), run_date)
+    cursors_fs: FileSystem,
+) -> str:
+    """Promote the manifest sidecar's ``next_marker`` to the live marker.
+
+    Reads ``<run_date>/<workflow>.marker.json`` written by
+    :func:`plan_transform_backfill`. Unconditional — the workflow runs
+    this even after swallowed per-task failures, so the marker advances
+    at a predictable cadence and a transiently-failed transform task is a
+    recorded hole, not a perpetual retry. Returns the new marker value.
+    """
+    workflow_name = workflow_name_for(scope)
+    sidecar = manifests_fs.read_text(_marker_sidecar_path(workflow_name, run_date))
+    next_marker = json.loads(sidecar)['next_marker']
+    save_marker(cursors_fs, workflow_name, ConsumedMarker(consumed_through=next_marker))
+    return next_marker

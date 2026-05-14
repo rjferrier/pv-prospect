@@ -119,16 +119,18 @@ Workflows on a daily or weekly basis:
   Orchestrates the data cleaning and preparation steps to generate the prepared
   datasets for all data extracted earlier in the day.
 * **PV-Sites Transformation Backfill (`pv-prospect-transform-pv-sites-backfill`)**:
-  Runs at **06:00 UTC**. Trails the PV-sites extraction backfill, transforming the
-  same 28-day window once raw data is available. Internally calls
-  `plan_transform_backfill` to advance a dedicated cursor, then dispatches the
-  same `clean → prepare → assemble` task graph the daily transform uses across
-  every day in the window. `commit_transform_backfill` only advances the cursor
-  if every task succeeds.
+  Runs at **06:00 UTC**. Plans its work from the PV-sites extraction backfill's
+  committed task-outcome ledger rather than a cursor of its own:
+  `plan_transform_backfill` turns each `completed` extraction entry into a
+  `clean → prepare → assemble` task graph over that entry's window. A small
+  **consumed-through marker** bounds each run to the next `MAX_EXTRACT_RUNS`
+  (default 4) unconsumed extraction ledgers; `commit_transform_backfill`
+  advances it *unconditionally*, so a transiently-failed transform task is a
+  recorded hole rather than a perpetual retry.
 * **Weather-Grid Transformation Backfill
   (`pv-prospect-transform-weather-grid-backfill`)**: Runs at **06:30 UTC**. Same
-  pattern as above but for the grid-point weather backfill (14-day window,
-  weather-only task graph). Uses an independent cursor so it can advance
+  pattern as above but planning from the weather-grid extraction backfill's
+  ledger (weather-only task graph). Uses an independent marker so it can advance
   separately from the PV-sites transform backfill.
 * **Data Versioning (`data-versioner`)**: Runs weekly at **Sunday 23:00 UTC**.
   Snapshots prepared CSV data and trained model artefacts, producing a versioned
@@ -189,17 +191,20 @@ sleep so the rate limit is respected. The checkpoint is deleted on success.
 #### Resuming a Transformation Backfill after a timeout
 
 The transform backfills (`pv-prospect-transform-pv-sites-backfill` and
-`pv-prospect-transform-weather-grid-backfill`) use the shared
-`WorkflowOrchestrator` task-outcome ledger (keyed by `(workflow_name, run_date,
-task_hash)`) rather than a workflow-level checkpoint file. To resume,
-re-trigger the same workflow:
+`pv-prospect-transform-weather-grid-backfill`) record every task's outcome in
+the shared `WorkflowOrchestrator` task-outcome ledger. To resume after a failed
+run, re-trigger the same workflow:
 
 ```bash
 gcloud workflows run pv-prospect-transform-pv-sites-backfill \
   --location=europe-west2
 ```
 
-The plan-commit envelope re-derives the same window from the live cursor (which
-was not advanced because the previous run failed before `commit_transform_backfill`),
-re-plans the orchestrator manifest, and the ledger filter skips already-completed
-`clean` / `prepare` / `assemble` tasks.
+The consumed-through marker is only advanced by `commit_transform_backfill` at
+the end of a run, so a run that crashed before commit re-derives the same plan
+from the extraction ledger on re-trigger and simply re-does its idempotent
+`clean` / `prepare` / `assemble` work. To deliberately re-transform history
+(e.g. after a feature-spec change), reset the marker at
+`gs://<staging-bucket>/tracking/cursors/pv-prospect-transform-<scope>-backfill.json`
+to `{"consumed_through": ""}` and the next runs re-derive every task from the
+oldest extraction ledger forward.

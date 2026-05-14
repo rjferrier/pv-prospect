@@ -12,7 +12,11 @@ JOB_TYPE
 BACKFILL_SCOPE
     Required for ``plan_transform_backfill`` and
     ``commit_transform_backfill``. ``pv_sites`` or ``weather_grid`` —
-    selects which transform-backfill cursor to advance.
+    selects which transform backfill (and its consumed-through marker) to
+    plan or commit.
+MAX_EXTRACT_RUNS
+    (Optional, ``plan_transform_backfill`` only) how many unconsumed
+    extraction consolidated ledgers one run may consume. Defaults to 4.
 TRANSFORM_STEP
     ``clean_weather``, ``clean_pv``, ``prepare_weather``, ``prepare_pv``,
     ``assemble_weather``, or ``assemble_pv``
@@ -201,15 +205,16 @@ def main() -> None:
     elif job_type == 'plan_transform_backfill':
         _run_plan_transform_backfill(
             run_date,
-            _required(cursors_fs, 'cursors_storage'),
+            _required(ledger_fs, 'ledger_storage'),
             _required(manifests_fs, 'manifests_storage'),
+            _required(cursors_fs, 'cursors_storage'),
         )
         return
     elif job_type == 'commit_transform_backfill':
         _run_commit_transform_backfill(
             run_date,
-            _required(cursors_fs, 'cursors_storage'),
             _required(manifests_fs, 'manifests_storage'),
+            _required(cursors_fs, 'cursors_storage'),
         )
         return
     elif job_type == 'consolidate_logs':
@@ -413,33 +418,40 @@ def parse_backfill_scope(raw: str) -> BackfillScope:
         ) from e
 
 
+_DEFAULT_MAX_EXTRACT_RUNS = 4
+
+
 def _run_plan_transform_backfill(
     run_date: str,
-    cursors_fs: FileSystem,
+    ledger_fs: FileSystem,
     manifests_fs: FileSystem,
+    cursors_fs: FileSystem,
 ) -> None:
     scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
-    today = date.today()
-    plan = plan_transform_backfill(scope, today, run_date, cursors_fs, manifests_fs)
+    max_extract_runs = int(
+        os.environ.get('MAX_EXTRACT_RUNS') or _DEFAULT_MAX_EXTRACT_RUNS
+    )
+    next_marker = plan_transform_backfill(
+        scope, run_date, ledger_fs, manifests_fs, cursors_fs, max_extract_runs
+    )
     logger.info(
-        'plan_transform_backfill[%s]: wrote manifest (%s to %s)',
+        'plan_transform_backfill[%s]: wrote manifest, next_marker=%r',
         scope.value,
-        plan.start_date,
-        plan.end_date,
+        next_marker,
     )
 
 
 def _run_commit_transform_backfill(
     run_date: str,
-    cursors_fs: FileSystem,
     manifests_fs: FileSystem,
+    cursors_fs: FileSystem,
 ) -> None:
     scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
-    cursor = commit_transform_backfill(scope, run_date, cursors_fs, manifests_fs)
+    next_marker = commit_transform_backfill(scope, run_date, manifests_fs, cursors_fs)
     logger.info(
-        'commit_transform_backfill[%s]: advanced cursor to %s',
+        'commit_transform_backfill[%s]: advanced marker to %r',
         scope.value,
-        cursor.next_end_date,
+        next_marker,
     )
 
 
