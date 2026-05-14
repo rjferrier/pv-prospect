@@ -29,7 +29,6 @@ resource "google_workflows_workflow" "data_transformation" {
               - date: $${default(map.get(args, "date"), default(map.get(args, "start_date"), text.substring(time.format(sys.now() - 86400), 0, 10)))}
               - raw_pv_system_ids: $${default(map.get(args, "pv_system_ids"), [])}
               - raw_locations: $${default(map.get(args, "locations"), [])}
-              - split_by: $${default(map.get(args, "split_by"), "")}
 
         - parse_all_pvs:
             switch:
@@ -74,8 +73,6 @@ resource "google_workflows_workflow" "data_transformation" {
                                   value: $${json.encode_to_string(pv_system_ids)}
                                 - name: LOCATIONS
                                   value: $${json.encode_to_string(locations)}
-                                - name: SPLIT_BY
-                                  value: $${split_by}
                     result: plan_op
 
                 - wait_plan_op:
