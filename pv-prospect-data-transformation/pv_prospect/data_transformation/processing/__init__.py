@@ -16,6 +16,8 @@ from .core import (
     write_metadata,
 )
 from .transform_backfill import (
+    TransformUnit,
+    build_transform_phases,
     commit_transform_backfill,
     plan_transform_backfill,
     workflow_name_for,
@@ -39,10 +41,12 @@ __all__ = [
     'TRANSFORMATIONS_NEEDING_GRID_POINT',
     'TRANSFORMATIONS_NEEDING_PV_SITE',
     'Transformation',
+    'TransformUnit',
     'WEATHER_BATCH_PREFIX',
     'WEATHER_COLUMNS',
     'assemble_prepared_pv',
     'assemble_prepared_weather',
+    'build_transform_phases',
     'commit_transform_backfill',
     'plan_transform_backfill',
     'workflow_name_for',
