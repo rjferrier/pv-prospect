@@ -88,8 +88,8 @@ variable "extractor_weather_grid_backfill_scheduler_run1_cron" {
 
 variable "extractor_weather_grid_backfill_scheduler_run2_cron" {
   type        = string
-  default     = "30 4 * * *"
-  description = "Cron schedule for daily weather grid backfill Run 2 (default: 04:30 UTC, 70 min after Run 1)"
+  default     = "45 5 * * *"
+  description = "Cron schedule for daily weather grid backfill Run 2 (default: 05:45 UTC). Must start at least one hour after Run 1's *last* API call (Run 1 dispatches its last batch ~1h 25min after its trigger), so OpenMeteo's 5,000/hour limit can't be exceeded by a sliding-hour window that catches the tail of Run 1 and the head of Run 2."
 }
 
 variable "transformer_pv_sites_backfill_scheduler_cron" {
@@ -100,8 +100,8 @@ variable "transformer_pv_sites_backfill_scheduler_cron" {
 
 variable "transformer_weather_grid_backfill_scheduler_cron" {
   type        = string
-  default     = "30 6 * * *"
-  description = "Cron schedule for daily weather-grid transform backfill (default: 06:30 UTC, 30 min after PV-sites transform backfill)"
+  default     = "0 8 * * *"
+  description = "Cron schedule for daily weather-grid transform backfill (default: 08:00 UTC). Must start after Run 2 of the weather-grid extract finishes and its ledger is consolidated, otherwise plan_transform_backfill sees no new ledgers and emits empty phases. Run 2 finishes ~07:33 UTC under the default schedule; 08:00 gives a ~25 min margin."
 }
 
 variable "versioner_image_tag" {
