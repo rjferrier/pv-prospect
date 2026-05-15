@@ -197,6 +197,7 @@ def batch_to_task_env(
     data_source: str,
     dry_run: str,
     run_date: str,
+    run_label: str = '',
 ) -> list[dict[str, str]]:
     """Build the ``extract_and_load`` env list for *batch*.
 
@@ -205,18 +206,23 @@ def batch_to_task_env(
     sample-file index is resolved to its concrete list of ``lat,lon``
     strings at plan time and passed as the ``LOCATIONS`` env var (a
     JSON array). Per-site ``TASK_HASH`` values are computed inside the
-    container; nothing is injected here.
+    container; nothing is injected here. *run_label* (e.g. ``"run1"`` /
+    ``"run2"``) is forwarded to the container so per-write/per-task
+    scratch directories stay segregated between same-day executions.
     """
-    return build_env_list(
-        JOB_TYPE='extract_and_load',
-        DATA_SOURCE=data_source,
-        START_DATE=batch.start_date.isoformat(),
-        END_DATE=batch.end_date.isoformat(),
-        LOCATIONS=json.dumps(locations),
-        DRY_RUN=dry_run,
-        WORKFLOW_NAME=WORKFLOW_NAME,
-        RUN_DATE=run_date,
-    )
+    kwargs: dict[str, str] = {
+        'JOB_TYPE': 'extract_and_load',
+        'DATA_SOURCE': data_source,
+        'START_DATE': batch.start_date.isoformat(),
+        'END_DATE': batch.end_date.isoformat(),
+        'LOCATIONS': json.dumps(locations),
+        'DRY_RUN': dry_run,
+        'WORKFLOW_NAME': WORKFLOW_NAME,
+        'RUN_DATE': run_date,
+    }
+    if run_label:
+        kwargs['RUN_LABEL'] = run_label
+    return build_env_list(**kwargs)
 
 
 def build_phases(
@@ -225,6 +231,7 @@ def build_phases(
     data_source: str,
     dry_run: str,
     run_date: str,
+    run_label: str = '',
 ) -> list[list[list[dict[str, str]]]]:
     """Convert *manifest*'s batches into the orchestrator ``phases`` shape.
 
@@ -242,6 +249,7 @@ def build_phases(
             data_source,
             dry_run,
             run_date,
+            run_label,
         )
         for b in batches
     ]
@@ -293,6 +301,7 @@ def plan_weather_grid_backfill(
     manifests_fs: FileSystem,
     resources_fs: FileSystem,
     step3_batch_count: int = 8,
+    run_label: str = '',
 ) -> WeatherGridManifest:
     """Compute today's manifest and persist it to storage.
 
@@ -315,7 +324,9 @@ def plan_weather_grid_backfill(
     manifest, next_cursor = build_weather_grid_manifest(
         today, num_sample_files, cursor, step3_batch_count=step3_batch_count
     )
-    phases = build_phases(manifest, resources_fs, data_source, dry_run, run_date)
+    phases = build_phases(
+        manifest, resources_fs, data_source, dry_run, run_date, run_label
+    )
     manifests_fs.write_text(
         _manifest_path(run_date), serialize_manifest(phases, next_cursor)
     )

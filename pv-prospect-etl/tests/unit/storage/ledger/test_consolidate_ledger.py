@@ -127,6 +127,41 @@ def test_only_processes_matching_workflow() -> None:
     assert '2025-06-24/2025-06-24-110000-wf-a.jsonl' in log_fs._files
 
 
+def test_run_label_reads_only_its_scratch_subdir_and_names_the_consolidated_file() -> (
+    None
+):
+    """Two same-day runs of the same workflow consolidate independently."""
+    log_fs = FakeFileSystem(
+        {
+            '2025-06-24/wf/run1/aaa.jsonl': _entry(
+                '2025-06-24T10:30:15+00:00', 'aaa', 'completed'
+            ),
+            '2025-06-24/wf/run2/bbb.jsonl': _entry(
+                '2025-06-24T11:00:30+00:00', 'bbb', 'completed'
+            ),
+        }
+    )
+
+    consolidate_ledger(
+        log_fs, 'wf', date(2025, 6, 24), run_label='run1', now=_fixed_now
+    )
+
+    # run1's consolidated file is named with run_label *before* workflow_name
+    # so that ``list_consolidated_ledgers``'s ``*-<workflow>.jsonl`` pattern
+    # still picks it up.
+    assert '2025-06-24/2025-06-24-110000-run1-wf.jsonl' in log_fs._files
+    consolidated = log_fs._files['2025-06-24/2025-06-24-110000-run1-wf.jsonl']
+    hashes = {
+        json.loads(line)['task_hash'] for line in consolidated.strip().split('\n')
+    }
+    assert hashes == {'aaa'}
+
+    # run1's consolidate didn't touch run2's scratch entries.
+    assert '2025-06-24/wf/run2/bbb.jsonl' in log_fs._files
+    # run1's own scratch entries were cleaned up.
+    assert '2025-06-24/wf/run1/aaa.jsonl' not in log_fs._files
+
+
 def test_skips_malformed_lines() -> None:
     log_fs = FakeFileSystem(
         {

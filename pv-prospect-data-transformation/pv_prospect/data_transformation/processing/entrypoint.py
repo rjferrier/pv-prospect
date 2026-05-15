@@ -113,11 +113,14 @@ def _get_logging_filesystem(
     workflow_name: str,
     run_date: str,
     label: str,
+    run_label: str,
 ) -> FileSystem:
     fs: FileSystem = get_filesystem(storage_config)
     if workflow_name and log_storage:
         log_fs = get_filesystem(log_storage)
-        return LoggingFileSystem(fs, log_fs, workflow_name, run_date, label)
+        return LoggingFileSystem(
+            fs, log_fs, workflow_name, run_date, label, run_label=run_label
+        )
     logger.warning(
         'Write-logging disabled for %s (no WORKFLOW_NAME or log_storage)', label
     )
@@ -129,13 +132,14 @@ def _run_consolidate_logs(config: DataTransformationConfig, run_date: str) -> No
     if not workflow_name:
         logger.warning('consolidate_logs: WORKFLOW_NAME not configured')
         return
+    run_label = os.environ.get('RUN_LABEL', '')
     run_date_obj = date.fromisoformat(run_date)
     if config.log_storage:
         log_fs = get_filesystem(config.log_storage)
-        consolidate_logs(log_fs, workflow_name, run_date_obj)
+        consolidate_logs(log_fs, workflow_name, run_date_obj, run_label=run_label)
     if config.ledger_storage:
         ledger_fs = get_filesystem(config.ledger_storage)
-        consolidate_ledger(ledger_fs, workflow_name, run_date_obj)
+        consolidate_ledger(ledger_fs, workflow_name, run_date_obj, run_label=run_label)
 
 
 def _resolve_run_date() -> str:
@@ -223,6 +227,7 @@ def main() -> None:
 
     transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
     workflow_name = os.environ.get('WORKFLOW_NAME', '')
+    run_label = os.environ.get('RUN_LABEL', '')
 
     pv_system_id = _env_int('PV_SYSTEM_ID')
     location_str = os.environ.get('LOCATION')
@@ -244,6 +249,7 @@ def main() -> None:
         workflow_name,
         run_date,
         'cleaned',
+        run_label,
     )
     batches_fs = _get_logging_filesystem(
         config.staged_prepared_batches_data_storage,
@@ -251,6 +257,7 @@ def main() -> None:
         workflow_name,
         run_date,
         'prepared-batches',
+        run_label,
     )
     prepared_fs = _get_logging_filesystem(
         config.staged_prepared_data_storage,
@@ -258,6 +265,7 @@ def main() -> None:
         workflow_name,
         run_date,
         'prepared',
+        run_label,
     )
 
     _load_resources(resources_fs)
@@ -271,7 +279,9 @@ def main() -> None:
     descriptor = _build_transform_descriptor(
         transformation, start_date_str, pv_system_id, location_str
     )
-    orchestrator = WorkflowOrchestrator(workflow_name, run_date, ledger_fs=ledger_fs)
+    orchestrator = WorkflowOrchestrator(
+        workflow_name, run_date, ledger_fs=ledger_fs, run_label=run_label
+    )
 
     try:
         _run_transform_step(
@@ -397,8 +407,13 @@ def _run_plan_transform(
             TransformUnit('weather', start_date_str, end_date_str, location=loc)
         )
 
+    run_label = os.environ.get('RUN_LABEL', '')
     orchestrator = WorkflowOrchestrator(
-        workflow_name, run_date, manifests_fs=manifests_fs, ledger_fs=ledger_fs
+        workflow_name,
+        run_date,
+        manifests_fs=manifests_fs,
+        ledger_fs=ledger_fs,
+        run_label=run_label,
     )
 
     phases = build_transform_phases(units, workflow_name, run_date)

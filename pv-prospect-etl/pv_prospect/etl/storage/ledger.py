@@ -34,32 +34,46 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def ledger_prefix(run_date: str, workflow_name: str) -> str:
-    """Per-run directory holding per-task ledger files."""
+def ledger_prefix(run_date: str, workflow_name: str, run_label: str = '') -> str:
+    """Per-run directory holding per-task ledger files.
+
+    *run_label* namespaces the directory when multiple workflow executions
+    share a ``run_date`` (e.g. the weather-grid backfill's run1/run2
+    same-day pair) so their consolidates never race on the same folder.
+    """
+    if run_label:
+        return f'{run_date}/{workflow_name}/{run_label}'
     return f'{run_date}/{workflow_name}'
 
 
-def ledger_entry_path(run_date: str, workflow_name: str, task_hash: str) -> str:
+def ledger_entry_path(
+    run_date: str, workflow_name: str, task_hash: str, run_label: str = ''
+) -> str:
     """Path of a single task's ledger file within a run."""
-    return f'{ledger_prefix(run_date, workflow_name)}/{task_hash}.jsonl'
+    return f'{ledger_prefix(run_date, workflow_name, run_label)}/{task_hash}.jsonl'
 
 
 def consolidate_ledger(
     ledger_fs: FileSystem,
     workflow_name: str,
     run_date: date,
+    run_label: str = '',
     now: NowFn = _utc_now,
 ) -> None:
     """Merge per-task ledger files into one consolidated JSONL.
 
-    Reads every ``*.jsonl`` under ``<run_date>/<workflow_name>/``,
-    concatenates the JSON lines, sorts them by ``recorded_at``, writes a
-    single consolidated file at
-    ``<run_date>/<run_date>-<HHMMSS>-<workflow_name>.jsonl``, and removes
-    the per-task files.
+    Reads every ``*.jsonl`` under
+    ``<run_date>/<workflow_name>[/<run_label>]/``, concatenates the JSON
+    lines, sorts them by ``recorded_at``, writes a single consolidated
+    file at
+    ``<run_date>/<run_date>-<HHMMSS>-<workflow_name>[-<run_label>].jsonl``,
+    and removes the per-task files. *run_label* keeps concurrent same-day
+    executions disjoint at the scratch layer; the consolidated layer
+    encodes it in the filename so listings can still distinguish same-day
+    runs.
     """
     date_str = run_date.strftime('%Y-%m-%d')
-    prefix = ledger_prefix(date_str, workflow_name)
+    prefix = ledger_prefix(date_str, workflow_name, run_label)
     entries = ledger_fs.list_files(prefix, '*.jsonl')
     if not entries:
         logger.info(
@@ -82,7 +96,10 @@ def consolidate_ledger(
 
     records.sort(key=lambda r: r[0])
 
-    consolidated_name = f'{date_str}-{now().strftime("%H%M%S")}-{workflow_name}.jsonl'
+    consolidated_stem = f'{run_label}-{workflow_name}' if run_label else workflow_name
+    consolidated_name = (
+        f'{date_str}-{now().strftime("%H%M%S")}-{consolidated_stem}.jsonl'
+    )
     consolidated_path = f'{date_str}/{consolidated_name}'
     ledger_fs.write_text(
         consolidated_path, '\n'.join(line for _, line in records) + '\n'
@@ -93,8 +110,6 @@ def consolidate_ledger(
 
     for entry in entries:
         ledger_fs.delete(entry.path)
-
-    ledger_fs.rmdir(prefix)
 
 
 def list_consolidated_ledgers(

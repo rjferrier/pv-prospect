@@ -82,15 +82,50 @@ def test_only_processes_matching_workflow() -> None:
     assert '2025-06-24/2025-06-24-110000-wf-a.txt' in log_fs._files
 
 
-def test_removes_intermediate_directory() -> None:
+def test_run_label_reads_only_its_scratch_subdir_and_names_the_consolidated_file() -> (
+    None
+):
+    """Two same-day runs of the same workflow consolidate independently."""
+    log_fs = FakeFileSystem(
+        {
+            '2025-06-24/wf/run1/103015000000.txt': '2025-06-24T10:30:15+00:00 CREATED raw/a.csv\n',
+            '2025-06-24/wf/run2/110030000000.txt': '2025-06-24T11:00:30+00:00 CREATED raw/b.csv\n',
+        }
+    )
+
+    consolidate_logs(log_fs, 'wf', date(2025, 6, 24), run_label='run1', now=_fixed_now)
+
+    # run1's consolidated file is named with run_label *before* workflow_name
+    # so that ``list_consolidated_ledgers``'s ``*-<workflow>.<ext>`` pattern
+    # still picks it up.
+    assert '2025-06-24/2025-06-24-110000-run1-wf.txt' in log_fs._files
+    consolidated = log_fs._files['2025-06-24/2025-06-24-110000-run1-wf.txt']
+    assert 'raw/a.csv' in consolidated
+    assert 'raw/b.csv' not in consolidated
+
+    # run1's consolidate didn't touch run2's scratch entries.
+    assert '2025-06-24/wf/run2/110030000000.txt' in log_fs._files
+    # run1's own scratch entries were cleaned up.
+    assert '2025-06-24/wf/run1/103015000000.txt' not in log_fs._files
+
+
+def test_does_not_rmdir_the_per_write_directory() -> None:
+    """We intentionally don't call rmdir on the per-write directory.
+
+    GCS has no real directories — per-entry deletes already remove the
+    data — and calling delete_folder under concurrent writes from another
+    same-day workflow execution races with new files appearing in the
+    folder (the FailedPrecondition: "folder you tried to delete is not
+    empty" failure mode). Per-write deletes are all we need.
+    """
     log_fs = FakeFileSystem(
         {
             '2025-06-24/wf/103015000000.txt': '...',
         }
     )
-    # Simulate directory having been created
     log_fs.mkdir('2025-06-24/wf')
 
     consolidate_logs(log_fs, 'wf', date(2025, 6, 24), now=_fixed_now)
 
-    assert '2025-06-24/wf' not in log_fs.created_dirs
+    assert '2025-06-24/wf' in log_fs.created_dirs
+    assert '2025-06-24/wf/103015000000.txt' not in log_fs._files

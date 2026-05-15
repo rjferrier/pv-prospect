@@ -69,6 +69,29 @@ def test_excludes_other_workflows() -> None:
     assert [entry.name for entry in entries] == ['2026-05-14-070000-wf.jsonl']
 
 
+def test_includes_run_labeled_consolidated_files() -> None:
+    """Same-day run1/run2 consolidates are both surfaced.
+
+    ``consolidate_logs`` / ``consolidate_ledger`` put the optional
+    ``run_label`` *between* the HHMMSS stamp and the workflow name in the
+    filename (``<date>-<HHMMSS>-<run_label>-<workflow>.jsonl``), so the
+    ``*-<workflow>.jsonl`` matcher still picks them up.
+    """
+    ledger_fs = FakeFileSystem(
+        {
+            '2026-05-14/2026-05-14-053000-run1-wf.jsonl': '{}\n',
+            '2026-05-14/2026-05-14-073000-run2-wf.jsonl': '{}\n',
+        }
+    )
+
+    entries = list_consolidated_ledgers(ledger_fs, 'wf')
+
+    assert [entry.name for entry in entries] == [
+        '2026-05-14-053000-run1-wf.jsonl',
+        '2026-05-14-073000-run2-wf.jsonl',
+    ]
+
+
 def test_excludes_workflow_whose_name_extends_this_one() -> None:
     """A workflow name that is a prefix of another (``pv-prospect-extract``
     vs ``pv-prospect-extract-pv-sites-backfill``) must not pull in the

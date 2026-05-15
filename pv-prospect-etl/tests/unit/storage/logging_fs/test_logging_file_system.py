@@ -177,6 +177,52 @@ def test_list_files_delegates_to_inner() -> None:
     assert len(result) == 2
 
 
+def test_run_label_namespaces_log_entry_path() -> None:
+    inner = FakeFileSystem()
+    log_fs = FakeFileSystem()
+    fs = LoggingFileSystem(
+        inner,
+        log_fs,
+        'my-workflow',
+        '2025-06-24',
+        'raw',
+        run_label='run1',
+        now=_fixed_now,
+    )
+
+    fs.write_text('data/file.csv', 'content')
+
+    expected_path = '2025-06-24/my-workflow/run1/103015123456.txt'
+    assert expected_path in log_fs._files
+
+
+def test_two_run_labels_write_to_disjoint_scratch_dirs() -> None:
+    inner = FakeFileSystem()
+    log_fs = FakeFileSystem()
+    times = iter(
+        [
+            datetime(2025, 6, 24, 10, 30, 15, 0, tzinfo=timezone.utc),
+            datetime(2025, 6, 24, 10, 30, 16, 0, tzinfo=timezone.utc),
+        ]
+    )
+
+    def now() -> datetime:
+        return next(times)
+
+    fs1 = LoggingFileSystem(
+        inner, log_fs, 'wf', '2025-06-24', 'raw', run_label='run1', now=now
+    )
+    fs2 = LoggingFileSystem(
+        inner, log_fs, 'wf', '2025-06-24', 'raw', run_label='run2', now=now
+    )
+
+    fs1.write_text('a.csv', 'a')
+    fs2.write_text('b.csv', 'b')
+
+    assert '2025-06-24/wf/run1/103015000000.txt' in log_fs._files
+    assert '2025-06-24/wf/run2/103016000000.txt' in log_fs._files
+
+
 def test_multiple_writes_with_different_timestamps() -> None:
     inner = FakeFileSystem()
     log_fs = FakeFileSystem()

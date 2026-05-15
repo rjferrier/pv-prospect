@@ -118,3 +118,19 @@ def test_descriptor_is_copied_not_referenced() -> None:
 
     entries = _read_entries(ledger_fs, '2025-06-24/wf/abc.jsonl')
     assert entries[0]['descriptor'] == {'system_id': '89665'}
+
+
+def test_run_label_namespaces_the_per_task_path() -> None:
+    """Same-day run1/run2 executions write to disjoint per-task dirs."""
+    ledger_fs = FakeFileSystem()
+    orchestrator = WorkflowOrchestrator(
+        'wf', '2025-06-24', ledger_fs=ledger_fs, run_label='run1'
+    )
+
+    orchestrator.record_outcome(
+        'abc', {'system_id': '89665'}, 'completed', now=_fixed_now
+    )
+
+    entries = _read_entries(ledger_fs, '2025-06-24/wf/run1/abc.jsonl')
+    assert entries[0]['task_hash'] == 'abc'
+    assert '2025-06-24/wf/abc.jsonl' not in ledger_fs._files

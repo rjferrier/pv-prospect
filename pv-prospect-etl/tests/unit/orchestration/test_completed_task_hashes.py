@@ -119,3 +119,23 @@ def test_unions_per_task_and_consolidated_sources() -> None:
     orchestrator = WorkflowOrchestrator('wf', '2025-06-24', ledger_fs=ledger_fs)
 
     assert orchestrator.completed_task_hashes() == {'today', 'yesterday'}
+
+
+def test_run_label_scopes_per_task_lookup_to_its_own_scratch_dir() -> None:
+    """Within-run idempotency only needs the current run's own entries.
+
+    Cross-run resumption flows through the consolidated layer, which
+    ``list_consolidated_ledgers`` already covers — the per-task scan is
+    only there for Cloud Run task retries within a single execution.
+    """
+    ledger_fs = FakeFileSystem(
+        {
+            '2025-06-24/wf/run1/a.jsonl': _ledger_line('a', 'completed'),
+            '2025-06-24/wf/run2/b.jsonl': _ledger_line('b', 'completed'),
+        }
+    )
+    orchestrator = WorkflowOrchestrator(
+        'wf', '2025-06-24', ledger_fs=ledger_fs, run_label='run1'
+    )
+
+    assert orchestrator.completed_task_hashes() == {'a'}

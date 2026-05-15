@@ -207,6 +207,7 @@ module "extractor_weather_grid_backfill_scheduler_run1" {
   schedule              = var.extractor_weather_grid_backfill_scheduler_run1_cron
   argument_json = jsonencode({
     "max_batches_per_run" = 4
+    "run_label"           = "run1"
   })
 
   depends_on = [google_project_service.apis, module.extractor_weather_grid_backfill_workflow]
@@ -222,6 +223,7 @@ module "extractor_weather_grid_backfill_scheduler_run2" {
   schedule              = var.extractor_weather_grid_backfill_scheduler_run2_cron
   argument_json = jsonencode({
     "max_batches_per_run" = 100
+    "run_label"           = "run2"
   })
 
   depends_on = [google_project_service.apis, module.extractor_weather_grid_backfill_workflow]

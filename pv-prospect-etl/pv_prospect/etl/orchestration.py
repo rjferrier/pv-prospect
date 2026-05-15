@@ -92,11 +92,13 @@ class WorkflowOrchestrator:
         run_date: str,
         manifests_fs: FileSystem | None = None,
         ledger_fs: FileSystem | None = None,
+        run_label: str = '',
     ):
         self.workflow_name = workflow_name
         self.run_date = run_date
         self.manifests_fs = manifests_fs
         self.ledger_fs = ledger_fs
+        self.run_label = run_label
         self.manifest_path = f'{run_date}/{workflow_name}.json'
 
     def record_outcome(
@@ -129,7 +131,9 @@ class WorkflowOrchestrator:
         """
         if self.ledger_fs is None or not task_hash:
             return
-        path = ledger_entry_path(self.run_date, self.workflow_name, task_hash)
+        path = ledger_entry_path(
+            self.run_date, self.workflow_name, task_hash, self.run_label
+        )
         if status == 'completed' and self.ledger_fs.exists(path):
             if _has_completed_entry(self.ledger_fs.read_text(path)):
                 return
@@ -175,7 +179,7 @@ class WorkflowOrchestrator:
         if ledger_fs is None:
             return set()
         completed: set[str] = set()
-        per_task_dir = ledger_prefix(self.run_date, self.workflow_name)
+        per_task_dir = ledger_prefix(self.run_date, self.workflow_name, self.run_label)
         for entry in ledger_fs.list_files(per_task_dir, '*.jsonl'):
             if _has_completed_entry(ledger_fs.read_text(entry.path)):
                 completed.add(entry.name.removesuffix('.jsonl'))

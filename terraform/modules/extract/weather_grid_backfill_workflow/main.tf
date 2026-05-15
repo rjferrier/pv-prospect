@@ -55,6 +55,11 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
               - data_source: $${default(map.get(args, "data_source"), "${var.data_source}")}
               - sleep_seconds: $${default(map.get(args, "sleep_seconds_between_batches"), ${var.sleep_seconds_between_batches})}
               - max_batches_per_run: $${default(map.get(args, "max_batches_per_run"), 100)}
+              # Same-day-run discriminator (e.g. "run1" / "run2") supplied
+              # by Cloud Scheduler. Namespaces the per-write log and
+              # per-task ledger scratch directories so the two scheduled
+              # executions don't race on the same folder.
+              - run_label: $${default(map.get(args, "run_label"), "")}
               - run_count: 0
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
               - next_batch_index: 0
@@ -76,6 +81,8 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                                   value: $${workflow_name}
                                 - name: RUN_DATE
                                   value: $${run_date}
+                                - name: RUN_LABEL
+                                  value: $${run_label}
                                 - name: DATA_SOURCE
                                   value: $${data_source}
                                 - name: DRY_RUN
@@ -269,6 +276,8 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                                   value: $${workflow_name}
                                 - name: RUN_DATE
                                   value: $${run_date}
+                                - name: RUN_LABEL
+                                  value: $${run_label}
                     result: commit_op
 
                 - wait_for_commit_op:
@@ -328,6 +337,8 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
                           value: $${workflow_name}
                         - name: RUN_DATE
                           value: $${run_date}
+                        - name: RUN_LABEL
+                          value: $${run_label}
             result: consolidate_logs_op
 
         - wait_for_consolidate_op:

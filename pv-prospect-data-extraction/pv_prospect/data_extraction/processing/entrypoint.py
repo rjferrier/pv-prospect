@@ -259,7 +259,10 @@ def _run_extract_and_load(
         raise WorkflowTerminatingError(str(e)) from e
 
     workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
-    orchestrator = WorkflowOrchestrator(workflow_name, run_date, ledger_fs=ledger_fs)
+    run_label = os.environ.get('RUN_LABEL', '')
+    orchestrator = WorkflowOrchestrator(
+        workflow_name, run_date, ledger_fs=ledger_fs, run_label=run_label
+    )
 
     resources_extractor = Extractor(resources_fs)
     build_pv_site_repo(resources_extractor.read_file(core.PV_SITES_CSV_FILE))
@@ -353,9 +356,14 @@ def _run_plan_extract(
     weather_sources = json.loads(os.environ.get('WEATHER_MODEL_DATA_SOURCES', '[]'))
     dry_run = os.environ.get('DRY_RUN', 'false')
     split_by = os.environ.get('SPLIT_BY', '')
+    run_label = os.environ.get('RUN_LABEL', '')
 
     orchestrator = WorkflowOrchestrator(
-        workflow_name, run_date, manifests_fs=manifests_fs, ledger_fs=ledger_fs
+        workflow_name,
+        run_date,
+        manifests_fs=manifests_fs,
+        ledger_fs=ledger_fs,
+        run_label=run_label,
     )
     all_tasks = []
 
@@ -412,6 +420,7 @@ def _run_plan_weather_grid_backfill(
         raise ValueError('No sample files found on the resources filesystem.')
     data_source = os.environ.get('DATA_SOURCE', 'weather')
     dry_run = os.environ.get('DRY_RUN', 'false')
+    run_label = os.environ.get('RUN_LABEL', '')
     manifest = plan_weather_grid_backfill(
         today,
         run_date,
@@ -421,6 +430,7 @@ def _run_plan_weather_grid_backfill(
         cursors_fs,
         manifests_fs,
         resources_fs,
+        run_label=run_label,
     )
     logger.info(
         'plan_weather_grid_backfill: wrote manifest (step2=%s, step3_batches=%d)',
@@ -481,11 +491,14 @@ def _get_logging_filesystem(
     workflow_name: str,
     run_date: str,
     label: str,
+    run_label: str,
 ) -> FileSystem:
     fs: FileSystem = get_filesystem(storage_config)
     if workflow_name and log_storage:
         log_fs = get_filesystem(log_storage)
-        return LoggingFileSystem(fs, log_fs, workflow_name, run_date, label)
+        return LoggingFileSystem(
+            fs, log_fs, workflow_name, run_date, label, run_label=run_label
+        )
     return fs
 
 
@@ -494,13 +507,14 @@ def _run_consolidate_logs(config: DataExtractionConfig, run_date: str) -> None:
     if not workflow_name:
         logger.warning('consolidate_logs: WORKFLOW_NAME not configured')
         return
+    run_label = os.environ.get('RUN_LABEL', '')
     run_date_obj = date.fromisoformat(run_date)
     if config.log_storage:
         log_fs = get_filesystem(config.log_storage)
-        consolidate_logs(log_fs, workflow_name, run_date_obj)
+        consolidate_logs(log_fs, workflow_name, run_date_obj, run_label=run_label)
     if config.ledger_storage:
         ledger_fs = get_filesystem(config.ledger_storage)
-        consolidate_ledger(ledger_fs, workflow_name, run_date_obj)
+        consolidate_ledger(ledger_fs, workflow_name, run_date_obj, run_label=run_label)
 
 
 def _resolve_run_date() -> str:
@@ -516,6 +530,7 @@ def _resolve_run_date() -> str:
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
     workflow_name = os.environ.get('WORKFLOW_NAME', '')
+    run_label = os.environ.get('RUN_LABEL', '')
     run_date = _resolve_run_date()
     config = get_config(
         DataExtractionConfig,
@@ -539,6 +554,7 @@ def main() -> None:
         workflow_name,
         run_date,
         'raw',
+        run_label,
     )
     resources_fs = get_filesystem(config.resources_storage)
     manifests_fs = (
