@@ -284,14 +284,17 @@ independent so the pipelines advance at their own pace.
 | PV-sites transformation backfill | `tracking/cursors/pv-prospect-transform-pv-sites-backfill.json` | consumed-through marker |
 | Weather-grid transformation backfill | `tracking/cursors/pv-prospect-transform-weather-grid-backfill.json` | consumed-through marker |
 
-### Weather-Grid Extraction Backfill: Two-Run Split
+### Weather-Grid Extraction Backfill: Single Long-Running Workflow
 
-The weather-grid extraction backfill is split into two scheduled Cloud Scheduler
-runs (03:20 and 04:30 UTC) to stay within OpenMeteo's 5,000 requests/hour limit.
-Run 1 attempts 4 batches and exits early, leaving `next_batch_index` pointing
-at the first un-attempted batch. Run 2 reads the checkpoint, attempts the
-remaining batches, and commits the cursor. Failed sites within an attempted
-batch are recorded in the ledger but not retried — the cursor still advances.
+The weather-grid extraction backfill runs as a single Cloud Workflows execution
+per day (one Cloud Scheduler trigger at 03:20 UTC). It dispatches all 9 batches
+sequentially, pausing `sleep_seconds_between_batches` (default 720 s) between
+successive dispatches; the in-batch sleep is what keeps the dispatch rate under
+OpenMeteo's 5,000 requests/hour limit. Total wall time ≈ 3 h 24 min; the
+cursor commits once every batch has been attempted. Failed sites within a batch
+are recorded in the ledger but not retried — the cursor still advances. There
+is no per-batch checkpoint; a workflow-level failure leaves the cursor at
+yesterday's position and tomorrow's run re-plans the same window.
 
 ### Transformation Backfills
 

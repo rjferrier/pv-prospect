@@ -108,13 +108,14 @@ Workflows on a daily or weekly basis:
   after each successful site extraction, so a manually re-triggered run resumes
   from where the previous execution stopped rather than starting over.
 * **Weather-Grid Extraction Backfill (`pv-prospect-extract-weather-grid-backfill`)**:
-  Triggered twice daily at **03:20 UTC** and **04:30 UTC**. Orchestrates the daily
-  grid-point weather backfill via a paced manifest-driven process. To stay strictly
-  under Open-Meteo's 5,000 requests/hour limit, the backfill is split into two
-  scheduled runs 70 minutes apart. Run 1 processes the first 4 batches and exits
-  cleanly. Run 2 resumes from the **GCS checkpoint**
-  (`resources/weather_grid_backfill_checkpoint.json`) to process the remaining
-  batches, then commits the cursor.
+  Runs once daily at **03:20 UTC**. Orchestrates the daily grid-point weather
+  backfill via a paced manifest-driven process: 9 batches dispatched sequentially
+  in a single workflow execution, separated by `sleep_seconds_between_batches`
+  (default 720 s = 12 min). The in-batch sleep is what keeps the workflow under
+  Open-Meteo's 5,000 requests/hour limit — a sliding 60-minute window covers at
+  most ~3 batches × 1,330 calls ≈ 3,990 calls. Total wall time ≈ 3 h 24 min;
+  the cursor commits once every batch has been attempted, so a workflow-level
+  failure rolls back the day cleanly (tomorrow re-plans the same window).
 * **Data Transformation (`pv-prospect-transform`)**: Runs at **05:30 UTC**.
   Orchestrates the data cleaning and preparation steps to generate the prepared
   datasets for all data extracted earlier in the day.

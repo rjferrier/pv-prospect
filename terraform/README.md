@@ -197,7 +197,7 @@ timeouts (`900s` and `1800s` respectively).
 
 ### Scheduler spacing
 
-Because individual Cloud Run Job tasks can now run for up to 30 minutes, the three
+Because individual Cloud Run Job tasks can now run for up to 30 minutes, the
 extraction workflows are spaced **40 minutes apart** to prevent concurrent
 executions from combining to breach PVOutput's 300 requests/hour rate limit:
 
@@ -205,53 +205,53 @@ executions from combining to breach PVOutput's 300 requests/hour rate limit:
 |---|---|---|
 | Daily extraction | 02:00 | PVOutput |
 | PV site backfill | 02:40 | PVOutput |
-| Weather grid backfill (Run 1) | 03:20 | OpenMeteo only |
-| Weather grid backfill (Run 2) | 04:30 | OpenMeteo only |
+| Weather grid backfill | 03:20 | OpenMeteo only |
 | Data transformation | 05:30 | -- |
 
-The weather grid backfill uses OpenMeteo exclusively, so it does not conflict with
-PVOutput. It is split into two runs 70 minutes apart because its 9 daily batches
-would breach OpenMeteo's 5,000 requests/hour limit if run in a single window. Run 1
-processes the first 4 batches and exits; Run 2 resumes from the checkpoint and
-completes the remaining batches. The transformation step runs after all extraction
-and backfill runs have completed.
+The weather grid backfill uses OpenMeteo exclusively, so it does not conflict
+with PVOutput. It runs in a single execution per day — the 9 batches it
+dispatches are paced internally by `sleep_seconds_between_batches` (default
+720 s), so a sliding-60-minute window contains at most ~3 batches × 1,330
+calls ≈ 3,990 calls, comfortably under OpenMeteo's 5,000/hour limit. Total
+wall time ≈ 3 h 24 min, so the transform-side schedules need to sit past
+~06:45 + consolidate-latency.
 
 The default cron expressions are defined as Terraform variables
 (`extractor_scheduler_cron`, `extractor_pv_site_backfill_scheduler_cron`,
-`extractor_weather_grid_backfill_scheduler_run1_cron`,
-`extractor_weather_grid_backfill_scheduler_run2_cron`,
-`transformer_scheduler_cron`) and can be overridden in `terraform.tfvars` without
-touching module code.
+`extractor_weather_grid_backfill_scheduler_cron`,
+`transformer_scheduler_cron`) and can be overridden in `terraform.tfvars`
+without touching module code.
 
 ### Checkpoint-based resume
 
-Both backfill workflows maintain a GCS checkpoint so that a re-triggered execution
-resumes from where the previous one stopped rather than starting over.
+The PV-sites backfill workflow maintains a GCS position checkpoint so that a
+re-triggered execution resumes from where the previous one stopped rather than
+starting over:
 
 | Workflow | GCS checkpoint object | Checkpoint key |
 |---|---|---|
-| `pv-prospect-extract-pv-site-backfill` | `resources/pv_site_backfill_checkpoint.json` | PV system ID (string) |
-| `pv-prospect-extract-weather-grid-backfill` | `resources/weather_grid_backfill_checkpoint.json` | Batch index (string) |
+| `pv-prospect-extract-pv-site-backfill` | `tracking/checkpoints/pv_sites_backfill.json` | Next PV task index (integer) |
 
-The checkpoint is a JSON map `{"<key>": true}` written to GCS after each item (site
-or batch) completes successfully.
+The checkpoint is a JSON object written to GCS after each dispatched task.
 
-**Behaviour in all cases:**
+**Behaviour:**
 
-- **Normal run** -- no checkpoint exists; the workflow processes all items and
-  deletes the checkpoint on success.
-- **Interrupted run** -- checkpoint records whatever completed. Re-triggering
-  manually loads the checkpoint, logs `"Resuming from checkpoint -- N <items>
-  already done"`, and skips those items.
+- **Normal run** -- no checkpoint exists; the workflow processes every task in
+  the manifest and deletes the checkpoint on success.
+- **Interrupted run** -- checkpoint records the next task index. Re-triggering
+  manually loads the checkpoint, logs `"Resuming from checkpoint -- starting at
+  PV task N"`, and skips earlier tasks.
 - **Next scheduled run** -- because the checkpoint was deleted on the previous
   successful run (or never created), the scheduled run starts fresh.
 
-If a run is interrupted *before* any item completes (e.g. the `plan` step fails),
+If a run is interrupted *before* any task completes (e.g. the `plan` step fails),
 no checkpoint exists and a re-run starts from the beginning.
 
-The weather grid backfill also honours the configured inter-batch sleep
-(`sleep_seconds_between_batches`, default 720 s) when resuming, so the OpenMeteo
-5,000/hour rate limit is respected even across re-runs.
+The weather-grid backfill does **not** use a checkpoint: it runs as a single
+linear pass per day, and a re-trigger after failure re-runs every batch from
+index 0. The cost is roughly 3 hours of OpenMeteo budget on the rare manual
+retrigger; in exchange there is no checkpoint-shaped coordination surface for
+concurrent same-day executions to race on.
 
 ## Security Considerations
 

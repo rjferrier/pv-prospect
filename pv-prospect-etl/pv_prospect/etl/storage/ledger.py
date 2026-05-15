@@ -38,8 +38,9 @@ def ledger_prefix(run_date: str, workflow_name: str, run_label: str = '') -> str
     """Per-run directory holding per-task ledger files.
 
     *run_label* namespaces the directory when multiple workflow executions
-    share a ``run_date`` (e.g. the weather-grid backfill's run1/run2
-    same-day pair) so their consolidates never race on the same folder.
+    share a ``run_date`` so their consolidates never race on the same
+    folder. Default ``''`` (the prevailing case — one execution per day)
+    keeps the directory layout flat.
     """
     if run_label:
         return f'{run_date}/{workflow_name}/{run_label}'

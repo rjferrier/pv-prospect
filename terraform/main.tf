@@ -197,34 +197,15 @@ module "extractor_weather_grid_backfill_workflow" {
   depends_on = [google_project_service.apis, module.cloud_run_extract]
 }
 
-module "extractor_weather_grid_backfill_scheduler_run1" {
+module "extractor_weather_grid_backfill_scheduler" {
   source = "./modules/scheduler"
   region = var.region
 
-  scheduler_job_name    = "pv-prospect-daily-extract-weather-grid-backfill-run1"
+  scheduler_job_name    = "pv-prospect-daily-extract-weather-grid-backfill"
   workflow_id           = module.extractor_weather_grid_backfill_workflow.workflow_id
   service_account_email = google_service_account.pipeline.email
-  schedule              = var.extractor_weather_grid_backfill_scheduler_run1_cron
-  argument_json = jsonencode({
-    "max_batches_per_run" = 4
-    "run_label"           = "run1"
-  })
-
-  depends_on = [google_project_service.apis, module.extractor_weather_grid_backfill_workflow]
-}
-
-module "extractor_weather_grid_backfill_scheduler_run2" {
-  source = "./modules/scheduler"
-  region = var.region
-
-  scheduler_job_name    = "pv-prospect-daily-extract-weather-grid-backfill-run2"
-  workflow_id           = module.extractor_weather_grid_backfill_workflow.workflow_id
-  service_account_email = google_service_account.pipeline.email
-  schedule              = var.extractor_weather_grid_backfill_scheduler_run2_cron
-  argument_json = jsonencode({
-    "max_batches_per_run" = 100
-    "run_label"           = "run2"
-  })
+  schedule              = var.extractor_weather_grid_backfill_scheduler_cron
+  argument_json         = jsonencode({})
 
   depends_on = [google_project_service.apis, module.extractor_weather_grid_backfill_workflow]
 }
@@ -518,14 +499,9 @@ output "extractor_weather_grid_backfill_workflow_name" {
   description = "Weather grid backfill workflow name"
 }
 
-output "extractor_weather_grid_backfill_scheduler_run1_job_name" {
-  value       = module.extractor_weather_grid_backfill_scheduler_run1.scheduler_job_name
-  description = "Weather grid backfill Run 1 Cloud Scheduler job name"
-}
-
-output "extractor_weather_grid_backfill_scheduler_run2_job_name" {
-  value       = module.extractor_weather_grid_backfill_scheduler_run2.scheduler_job_name
-  description = "Weather grid backfill Run 2 Cloud Scheduler job name"
+output "extractor_weather_grid_backfill_scheduler_job_name" {
+  value       = module.extractor_weather_grid_backfill_scheduler.scheduler_job_name
+  description = "Weather grid backfill Cloud Scheduler job name"
 }
 
 output "transformer_pv_sites_backfill_workflow_name" {

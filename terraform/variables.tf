@@ -80,16 +80,10 @@ variable "extractor_pv_sites_backfill_scheduler_cron" {
   description = "Cron schedule for daily PV-site backfill (default: 02:40 UTC, 40 min after main extraction)"
 }
 
-variable "extractor_weather_grid_backfill_scheduler_run1_cron" {
+variable "extractor_weather_grid_backfill_scheduler_cron" {
   type        = string
   default     = "20 3 * * *"
-  description = "Cron schedule for daily weather grid backfill Run 1 (default: 03:20 UTC, 40 min after PV-site backfill)"
-}
-
-variable "extractor_weather_grid_backfill_scheduler_run2_cron" {
-  type        = string
-  default     = "45 5 * * *"
-  description = "Cron schedule for daily weather grid backfill Run 2 (default: 05:45 UTC). Must start at least one hour after Run 1's *last* API call (Run 1 dispatches its last batch ~1h 25min after its trigger), so OpenMeteo's 5,000/hour limit can't be exceeded by a sliding-hour window that catches the tail of Run 1 and the head of Run 2."
+  description = "Cron schedule for the daily weather grid backfill (default: 03:20 UTC). The workflow runs in a single execution that paces 9 batches with in-batch sleeps (~3 h 24 min wall time under the default sleep_seconds_between_batches=720), so it must start early enough that the transform-side schedule (transformer_weather_grid_backfill_scheduler_cron) reads its consolidated ledger."
 }
 
 variable "transformer_pv_sites_backfill_scheduler_cron" {
@@ -101,7 +95,7 @@ variable "transformer_pv_sites_backfill_scheduler_cron" {
 variable "transformer_weather_grid_backfill_scheduler_cron" {
   type        = string
   default     = "0 8 * * *"
-  description = "Cron schedule for daily weather-grid transform backfill (default: 08:00 UTC). Must start after Run 2 of the weather-grid extract finishes and its ledger is consolidated, otherwise plan_transform_backfill sees no new ledgers and emits empty phases. Run 2 finishes ~07:33 UTC under the default schedule; 08:00 gives a ~25 min margin."
+  description = "Cron schedule for daily weather-grid transform backfill (default: 08:00 UTC). Must start after the weather-grid extract finishes and its ledger is consolidated, otherwise plan_transform_backfill sees no new ledgers and emits empty phases. Under the default extract schedule (03:20 + ~3h 24min wall) the extract finishes ~06:44 and consolidate adds a few minutes; 08:00 gives ~1h margin."
 }
 
 variable "versioner_image_tag" {

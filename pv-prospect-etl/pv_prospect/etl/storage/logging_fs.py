@@ -22,10 +22,10 @@ class LoggingFileSystem:
     ``<run_date>/<workflow_name>[/<run_label>]/<HHMMSSffffff>.txt`` on the
     *log_fs*, where ``run_date`` is the workflow's UTC trigger date pinned
     at the workflow's ``init`` step. ``run_label`` is an optional
-    same-day-run discriminator (e.g. ``run1`` / ``run2`` for the two
-    weather-grid backfill scheduler firings) that namespaces the per-write
-    scratch directory so concurrent workflow executions don't race on it.
-    The entry contains the UTC timestamp and the fully-qualified path
+    same-day-run discriminator that namespaces the per-write scratch
+    directory so concurrent workflow executions don't race on it (default
+    ``''`` is the prevailing case of one execution per day). The entry
+    contains the UTC timestamp and the fully-qualified path
     (``<label>/<relative_path>``) of the written file.
     """
 
@@ -105,8 +105,9 @@ def log_scratch_subprefix(workflow_name: str, run_label: str) -> str:
 
     ``<workflow_name>[/<run_label>]``. The optional *run_label* namespaces
     the scratch directory when multiple workflow executions share a
-    ``run_date`` (e.g. the weather-grid backfill's run1/run2 same-day
-    pair), so their consolidates never race on the same folder.
+    ``run_date`` so their consolidates never race on the same folder.
+    Default ``''`` (the prevailing case — one execution per day) keeps
+    the directory layout flat.
     """
     if run_label:
         return f'{workflow_name}/{run_label}'

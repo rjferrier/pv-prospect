@@ -18,12 +18,6 @@ variable "staging_bucket_name" {
   description = "Name of the GCS staging bucket; the workflow reads the manifest from gs://<bucket>/tracking/manifests/<run_date>/pv-prospect-extract-weather-grid-backfill.json"
 }
 
-variable "checkpoint_object_path" {
-  type        = string
-  description = "GCS object path (inside the staging bucket) where the workflow persists its per-run resume checkpoint"
-  default     = "tracking/checkpoints/weather_grid_backfill.json"
-}
-
 variable "sleep_seconds_between_batches" {
   type        = number
   description = "Seconds to sleep between dispatching successive extraction batches. Defaults to 720 (12 minutes), which keeps us safely under OpenMeteo's 5,000/hour limit."
