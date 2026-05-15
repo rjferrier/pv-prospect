@@ -57,7 +57,7 @@ resource "google_workflows_workflow" "pv_sites_backfill" {
               # task as RUN_DATE. Distinct from manifest.start_date / end_date
               # (the data window the backfill is processing).
               - run_date: $${text.substring(time.format(sys.now()), 0, 10)}
-              - manifest_object: $${"tracking/manifests/" + run_date + "/" + workflow_name + ".backfill.json"}
+              - manifest_object: $${"tracking/manifests/" + run_date + "/" + workflow_name + ".json"}
               - checkpoint_object: "${var.checkpoint_object_path}"
               - pv_system_ids: $${default(map.get(args, "pv_system_ids"), ${jsonencode(var.default_pv_system_ids)})}
               - pv_data_source: $${default(map.get(args, "pv_data_source"), "${var.pv_data_source}")}

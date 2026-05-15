@@ -31,8 +31,7 @@ gs://pv-prospect-staging/
 │   ├── prepared-batches/  (parquet)
 │   └── prepared/          (parquet)
 ├── tracking/
-│   ├── manifests/<run_date>/<workflow>.json           (orchestrator phases manifest)
-│   ├── manifests/<run_date>/<workflow>.backfill.json  (extraction backfill date-window plan)
+│   ├── manifests/<run_date>/<workflow>.json           (orchestrator phases manifest — for the daily transform/extract; extract-backfill workflows embed phases inside this same path alongside their date window + next-cursor)
 │   ├── manifests/<run_date>/<workflow>.marker.json    (transformation backfill next-marker sidecar)
 │   ├── cursors/<workflow>.json                        (extraction backfill cursors / transformation backfill consumed-through markers — same path, different schema)
 │   ├── ledger/<run_date>/<workflow>/<task_hash>.jsonl (per-task ledger entries, mid-run)
@@ -95,13 +94,13 @@ dispatch.
 
 Manifest path: `tracking/manifests/<run_date>/<workflow_name>.json`
 
-An **extraction** backfill workflow additionally writes a date-window plan
-(start_date, end_date, next_cursor) at
-`tracking/manifests/<run_date>/<workflow_name>.backfill.json` — distinct from
-the orchestrator phases manifest above. A **transformation** backfill writes
-the orchestrator phases manifest directly (its planner derives the plan from
-the extraction ledger rather than a cursor) plus a small
-`<workflow_name>.marker.json` next-marker sidecar.
+An **extraction** backfill workflow's planner writes a single document at
+this path carrying the date-window plan (start_date, end_date, next_cursor)
+*and* the orchestrator phases list — the Cloud Workflow consumes both from
+one file. A **transformation** backfill writes the orchestrator phases
+manifest directly (its planner derives the plan from the extraction ledger
+rather than a cursor) plus a small `<workflow_name>.marker.json` next-marker
+sidecar.
 
 ### Task-Outcome Ledger
 
@@ -229,10 +228,10 @@ use yet another pattern — see [Transformation Backfills](#transformation-backf
 1. **Plan** — Reads a live **cursor** at
    `tracking/cursors/<workflow>.json` (tracking where the window left off),
    computes the next window, and writes a backfill plan manifest at
-   `tracking/manifests/<run_date>/<workflow>.backfill.json` containing the
-   date window, the **next cursor** value, and (on the extract side) a
-   `phases` list in the same shape the daily-extract orchestrator manifest
-   uses — one `extract_and_load` task env per dispatched batch. Task
+   `tracking/manifests/<run_date>/<workflow>.json` containing the date
+   window, the **next cursor** value, and a `phases` list in the same shape
+   the daily-extract orchestrator manifest uses — one `extract_and_load`
+   task env per dispatched batch. Task
    identity is computed inside each container via `compute_task_hash`, so
    no `TASK_HASH` is pre-injected. For the weather-grid backfill, each
    batch env carries a `LOCATIONS` JSON array of grid-point lat,lon

@@ -21,7 +21,7 @@ from pv_prospect.etl import compute_task_hash
 
 _RUN_DATE = '2026-04-09'
 _CURSOR_PATH = f'{WORKFLOW_NAME}.json'
-_MANIFEST_PATH = f'{_RUN_DATE}/{WORKFLOW_NAME}.backfill.json'
+_MANIFEST_PATH = f'{_RUN_DATE}/{WORKFLOW_NAME}.json'
 _DATA_SOURCE = 'openmeteo_quarterhourly'
 _DRY_RUN = 'false'
 _NUM_SAMPLE_FILES = 32

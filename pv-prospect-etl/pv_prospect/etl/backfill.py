@@ -172,11 +172,11 @@ def manifest_filename(workflow_name: str, run_date: str) -> str:
     """Return the per-run-date backfill-plan manifest filename (relative to
     the manifests filesystem) for *workflow_name* on *run_date*.
 
-    The ``.backfill.json`` suffix distinguishes the backfill date-window
-    plan (start/end/next-cursor) from the orchestrator's phased task
-    manifest (``<run_date>/<workflow>.json``), which a backfill workflow
-    also writes via :class:`WorkflowOrchestrator`."""
-    return f'{run_date}/{workflow_name}.backfill.json'
+    The file carries the date window, the next cursor, and the phased
+    task list — extract-backfill workflows embed phases here directly
+    rather than emitting a separate ``WorkflowOrchestrator.write_manifest``
+    file, so there is no name collision to disambiguate."""
+    return f'{run_date}/{workflow_name}.json'
 
 
 def load_cursor(

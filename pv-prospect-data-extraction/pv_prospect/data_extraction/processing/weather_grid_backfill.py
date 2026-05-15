@@ -156,7 +156,7 @@ def _cursor_path() -> str:
 
 
 def _manifest_path(run_date: str) -> str:
-    return f'{run_date}/{WORKFLOW_NAME}.backfill.json'
+    return f'{run_date}/{WORKFLOW_NAME}.json'
 
 
 def serialize_cursor(cursor: WeatherGridBackfillCursor) -> str:
@@ -299,10 +299,9 @@ def plan_weather_grid_backfill(
     Reads the current cursor, builds the batch plan, resolves each
     sample-file index to its concrete list of grid-point locations via
     *resources_fs*, and writes both the phased manifest and the *next*
-    cursor to ``<run_date>/<workflow_name>.backfill.json`` on the
-    manifests filesystem. The live cursor at
-    ``<workflow_name>.json`` on the cursors filesystem is **not**
-    advanced — that happens later via
+    cursor to ``<run_date>/<workflow_name>.json`` on the manifests
+    filesystem. The live cursor at ``<workflow_name>.json`` on the
+    cursors filesystem is **not** advanced — that happens later via
     :func:`commit_weather_grid_backfill`, after the batches have been
     dispatched successfully.
 

@@ -45,7 +45,7 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
               # task as RUN_DATE. Per-batch START_DATEs (each batch's data
               # window) are separately set from the manifest.
               - run_date: $${text.substring(time.format(sys.now()), 0, 10)}
-              - manifest_object: $${"tracking/manifests/" + run_date + "/" + workflow_name + ".backfill.json"}
+              - manifest_object: $${"tracking/manifests/" + run_date + "/" + workflow_name + ".json"}
               - data_source: $${default(map.get(args, "data_source"), "${var.data_source}")}
               - sleep_seconds: $${default(map.get(args, "sleep_seconds_between_batches"), ${var.sleep_seconds_between_batches})}
               - dry_run: $${default(map.get(args, "dry_run"), "false")}
