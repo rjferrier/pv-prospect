@@ -84,7 +84,7 @@ def test_consumes_only_ledgers_above_the_marker() -> None:
         _ledger_path('2026-05-12', '020000', _PV_EXTRACT_WF): _ledger_line(
             'completed',
             {
-                'data_source': 'pvoutput',
+                'data_source': 'pv',
                 'start_date': '2026-01-01',
                 'end_date': '2026-01-29',
                 'pv_system_id': '111',
@@ -93,7 +93,7 @@ def test_consumes_only_ledgers_above_the_marker() -> None:
         _ledger_path('2026-05-13', '020000', _PV_EXTRACT_WF): _ledger_line(
             'completed',
             {
-                'data_source': 'pvoutput',
+                'data_source': 'pv',
                 'start_date': '2026-02-01',
                 'end_date': '2026-03-01',
                 'pv_system_id': '222',
@@ -113,7 +113,7 @@ def test_consumes_oldest_first_capped_at_max_extract_runs() -> None:
         _ledger_path(f'2026-05-{day:02d}', '020000', _PV_EXTRACT_WF): _ledger_line(
             'completed',
             {
-                'data_source': 'pvoutput',
+                'data_source': 'pv',
                 'start_date': '2026-01-01',
                 'end_date': '2026-01-29',
                 'pv_system_id': str(day),
@@ -137,7 +137,7 @@ def test_skips_failed_extraction_entries() -> None:
             _ledger_line(
                 'failed',
                 {
-                    'data_source': 'pvoutput',
+                    'data_source': 'pv',
                     'start_date': '2026-01-01',
                     'end_date': '2026-01-29',
                     'pv_system_id': '111',
@@ -146,7 +146,7 @@ def test_skips_failed_extraction_entries() -> None:
             + _ledger_line(
                 'completed',
                 {
-                    'data_source': 'pvoutput',
+                    'data_source': 'pv',
                     'start_date': '2026-01-01',
                     'end_date': '2026-01-29',
                     'pv_system_id': '222',
@@ -167,7 +167,7 @@ def test_pv_sites_pv_and_weather_entries_both_become_units() -> None:
             _ledger_line(
                 'completed',
                 {
-                    'data_source': 'pvoutput',
+                    'data_source': 'pv',
                     'start_date': '2026-03-18',
                     'end_date': '2026-04-15',
                     'pv_system_id': '4708',
@@ -176,7 +176,7 @@ def test_pv_sites_pv_and_weather_entries_both_become_units() -> None:
             + _ledger_line(
                 'completed',
                 {
-                    'data_source': 'openmeteo/historical',
+                    'data_source': 'weather',
                     'start_date': '2026-03-18',
                     'end_date': '2026-04-15',
                     'pv_system_id': '4708',
@@ -208,7 +208,7 @@ def test_weather_grid_ledger_spanning_windows_yields_per_task_windows() -> None:
             _ledger_line(
                 'completed',
                 {
-                    'data_source': 'openmeteo/historical',
+                    'data_source': 'weather',
                     'start_date': '2026-01-01',
                     'end_date': '2026-01-15',
                     'location': '50.06,-5.16',
@@ -217,7 +217,7 @@ def test_weather_grid_ledger_spanning_windows_yields_per_task_windows() -> None:
             + _ledger_line(
                 'completed',
                 {
-                    'data_source': 'openmeteo/historical',
+                    'data_source': 'weather',
                     'start_date': '2026-02-01',
                     'end_date': '2026-02-15',
                     'location': '51.00,-4.00',
@@ -244,7 +244,7 @@ def test_no_unconsumed_ledgers_writes_empty_manifest_and_keeps_marker() -> None:
         ledger_name: _ledger_line(
             'completed',
             {
-                'data_source': 'pvoutput',
+                'data_source': 'pv',
                 'start_date': '2026-01-01',
                 'end_date': '2026-01-29',
                 'pv_system_id': '111',
@@ -264,7 +264,7 @@ def test_next_marker_sidecar_holds_highest_consumed_ledger_name() -> None:
         _ledger_path('2026-05-13', '020000', _PV_EXTRACT_WF): _ledger_line(
             'completed',
             {
-                'data_source': 'pvoutput',
+                'data_source': 'pv',
                 'start_date': '2026-01-01',
                 'end_date': '2026-01-29',
                 'pv_system_id': '111',
@@ -273,7 +273,7 @@ def test_next_marker_sidecar_holds_highest_consumed_ledger_name() -> None:
         _ledger_path('2026-05-14', '020000', _PV_EXTRACT_WF): _ledger_line(
             'completed',
             {
-                'data_source': 'pvoutput',
+                'data_source': 'pv',
                 'start_date': '2026-02-01',
                 'end_date': '2026-03-01',
                 'pv_system_id': '222',
@@ -295,7 +295,7 @@ def test_first_run_consumes_from_the_oldest_ledger() -> None:
         _ledger_path('2026-05-13', '020000', _PV_EXTRACT_WF): _ledger_line(
             'completed',
             {
-                'data_source': 'pvoutput',
+                'data_source': 'pv',
                 'start_date': '2026-01-01',
                 'end_date': '2026-01-29',
                 'pv_system_id': '111',

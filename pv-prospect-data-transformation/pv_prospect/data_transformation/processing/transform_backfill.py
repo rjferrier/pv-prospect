@@ -28,7 +28,7 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from pv_prospect.data_sources import DataSource
+from pv_prospect.data_sources import DataSourceType
 from pv_prospect.etl import (
     BackfillScope,
     WorkflowOrchestrator,
@@ -261,19 +261,20 @@ def _descriptor_to_unit(descriptor: dict[str, str]) -> TransformUnit | None:
     """Map one extraction ledger descriptor to a :class:`TransformUnit`.
 
     The extraction backfill records, per completed task, a descriptor of
-    ``{data_source, start_date, end_date?, pv_system_id | location}``.
-    ``DataSource.PVOUTPUT`` is PV data; every OpenMeteo source is weather.
-    Returns ``None`` for a descriptor missing its dates or an identifier
-    so a malformed entry becomes a skipped hole rather than a crash.
+    ``{data_source, start_date, end_date?, pv_system_id | location}``,
+    where ``data_source`` carries the :class:`DataSourceType` value
+    (``'pv'`` / ``'weather'``) propagated from the extract job's
+    ``DATA_SOURCE`` env var — *not* the concrete :class:`DataSource`
+    (e.g. ``'pvoutput'``). Returns ``None`` for a descriptor missing its
+    dates or an identifier so a malformed entry becomes a skipped hole
+    rather than a crash.
     """
     start_date = descriptor.get('start_date')
     if not start_date:
         return None
     end_date = descriptor.get('end_date')
     kind: Literal['pv', 'weather'] = (
-        'pv'
-        if descriptor.get('data_source') == DataSource.PVOUTPUT.value
-        else 'weather'
+        'pv' if descriptor.get('data_source') == DataSourceType.PV.value else 'weather'
     )
     pv_system_id = descriptor.get('pv_system_id')
     if pv_system_id is not None:
