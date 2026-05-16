@@ -324,9 +324,15 @@ def plan_transform_backfill(
                 units.append(unit)
 
     phases = build_transform_phases(units, workflow_name, run_date)
+    # Phased (v2) manifest: index + per-phase files. The weather-grid
+    # backfill phases routinely reach ~10 K tasks each, and the v1 single-
+    # document shape blew past the Cloud Workflows 2 MiB HTTP-response
+    # limit. The v2 split hoists each phase's constant env into the index
+    # and keeps per-phase rows compact (positional, varying-only) so each
+    # phase fetch stays well under the limit.
     WorkflowOrchestrator(
         workflow_name, run_date, manifests_fs=manifests_fs
-    ).write_manifest(phases)
+    ).write_phased_manifest(phases)
 
     next_marker = chosen[-1].name if chosen else marker.consumed_through
     manifests_fs.write_text(

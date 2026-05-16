@@ -15,7 +15,7 @@ variable "cloud_run_job_name" {
 
 variable "staging_bucket_name" {
   type        = string
-  description = "GCS staging bucket; the workflow reads the orchestrator manifest from gs://<bucket>/tracking/manifests/<run_date>/<workflow_name>.json (written directly by plan_transform_backfill)"
+  description = "GCS staging bucket; the workflow reads the v2 phased manifest written by plan_transform_backfill: an index at gs://<bucket>/tracking/manifests/<run_date>/<workflow_name>.json plus one gs://<bucket>/tracking/manifests/<run_date>/<workflow_name>.phase-<N>.json per phase"
 }
 
 variable "backfill_scope" {

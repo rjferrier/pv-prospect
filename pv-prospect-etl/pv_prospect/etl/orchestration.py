@@ -201,3 +201,99 @@ class WorkflowOrchestrator:
                 'WorkflowOrchestrator.write_manifest called without manifests_fs'
             )
         self.manifests_fs.write_text(self.manifest_path, json.dumps({'phases': phases}))
+
+    def phase_file_name(self, phase_index: int) -> str:
+        """Filename (relative to the manifests filesystem run-date directory) of
+        the per-phase file written by :meth:`write_phased_manifest`."""
+        return f'{self.workflow_name}.phase-{phase_index}.json'
+
+    def write_phased_manifest(self, phases: list[list[list[dict[str, str]]]]) -> None:
+        """Write a v2 phased manifest, split across an index + per-phase files.
+
+        Hoists each phase's constant env-vars into a phase-level
+        ``common_env`` and stores only the varying fields as positional
+        ``rows`` aligned to a sorted ``task_keys`` schema. The split keeps
+        any single per-phase fetch well under the Cloud Workflows 2 MiB
+        per-step HTTP response limit, even for the weather-grid transform
+        backfill (~10 K tasks per phase, which is ~10 MB in the v1
+        all-in-one shape).
+
+        File layout under ``manifests_fs``:
+
+        * ``<run_date>/<workflow>.json``           -- the index document.
+        * ``<run_date>/<workflow>.phase-<N>.json`` -- one per phase.
+
+        The Cloud Workflow fetches the index, then per-phase: fetches the
+        phase file, reconstructs each task's env as
+        ``common_env + zip(task_keys, row)``, and dispatches.
+        """
+        if self.manifests_fs is None:
+            raise RuntimeError(
+                'WorkflowOrchestrator.write_phased_manifest called without manifests_fs'
+            )
+        phase_entries, phase_docs = pack_phases(phases)
+        for index, entry in enumerate(phase_entries):
+            entry['file'] = self.phase_file_name(index)
+        index_doc: dict[str, object] = {
+            'version': PHASED_MANIFEST_VERSION,
+            'phases': phase_entries,
+        }
+        self.manifests_fs.write_text(self.manifest_path, json.dumps(index_doc))
+        for index, doc in enumerate(phase_docs):
+            path = f'{self.run_date}/{self.phase_file_name(index)}'
+            self.manifests_fs.write_text(path, json.dumps(doc))
+
+
+PHASED_MANIFEST_VERSION = 2
+
+
+def pack_phases(
+    phases: list[list[list[dict[str, str]]]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Pack *phases* into the v2 manifest's index + per-phase shapes.
+
+    For each phase, hoists env entries that are identical across every
+    task into a phase-level ``common_env`` and re-encodes the remaining
+    varying fields as positional ``rows`` aligned to a sorted ``task_keys``
+    schema. This compaction is what keeps any single per-phase fetch
+    under the Cloud Workflows 2 MiB HTTP-response limit.
+
+    Tolerates heterogeneous task keys within a phase by using the union
+    of keys for ``task_keys`` and padding missing values with ``None``
+    (serialised as JSON ``null``). The Workflows expander skips ``null``
+    cells so the corresponding env-var is omitted from the Cloud Run
+    container — preserving the legacy "absent key" semantics rather than
+    surfacing an empty string. A key is hoisted into ``common_env`` only
+    when every task carries it with the same value.
+
+    Returns ``(phase_entries, phase_docs)`` as two parallel lists indexed
+    by phase. The writer attaches the per-phase filename to each entry
+    and wraps the entries under a ``version``/``phases`` index document.
+    """
+    phase_entries: list[dict[str, object]] = []
+    phase_docs: list[dict[str, object]] = []
+    for phase in phases:
+        common_env, task_keys, rows = _pack_phase(phase)
+        phase_entries.append({'common_env': common_env, 'task_keys': task_keys})
+        phase_docs.append({'rows': rows})
+    return phase_entries, phase_docs
+
+
+def _pack_phase(
+    phase: list[list[dict[str, str]]],
+) -> tuple[list[dict[str, str]], list[str], list[list[str | None]]]:
+    if not phase:
+        return [], [], []
+    task_dicts = [{e['name']: e['value'] for e in task} for task in phase]
+    all_keys: set[str] = set().union(*(set(td) for td in task_dicts))
+    common: dict[str, str] = {}
+    for key in all_keys:
+        first = task_dicts[0].get(key)
+        if first is None:
+            continue
+        if all(td.get(key) == first for td in task_dicts[1:]):
+            common[key] = first
+    varying = sorted(all_keys - set(common))
+    common_env = [{'name': k, 'value': common[k]} for k in sorted(common)]
+    rows: list[list[str | None]] = [[td.get(k) for k in varying] for td in task_dicts]
+    return common_env, varying, rows

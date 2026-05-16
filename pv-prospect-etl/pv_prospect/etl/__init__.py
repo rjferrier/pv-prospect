@@ -28,10 +28,12 @@ from .entrypoint import (
 from .extractor import Extractor
 from .loader import Loader
 from .orchestration import (
+    PHASED_MANIFEST_VERSION,
     WorkflowOrchestrator,
     build_env_list,
     compute_task_hash,
     inject_task_hash,
+    pack_phases,
 )
 from .resources import get_config_dir
 
@@ -45,6 +47,7 @@ __all__ = [
     'EXIT_WORKFLOW_TERMINATING',
     'Extractor',
     'Loader',
+    'PHASED_MANIFEST_VERSION',
     'TIMESERIES_FOLDER',
     'WorkflowOrchestrator',
     'WorkflowTerminatingError',
@@ -62,6 +65,7 @@ __all__ = [
     'inject_task_hash',
     'load_cursor',
     'manifest_filename',
+    'pack_phases',
     'parse_date',
     'plan_backfill',
     'run_entrypoint',

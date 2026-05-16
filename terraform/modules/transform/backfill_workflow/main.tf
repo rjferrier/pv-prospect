@@ -10,12 +10,19 @@
 #
 #   1. plan_transform_backfill: reads the scope's consumed-through marker,
 #      takes the next MAX_EXTRACT_RUNS unconsumed extraction consolidated
-#      ledgers, and writes the orchestrator phased manifest directly
-#      (plus a <workflow>.marker.json next-marker sidecar).
-#   2. Read that orchestrator manifest.
-#   3. Iterate phases, dispatching clean -> prepare -> assemble tasks in
-#      parallel within each phase (same shape as the daily transform).
-#   4. commit_transform_backfill: promotes the sidecar's next_marker to
+#      ledgers, and writes the v2 phased orchestrator manifest — an
+#      index document at <workflow>.json plus one
+#      <workflow>.phase-<N>.json per phase (alongside a
+#      <workflow>.marker.json next-marker sidecar).
+#   2. Read the index, then per-phase: fetch the phase file and dispatch
+#      clean -> prepare -> assemble tasks in parallel within each phase.
+#      Each task's env is reconstructed at dispatch time as the phase's
+#      hoisted common_env plus a varying-fields suffix zipped from
+#      task_keys + the row. This keeps any single per-step HTTP fetch
+#      under the Workflows 2 MiB response limit — the v1 single-doc
+#      shape blew past it for the weather-grid backfill (~10 K tasks
+#      per phase, ~10 MB total).
+#   3. commit_transform_backfill: promotes the sidecar's next_marker to
 #      the live marker.
 #
 # Failures branch on the container exit code surfaced by await_job:
@@ -92,34 +99,58 @@ resource "google_workflows_workflow" "transform_backfill" {
                     args:
                       execution_name: $${plan_backfill_op_done.response.name}
 
-                # ---------- 2. fetch + execute the orchestrator manifest ----------
-                - fetch_orchestrator_manifest:
+                # ---------- 2. fetch + execute the v2 phased manifest ----------
+                # The index document carries one descriptor per phase:
+                # {file, common_env, task_keys}. We fetch each phase
+                # file (just {rows}) inside the loop so no single
+                # HTTP response exceeds the Workflows 2 MiB limit.
+                - fetch_manifest_index:
                     call: googleapis.storage.v1.objects.get
                     args:
                       bucket: $${bucket}
                       object: $${text.url_encode("tracking/manifests/" + run_date + "/" + workflow_name + ".json")}
                       alt: media
-                    result: orchestrator_manifest_raw
-                - decode_orchestrator_manifest:
+                    result: manifest_index_raw
+                - decode_manifest_index:
                     assign:
-                      - orchestrator_manifest: $${json.decode(orchestrator_manifest_raw)}
-                      - phases: $${orchestrator_manifest.phases}
+                      - manifest_index: $${json.decode(manifest_index_raw)}
+                      - phase_descriptors: $${manifest_index.phases}
 
                 - execute_phases:
                     for:
-                      value: phase_tasks
-                      in: $${phases}
+                      value: phase_descriptor
+                      in: $${phase_descriptors}
                       steps:
+                        - fetch_phase_file:
+                            call: googleapis.storage.v1.objects.get
+                            args:
+                              bucket: $${bucket}
+                              object: $${text.url_encode("tracking/manifests/" + run_date + "/" + phase_descriptor.file)}
+                              alt: media
+                            result: phase_doc_raw
+                        - decode_phase_file:
+                            assign:
+                              - phase_doc: $${json.decode(phase_doc_raw)}
+                              - rows: $${phase_doc.rows}
+                              - phase_common_env: $${phase_descriptor.common_env}
+                              - phase_task_keys: $${phase_descriptor.task_keys}
                         - check_phase_empty:
                             switch:
-                              - condition: $${len(phase_tasks) == 0}
+                              - condition: $${len(rows) == 0}
                                 next: continue_phase
                         - dispatch_tasks:
                             parallel:
                               for:
-                                value: task_env
-                                in: $${phase_tasks}
+                                value: row
+                                in: $${rows}
                                 steps:
+                                  - build_task_env:
+                                      call: expand_task_env
+                                      args:
+                                        common_env: $${phase_common_env}
+                                        task_keys: $${phase_task_keys}
+                                        row: $${row}
+                                      result: task_env
                                   - run_task:
                                       try:
                                         steps:
@@ -237,6 +268,38 @@ resource "google_workflows_workflow" "transform_backfill" {
 
         - done:
             return: "completed"
+
+    # Reconstructs a Cloud Run env list from the v2 phased manifest's
+    # (common_env, task_keys, row) tuple: starts with the phase-level
+    # constants and appends one {name, value} pair per non-null cell
+    # in the positional row, aligned to task_keys. A null cell signals
+    # "this task does not carry this env-var" — emitting an empty
+    # string would change the absent-key semantics the container
+    # currently relies on, so we skip the entry entirely.
+    expand_task_env:
+      params: [common_env, task_keys, row]
+      steps:
+        - init:
+            assign:
+              - task_extras: []
+              - idx: 0
+        - extras_loop:
+            for:
+              value: row_value
+              in: $${row}
+              steps:
+                - maybe_append:
+                    switch:
+                      - condition: $${row_value != null}
+                        steps:
+                          - append_extra:
+                              assign:
+                                - task_extras: '$${list.concat(task_extras, [{"name": task_keys[idx], "value": row_value}])}'
+                - bump_idx:
+                    assign:
+                      - idx: $${idx + 1}
+        - return_env:
+            return: $${list.concat(common_env, task_extras)}
 
     wait_for_operation:
       params: [operation_name]

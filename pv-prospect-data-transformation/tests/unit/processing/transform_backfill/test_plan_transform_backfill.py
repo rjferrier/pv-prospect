@@ -62,10 +62,32 @@ def _plan(
 def _phases(
     manifests_fs: FakeFileSystem, scope: BackfillScope
 ) -> list[list[list[dict[str, str]]]]:
-    manifest = json.loads(
-        manifests_fs.read_text(f'{_RUN_DATE}/{workflow_name_for(scope)}.json')
-    )
-    return manifest['phases']
+    """Read the v2 phased manifest back as the original phases-of-env-lists.
+
+    Reconstructs each task's env from the phase descriptor's ``common_env``
+    plus the per-row ``zip(task_keys, row)``, skipping ``None`` cells
+    (which represent keys absent from that task).
+    """
+    workflow_name = workflow_name_for(scope)
+    index = json.loads(manifests_fs.read_text(f'{_RUN_DATE}/{workflow_name}.json'))
+    phases: list[list[list[dict[str, str]]]] = []
+    for descriptor in index['phases']:
+        phase_doc = json.loads(
+            manifests_fs.read_text(f'{_RUN_DATE}/{descriptor["file"]}')
+        )
+        common_env = descriptor['common_env']
+        task_keys = descriptor['task_keys']
+        phase = [
+            common_env
+            + [
+                {'name': k, 'value': v}
+                for k, v in zip(task_keys, row, strict=False)
+                if v is not None
+            ]
+            for row in phase_doc['rows']
+        ]
+        phases.append(phase)
+    return phases
 
 
 def _env(task: list[dict[str, str]]) -> dict[str, str]:
