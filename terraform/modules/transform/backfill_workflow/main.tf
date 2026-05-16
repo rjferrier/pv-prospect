@@ -43,7 +43,7 @@ resource "google_workflows_workflow" "transform_backfill" {
   region              = var.region
   service_account     = var.service_account_email
   deletion_protection = false
-  call_log_level      = "LOG_ALL_CALLS"
+  call_log_level      = "LOG_ERRORS_ONLY"
   description         = "Orchestrates the ${var.backfill_scope} transform backfill, planning from the extraction backfill's ledger"
 
   source_contents = <<-YAML

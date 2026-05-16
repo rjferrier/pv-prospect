@@ -27,7 +27,7 @@ resource "google_workflows_workflow" "weather_grid_backfill" {
   region              = var.region
   service_account     = var.service_account_email
   deletion_protection = false
-  call_log_level      = "LOG_ALL_CALLS"
+  call_log_level      = "LOG_ERRORS_ONLY"
   description         = "Orchestrates the daily grid-point weather backfill via a manifest + paced Cloud Run Job dispatch"
 
   source_contents = <<-YAML
