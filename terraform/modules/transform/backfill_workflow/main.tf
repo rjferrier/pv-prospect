@@ -276,6 +276,11 @@ resource "google_workflows_workflow" "transform_backfill" {
     # "this task does not carry this env-var" — emitting an empty
     # string would change the absent-key semantics the container
     # currently relies on, so we skip the entry entirely.
+    #
+    # The {name, value} entry is built via an `assign` step (YAML map
+    # syntax) rather than an inline `{...}` expression, since the
+    # Workflows expression parser only accepts list/primitive literals,
+    # not map literals, inside an expression body.
     expand_task_env:
       params: [common_env, task_keys, row]
       steps:
@@ -292,9 +297,14 @@ resource "google_workflows_workflow" "transform_backfill" {
                     switch:
                       - condition: $${row_value != null}
                         steps:
+                          - build_entry:
+                              assign:
+                                - new_entry:
+                                    name: $${task_keys[idx]}
+                                    value: $${row_value}
                           - append_extra:
                               assign:
-                                - task_extras: '$${list.concat(task_extras, [{"name": task_keys[idx], "value": row_value}])}'
+                                - task_extras: $${list.concat(task_extras, [new_entry])}
                 - bump_idx:
                     assign:
                       - idx: $${idx + 1}
