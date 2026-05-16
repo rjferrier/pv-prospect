@@ -64,19 +64,21 @@ def _phases(
 ) -> list[list[list[dict[str, str]]]]:
     """Read the v2 phased manifest back as the original phases-of-env-lists.
 
-    Reconstructs each task's env from the phase descriptor's ``common_env``
-    plus the per-row ``zip(task_keys, row)``, skipping ``None`` cells
-    (which represent keys absent from that task).
+    Concatenates each phase's chunked part files in order, then
+    reconstructs each task's env from the phase descriptor's
+    ``common_env`` plus the per-row ``zip(task_keys, row)``, skipping
+    ``None`` cells (which represent keys absent from that task).
     """
     workflow_name = workflow_name_for(scope)
     index = json.loads(manifests_fs.read_text(f'{_RUN_DATE}/{workflow_name}.json'))
     phases: list[list[list[dict[str, str]]]] = []
     for descriptor in index['phases']:
-        phase_doc = json.loads(
-            manifests_fs.read_text(f'{_RUN_DATE}/{descriptor["file"]}')
-        )
         common_env = descriptor['common_env']
         task_keys = descriptor['task_keys']
+        rows: list[list[str | None]] = []
+        for part_file in descriptor['files']:
+            part = json.loads(manifests_fs.read_text(f'{_RUN_DATE}/{part_file}'))
+            rows.extend(part['rows'])
         phase = [
             common_env
             + [
@@ -84,7 +86,7 @@ def _phases(
                 for k, v in zip(task_keys, row, strict=False)
                 if v is not None
             ]
-            for row in phase_doc['rows']
+            for row in rows
         ]
         phases.append(phase)
     return phases

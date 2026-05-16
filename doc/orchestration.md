@@ -107,17 +107,21 @@ extraction ledger rather than a cursor — plus a small
 Used by `plan_transform_backfill` via
 `WorkflowOrchestrator.write_phased_manifest`. The v1 single-document shape
 inlines every task's full env-list, which for the weather-grid transform
-backfill reaches ~10 K tasks per phase ≈ 10 MB — far past the Cloud
-Workflows 2 MiB per-step HTTP-response limit, so the workflow can't even
-fetch its own plan. The v2 layout splits the manifest into an index plus
-one file per phase, and hoists each phase's constant env-vars so the per-
-phase files carry only the varying fields:
+backfill reaches ~10–20 K tasks per phase — far past the Cloud Workflows
+2 MiB per-step HTTP-response limit, so the workflow can't even fetch its
+own plan. The v2 layout splits the manifest into an index plus chunked
+per-phase part files, and hoists each phase's constant env-vars so the
+part files carry only the varying fields. Two independent compactions
+do the work: hoisting shrinks per-row bytes; chunking bounds per-file
+row count regardless of how big the queue gets.
 
 ```
-tracking/manifests/<run_date>/<workflow>.json          (index)
-tracking/manifests/<run_date>/<workflow>.phase-0.json  (clean tasks)
-tracking/manifests/<run_date>/<workflow>.phase-1.json  (prepare tasks)
-tracking/manifests/<run_date>/<workflow>.phase-2.json  (assemble tasks)
+tracking/manifests/<run_date>/<workflow>.json                  (index)
+tracking/manifests/<run_date>/<workflow>.phase-0.part-0.json   (clean,   part 0)
+tracking/manifests/<run_date>/<workflow>.phase-0.part-1.json   (clean,   part 1)
+tracking/manifests/<run_date>/<workflow>.phase-1.part-0.json   (prepare, part 0)
+...
+tracking/manifests/<run_date>/<workflow>.phase-2.part-0.json   (assemble)
 ```
 
 Index document:
@@ -127,7 +131,7 @@ Index document:
   "version": 2,
   "phases": [
     {
-      "file": "<workflow>.phase-0.json",
+      "files": ["<workflow>.phase-0.part-0.json", "<workflow>.phase-0.part-1.json"],
       "common_env": [{"name": "TRANSFORM_STEP", "value": "clean_weather"}, ...],
       "task_keys": ["DATE", "END_DATE", "LOCATION", "START_DATE", "TASK_HASH"]
     },
@@ -136,7 +140,7 @@ Index document:
 }
 ```
 
-Per-phase document:
+Per phase-part document:
 
 ```json
 {
@@ -150,13 +154,15 @@ Per-phase document:
 Each row is positional in `task_keys` order; `null` denotes "this task
 doesn't carry that env-var" (preserves the legacy absent-key semantics
 when a phase mixes tasks with and without optional fields like
-`PV_SYSTEM_ID`). At dispatch the Cloud Workflow expands each task to
-`common_env + zip(task_keys, row)` (skipping `null` cells) and sends the
-resulting env-list as `containerOverrides.env`.
+`PV_SYSTEM_ID`). At dispatch the Cloud Workflow walks `phases[i].files`
+in order, fetches each part file, and expands every task as
+`common_env + zip(task_keys, row)` (skipping `null` cells) before
+sending the resulting env-list as `containerOverrides.env`.
 
-This compaction takes the weather-grid transform backfill's per-phase
-fetch from ~5 MB (over the limit) down to ~1.3 MB — under the limit with
-comfortable headroom — without changing what the Cloud Run task sees.
+Chunk size is `TASKS_PER_PHASE_FILE` rows (5000) in
+`pv_prospect.etl.orchestration`. At the current ~130 B/row, that's
+≈650 KiB per part — ~3× headroom under the 2 MiB limit, with capacity
+to scale as the queue grows or as task_keys widens.
 
 ### Task-Outcome Ledger
 

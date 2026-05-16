@@ -202,61 +202,92 @@ class WorkflowOrchestrator:
             )
         self.manifests_fs.write_text(self.manifest_path, json.dumps({'phases': phases}))
 
-    def phase_file_name(self, phase_index: int) -> str:
-        """Filename (relative to the manifests filesystem run-date directory) of
-        the per-phase file written by :meth:`write_phased_manifest`."""
-        return f'{self.workflow_name}.phase-{phase_index}.json'
+    def phase_part_file_name(self, phase_index: int, part_index: int) -> str:
+        """Filename (relative to the manifests filesystem run-date directory)
+        of one chunked phase-part file written by
+        :meth:`write_phased_manifest`. Phases that exceed
+        :data:`TASKS_PER_PHASE_FILE` rows are sharded into multiple parts
+        so each per-step HTTP fetch stays well under the Workflows 2 MiB
+        response limit."""
+        return f'{self.workflow_name}.phase-{phase_index}.part-{part_index}.json'
 
     def write_phased_manifest(self, phases: list[list[list[dict[str, str]]]]) -> None:
-        """Write a v2 phased manifest, split across an index + per-phase files.
+        """Write a v2 phased manifest, split across an index + chunked phase files.
 
         Hoists each phase's constant env-vars into a phase-level
         ``common_env`` and stores only the varying fields as positional
-        ``rows`` aligned to a sorted ``task_keys`` schema. The split keeps
-        any single per-phase fetch well under the Cloud Workflows 2 MiB
-        per-step HTTP response limit, even for the weather-grid transform
-        backfill (~10 K tasks per phase, which is ~10 MB in the v1
-        all-in-one shape).
+        ``rows`` aligned to a sorted ``task_keys`` schema. Each phase's
+        rows are then sharded into chunks of at most
+        :data:`TASKS_PER_PHASE_FILE` so any single per-step HTTP fetch
+        stays well under the Cloud Workflows 2 MiB response limit — the
+        weather-grid transform backfill reaches ~20 K tasks per phase
+        once a few extract ledgers pile up, which a single un-sharded
+        phase file blows past on its own.
 
         File layout under ``manifests_fs``:
 
-        * ``<run_date>/<workflow>.json``           -- the index document.
-        * ``<run_date>/<workflow>.phase-<N>.json`` -- one per phase.
+        * ``<run_date>/<workflow>.json`` -- the index document. Each
+          phase entry carries ``common_env``, ``task_keys`` and a
+          ``files`` list naming the chunked phase-part files in order.
+        * ``<run_date>/<workflow>.phase-<N>.part-<M>.json`` -- one per
+          chunk; each holds ``{"rows": [...]}``.
 
-        The Cloud Workflow fetches the index, then per-phase: fetches the
-        phase file, reconstructs each task's env as
-        ``common_env + zip(task_keys, row)``, and dispatches.
+        The Cloud Workflow fetches the index, then for each phase
+        iterates its ``files`` list in order: fetches each part,
+        reconstructs every task's env as
+        ``common_env + zip(task_keys, row)``, and parallel-dispatches.
         """
         if self.manifests_fs is None:
             raise RuntimeError(
                 'WorkflowOrchestrator.write_phased_manifest called without manifests_fs'
             )
-        phase_entries, phase_docs = pack_phases(phases)
-        for index, entry in enumerate(phase_entries):
-            entry['file'] = self.phase_file_name(index)
+        phase_entries, phase_chunks = pack_phases(phases)
+        files_per_phase: list[list[str]] = [
+            [
+                self.phase_part_file_name(phase_index, part_index)
+                for part_index in range(len(chunks))
+            ]
+            for phase_index, chunks in enumerate(phase_chunks)
+        ]
+        for entry, files in zip(phase_entries, files_per_phase, strict=True):
+            entry['files'] = files
         index_doc: dict[str, object] = {
             'version': PHASED_MANIFEST_VERSION,
             'phases': phase_entries,
         }
         self.manifests_fs.write_text(self.manifest_path, json.dumps(index_doc))
-        for index, doc in enumerate(phase_docs):
-            path = f'{self.run_date}/{self.phase_file_name(index)}'
-            self.manifests_fs.write_text(path, json.dumps(doc))
+        for files, chunks in zip(files_per_phase, phase_chunks, strict=True):
+            for file_name, chunk in zip(files, chunks, strict=True):
+                self.manifests_fs.write_text(
+                    f'{self.run_date}/{file_name}', json.dumps(chunk)
+                )
 
 
 PHASED_MANIFEST_VERSION = 2
 
+# Maximum rows per chunked phase-part file. The Cloud Workflows 2 MiB
+# HTTP-response limit is the hard ceiling; the actual ceiling we engineer
+# against is closer to 1 MiB so a growing average row size (e.g. a wider
+# task_keys schema or longer per-field values) doesn't push fetches over.
+# Weather-grid transform-backfill rows currently sit at ~130 bytes each,
+# so 5000 rows ≈ 650 KiB — about 3x headroom under 2 MiB.
+TASKS_PER_PHASE_FILE = 5000
+
 
 def pack_phases(
     phases: list[list[list[dict[str, str]]]],
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    """Pack *phases* into the v2 manifest's index + per-phase shapes.
+) -> tuple[list[dict[str, object]], list[list[dict[str, object]]]]:
+    """Pack *phases* into the v2 manifest's index + chunked per-phase shapes.
 
     For each phase, hoists env entries that are identical across every
     task into a phase-level ``common_env`` and re-encodes the remaining
     varying fields as positional ``rows`` aligned to a sorted ``task_keys``
-    schema. This compaction is what keeps any single per-phase fetch
-    under the Cloud Workflows 2 MiB HTTP-response limit.
+    schema. The rows are then sliced into chunks of at most
+    :data:`TASKS_PER_PHASE_FILE`, each of which lands in its own phase-
+    part file. Hoisting compacts the row encoding; chunking bounds the
+    file size regardless of how many tasks pile up — together they keep
+    any single per-step HTTP fetch under the Cloud Workflows 2 MiB
+    response limit.
 
     Tolerates heterogeneous task keys within a phase by using the union
     of keys for ``task_keys`` and padding missing values with ``None``
@@ -266,17 +297,31 @@ def pack_phases(
     surfacing an empty string. A key is hoisted into ``common_env`` only
     when every task carries it with the same value.
 
-    Returns ``(phase_entries, phase_docs)`` as two parallel lists indexed
-    by phase. The writer attaches the per-phase filename to each entry
+    Returns ``(phase_entries, phase_chunks)`` as two parallel lists
+    indexed by phase. ``phase_chunks[i]`` is a list of one or more
+    ``{"rows": [...]}`` dicts (an empty phase contributes a single
+    empty chunk so the index still names one file per phase). The
+    writer attaches per-chunk filenames to each entry's ``files`` list
     and wraps the entries under a ``version``/``phases`` index document.
     """
     phase_entries: list[dict[str, object]] = []
-    phase_docs: list[dict[str, object]] = []
+    phase_chunks: list[list[dict[str, object]]] = []
     for phase in phases:
         common_env, task_keys, rows = _pack_phase(phase)
+        chunks = _chunk_rows(rows, TASKS_PER_PHASE_FILE)
         phase_entries.append({'common_env': common_env, 'task_keys': task_keys})
-        phase_docs.append({'rows': rows})
-    return phase_entries, phase_docs
+        phase_chunks.append([{'rows': chunk} for chunk in chunks])
+    return phase_entries, phase_chunks
+
+
+def _chunk_rows(
+    rows: list[list[str | None]], chunk_size: int
+) -> list[list[list[str | None]]]:
+    """Slice *rows* into chunks of at most *chunk_size*; always at least one
+    chunk so an empty phase still produces a single empty file."""
+    if not rows:
+        return [[]]
+    return [rows[i : i + chunk_size] for i in range(0, len(rows), chunk_size)]
 
 
 def _pack_phase(

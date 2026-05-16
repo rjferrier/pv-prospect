@@ -1,26 +1,27 @@
 """Tests for pack_phases."""
 
 from pv_prospect.etl import pack_phases
+from pv_prospect.etl.orchestration import TASKS_PER_PHASE_FILE
 
 
-def test_empty_phase_packs_to_empty_descriptor() -> None:
-    phase_entries, phase_docs = pack_phases([[]])
+def test_empty_phase_packs_to_single_empty_chunk() -> None:
+    phase_entries, phase_chunks = pack_phases([[]])
 
     assert phase_entries == [{'common_env': [], 'task_keys': []}]
-    assert phase_docs == [{'rows': []}]
+    assert phase_chunks == [[{'rows': []}]]
 
 
 def test_single_task_hoists_every_env_to_common() -> None:
     task = [{'name': 'A', 'value': '1'}, {'name': 'B', 'value': '2'}]
 
-    phase_entries, phase_docs = pack_phases([[task]])
+    phase_entries, phase_chunks = pack_phases([[task]])
 
     assert phase_entries[0]['common_env'] == [
         {'name': 'A', 'value': '1'},
         {'name': 'B', 'value': '2'},
     ]
     assert phase_entries[0]['task_keys'] == []
-    assert phase_docs == [{'rows': [[]]}]
+    assert phase_chunks == [[{'rows': [[]]}]]
 
 
 def test_constant_keys_hoist_varying_keys_become_rows() -> None:
@@ -35,13 +36,12 @@ def test_constant_keys_hoist_varying_keys_become_rows() -> None:
         {'name': 'TASK_HASH', 'value': 'h2'},
     ]
 
-    phase_entries, phase_docs = pack_phases([[task1, task2]])
+    phase_entries, phase_chunks = pack_phases([[task1, task2]])
 
     assert phase_entries[0]['common_env'] == [{'name': 'STEP', 'value': 'clean'}]
     assert phase_entries[0]['task_keys'] == ['LOCATION', 'TASK_HASH']
-    assert phase_docs[0]['rows'] == [
-        ['50.0,-5.0', 'h1'],
-        ['51.0,-4.0', 'h2'],
+    assert phase_chunks[0] == [
+        {'rows': [['50.0,-5.0', 'h1'], ['51.0,-4.0', 'h2']]},
     ]
 
 
@@ -85,10 +85,10 @@ def test_task_keys_are_sorted_for_determinism() -> None:
         ],
     ]
 
-    phase_entries, phase_docs = pack_phases([tasks])
+    phase_entries, phase_chunks = pack_phases([tasks])
 
     assert phase_entries[0]['task_keys'] == ['A', 'M', 'Z']
-    assert phase_docs[0]['rows'] == [['a1', 'm1', 'z1'], ['a2', 'm2', 'z2']]
+    assert phase_chunks[0] == [{'rows': [['a1', 'm1', 'z1'], ['a2', 'm2', 'z2']]}]
 
 
 def test_heterogeneous_keys_become_varying_with_null_for_missing() -> None:
@@ -102,22 +102,48 @@ def test_heterogeneous_keys_become_varying_with_null_for_missing() -> None:
     ]
     task_without_id = [{'name': 'STEP', 'value': 'assemble'}]
 
-    phase_entries, phase_docs = pack_phases([[task_with_id, task_without_id]])
+    phase_entries, phase_chunks = pack_phases([[task_with_id, task_without_id]])
 
     assert phase_entries[0]['common_env'] == [{'name': 'STEP', 'value': 'assemble'}]
     assert phase_entries[0]['task_keys'] == ['PV_SYSTEM_ID']
-    assert phase_docs[0]['rows'] == [['42'], [None]]
+    assert phase_chunks[0] == [{'rows': [['42'], [None]]}]
 
 
 def test_empty_phases_list_returns_empty_outputs() -> None:
-    phase_entries, phase_docs = pack_phases([])
+    phase_entries, phase_chunks = pack_phases([])
 
     assert phase_entries == []
-    assert phase_docs == []
+    assert phase_chunks == []
+
+
+def test_large_phase_is_sharded_into_multiple_chunks() -> None:
+    """A phase with more than TASKS_PER_PHASE_FILE rows splits across
+    multiple chunk dicts so any single per-step HTTP fetch stays under
+    the Cloud Workflows 2 MiB response limit."""
+    row_count = TASKS_PER_PHASE_FILE * 2 + 1
+    tasks = [
+        [
+            {'name': 'STEP', 'value': 'clean'},
+            {'name': 'LOCATION', 'value': f'loc-{i}'},
+        ]
+        for i in range(row_count)
+    ]
+
+    _, phase_chunks = pack_phases([tasks])
+
+    chunks = phase_chunks[0]
+    assert len(chunks) == 3
+    assert len(chunks[0]['rows']) == TASKS_PER_PHASE_FILE
+    assert len(chunks[1]['rows']) == TASKS_PER_PHASE_FILE
+    assert len(chunks[2]['rows']) == 1
+    # Order is preserved across chunks.
+    flat = [row for chunk in chunks for row in chunk['rows']]
+    assert flat == [[f'loc-{i}'] for i in range(row_count)]
 
 
 def test_reconstruction_matches_original_env_set() -> None:
-    """The packer is lossless: hoisting + zipping reproduces each task's env."""
+    """The packer is lossless: hoisting + zipping (across all chunks)
+    reproduces each task's env."""
     original = [
         [
             {'name': 'STEP', 'value': 'clean'},
@@ -133,14 +159,13 @@ def test_reconstruction_matches_original_env_set() -> None:
         ],
     ]
 
-    phase_entries, phase_docs = pack_phases([original])
+    phase_entries, phase_chunks = pack_phases([original])
 
     common_env = phase_entries[0]['common_env']
     task_keys = phase_entries[0]['task_keys']
-    rows = phase_docs[0]['rows']
     assert isinstance(common_env, list)
     assert isinstance(task_keys, list)
-    assert isinstance(rows, list)
+    rows = [row for chunk in phase_chunks[0] for row in chunk['rows']]
     reconstructed = [
         common_env
         + [{'name': k, 'value': v} for k, v in zip(task_keys, row, strict=False)]

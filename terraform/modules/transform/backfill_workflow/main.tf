@@ -101,9 +101,11 @@ resource "google_workflows_workflow" "transform_backfill" {
 
                 # ---------- 2. fetch + execute the v2 phased manifest ----------
                 # The index document carries one descriptor per phase:
-                # {file, common_env, task_keys}. We fetch each phase
-                # file (just {rows}) inside the loop so no single
-                # HTTP response exceeds the Workflows 2 MiB limit.
+                # {files, common_env, task_keys}. We iterate per-phase
+                # then per-chunk-file inside that phase, fetching one
+                # phase-part file (just {rows}) at a time so no single
+                # HTTP response exceeds the Workflows 2 MiB limit even
+                # when a phase holds ~20K tasks.
                 - fetch_manifest_index:
                     call: googleapis.storage.v1.objects.get
                     args:
@@ -121,84 +123,91 @@ resource "google_workflows_workflow" "transform_backfill" {
                       value: phase_descriptor
                       in: $${phase_descriptors}
                       steps:
-                        - fetch_phase_file:
-                            call: googleapis.storage.v1.objects.get
-                            args:
-                              bucket: $${bucket}
-                              object: $${text.url_encode("tracking/manifests/" + run_date + "/" + phase_descriptor.file)}
-                              alt: media
-                            result: phase_doc_raw
-                        - decode_phase_file:
+                        - phase_init:
                             assign:
-                              - phase_doc: $${json.decode(phase_doc_raw)}
-                              - rows: $${phase_doc.rows}
                               - phase_common_env: $${phase_descriptor.common_env}
                               - phase_task_keys: $${phase_descriptor.task_keys}
-                        - check_phase_empty:
-                            switch:
-                              - condition: $${len(rows) == 0}
-                                next: continue_phase
-                        - dispatch_tasks:
-                            parallel:
-                              for:
-                                value: row
-                                in: $${rows}
-                                steps:
-                                  - build_task_env:
-                                      call: expand_task_env
-                                      args:
-                                        common_env: $${phase_common_env}
-                                        task_keys: $${phase_task_keys}
-                                        row: $${row}
-                                      result: task_env
-                                  - run_task:
-                                      try:
+                        - execute_phase_parts:
+                            for:
+                              value: phase_part_file
+                              in: $${phase_descriptor.files}
+                              steps:
+                                - fetch_phase_part:
+                                    call: googleapis.storage.v1.objects.get
+                                    args:
+                                      bucket: $${bucket}
+                                      object: $${text.url_encode("tracking/manifests/" + run_date + "/" + phase_part_file)}
+                                      alt: media
+                                    result: phase_part_raw
+                                - decode_phase_part:
+                                    assign:
+                                      - phase_part: $${json.decode(phase_part_raw)}
+                                      - rows: $${phase_part.rows}
+                                - check_part_empty:
+                                    switch:
+                                      - condition: $${len(rows) == 0}
+                                        next: continue_part
+                                - dispatch_tasks:
+                                    parallel:
+                                      for:
+                                        value: row
+                                        in: $${rows}
                                         steps:
-                                          - start_job:
-                                              call: googleapis.run.v2.projects.locations.jobs.run
+                                          - build_task_env:
+                                              call: expand_task_env
                                               args:
-                                                name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                                                body:
-                                                  overrides:
-                                                    containerOverrides:
-                                                      - env: $${task_env}
-                                              result: task_op
-                                          - wait_task_op:
-                                              call: wait_for_operation
-                                              args:
-                                                operation_name: $${task_op.name}
-                                              result: task_op_done
-                                          - wait_task:
-                                              call: await_job
-                                              args:
-                                                execution_name: $${task_op_done.response.name}
-                                      # No workflow-level retry — in line with
-                                      # the extraction backfills. Branch on the
-                                      # container exit code surfaced by await_job:
-                                      # 2 -> WorkflowTerminatingError, re-raise so
-                                      # the run_pipeline try aborts before the
-                                      # commit step, leaving the marker unchanged.
-                                      # 1 (or unknown) -> log and swallow so the
-                                      # run still reaches commit (predictable
-                                      # cadence; the ledger records the failure).
-                                      except:
-                                        as: task_err
-                                        steps:
-                                          - extract_exit_code:
-                                              assign:
-                                                - failed_exit_code: $${default(map.get(task_err, ["data", "exit_code"]), 1)}
-                                          - branch_on_exit_code:
-                                              switch:
-                                                - condition: $${failed_exit_code == 2}
-                                                  raise: $${task_err}
-                                          - log_task_failure:
-                                              call: sys.log
-                                              args:
-                                                data: '$${"Task failed (exit_code=" + string(failed_exit_code) + "), continuing: " + json.encode_to_string(task_err)}'
-                                                severity: "WARNING"
-                        - continue_phase:
-                            assign:
-                              - _dummy: true
+                                                common_env: $${phase_common_env}
+                                                task_keys: $${phase_task_keys}
+                                                row: $${row}
+                                              result: task_env
+                                          - run_task:
+                                              try:
+                                                steps:
+                                                  - start_job:
+                                                      call: googleapis.run.v2.projects.locations.jobs.run
+                                                      args:
+                                                        name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                                                        body:
+                                                          overrides:
+                                                            containerOverrides:
+                                                              - env: $${task_env}
+                                                      result: task_op
+                                                  - wait_task_op:
+                                                      call: wait_for_operation
+                                                      args:
+                                                        operation_name: $${task_op.name}
+                                                      result: task_op_done
+                                                  - wait_task:
+                                                      call: await_job
+                                                      args:
+                                                        execution_name: $${task_op_done.response.name}
+                                              # No workflow-level retry — in line with
+                                              # the extraction backfills. Branch on the
+                                              # container exit code surfaced by await_job:
+                                              # 2 -> WorkflowTerminatingError, re-raise so
+                                              # the run_pipeline try aborts before the
+                                              # commit step, leaving the marker unchanged.
+                                              # 1 (or unknown) -> log and swallow so the
+                                              # run still reaches commit (predictable
+                                              # cadence; the ledger records the failure).
+                                              except:
+                                                as: task_err
+                                                steps:
+                                                  - extract_exit_code:
+                                                      assign:
+                                                        - failed_exit_code: $${default(map.get(task_err, ["data", "exit_code"]), 1)}
+                                                  - branch_on_exit_code:
+                                                      switch:
+                                                        - condition: $${failed_exit_code == 2}
+                                                          raise: $${task_err}
+                                                  - log_task_failure:
+                                                      call: sys.log
+                                                      args:
+                                                        data: '$${"Task failed (exit_code=" + string(failed_exit_code) + "), continuing: " + json.encode_to_string(task_err)}'
+                                                        severity: "WARNING"
+                                - continue_part:
+                                    assign:
+                                      - _dummy: true
 
                 # ---------- 3. commit_transform_backfill ----------
                 # Promotes the next-marker sidecar to the live marker.
