@@ -39,6 +39,7 @@ LOCATION
 import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import date
 
 from pv_prospect.common import (
@@ -160,26 +161,6 @@ def _required(fs: FileSystem | None, name: str) -> FileSystem:
     return fs
 
 
-def _build_transform_descriptor(
-    transformation: 'Transformation',
-    start_date_str: str,
-    pv_system_id: int | None,
-    location_str: str | None,
-) -> dict[str, str]:
-    descriptor: dict[str, str] = {
-        'transform_step': transformation.value,
-        'start_date': start_date_str,
-    }
-    if pv_system_id is not None:
-        descriptor['pv_system_id'] = str(pv_system_id)
-    if location_str:
-        descriptor['location'] = location_str
-    end_date = os.environ.get('END_DATE')
-    if end_date:
-        descriptor['end_date'] = end_date
-    return descriptor
-
-
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
     run_date = _resolve_run_date()
@@ -224,23 +205,63 @@ def main() -> None:
     elif job_type == 'consolidate_logs':
         _run_consolidate_logs(config, run_date)
         return
+    elif job_type == 'process_transform_chunk':
+        _run_process_transform_chunk(
+            run_date,
+            config,
+            _required(manifests_fs, 'manifests_storage'),
+            ledger_fs,
+        )
+        return
 
-    transformation = Transformation(os.environ.get('TRANSFORM_STEP', ''))
+    # Per-task path (legacy daily-transform dispatch shape: one Cloud Run
+    # task per transform unit). The chunk path above is what the transform
+    # backfill uses now — see `_run_process_transform_chunk` for why.
     workflow_name = os.environ.get('WORKFLOW_NAME', '')
     run_label = os.environ.get('RUN_LABEL', '')
+    shared = _build_chunk_runtime(config, workflow_name, run_date, run_label)
+    orchestrator = WorkflowOrchestrator(
+        workflow_name, run_date, ledger_fs=ledger_fs, run_label=run_label
+    )
+    _run_one_transform_unit(_task_env_from_environ(), shared, config, orchestrator)
 
-    pv_system_id = _env_int('PV_SYSTEM_ID')
-    location_str = os.environ.get('LOCATION')
 
-    start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
-    if not start_date_str:
-        raise ValueError('START_DATE (or DATE) must be set.')
+def _task_env_from_environ() -> dict[str, str]:
+    """Snapshot the per-task env vars from ``os.environ`` into a plain dict.
 
-    try:
-        date_range = build_date_range(start_date_str, os.environ.get('END_DATE'))
-    except DegenerateDateRange as e:
-        raise WorkflowTerminatingError(str(e)) from e
+    Keeps the per-task path symmetrical with the chunk path, which builds
+    the same dict by reconstructing common_env + zip(task_keys, row).
+    """
+    keys = (
+        'TRANSFORM_STEP',
+        'PV_SYSTEM_ID',
+        'LOCATION',
+        'START_DATE',
+        'DATE',
+        'END_DATE',
+        'TASK_HASH',
+    )
+    return {k: os.environ[k] for k in keys if k in os.environ}
 
+
+@dataclass(frozen=True)
+class _ChunkRuntime:
+    """Shared per-chunk resources. Built once, reused for every unit in the
+    chunk to amortise config loading, GCS handle setup, and the
+    PV-site/location-mapping repo load."""
+
+    raw_fs: FileSystem
+    cleaned_fs: FileSystem
+    batches_fs: FileSystem
+    prepared_fs: FileSystem
+
+
+def _build_chunk_runtime(
+    config: DataTransformationConfig,
+    workflow_name: str,
+    run_date: str,
+    run_label: str,
+) -> _ChunkRuntime:
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
     cleaned_fs = _get_logging_filesystem(
@@ -267,29 +288,67 @@ def main() -> None:
         'prepared',
         run_label,
     )
-
     _load_resources(resources_fs)
+    return _ChunkRuntime(raw_fs, cleaned_fs, batches_fs, prepared_fs)
+
+
+def _run_one_transform_unit(
+    task_env: dict[str, str],
+    shared: _ChunkRuntime,
+    config: DataTransformationConfig,
+    orchestrator: WorkflowOrchestrator,
+) -> None:
+    """Run a single transform unit described by *task_env*.
+
+    *task_env* is the per-task env-var dict — either parsed from
+    ``os.environ`` (daily-transform per-task dispatch) or reconstructed
+    from a manifest row plus the phase's hoisted common env (transform-
+    backfill chunk dispatch). The shared runtime + config are loaded
+    once per Cloud Run execution; the orchestrator owns the ledger
+    writes.
+
+    Records a ``failed`` ledger entry and re-raises on any exception,
+    or a ``completed`` entry on success.
+    """
+    transformation = Transformation(task_env.get('TRANSFORM_STEP', ''))
+    pv_system_id = (
+        int(task_env['PV_SYSTEM_ID']) if task_env.get('PV_SYSTEM_ID') else None
+    )
+    location_str = task_env.get('LOCATION')
+
+    start_date_str = task_env.get('START_DATE') or task_env.get('DATE')
+    if not start_date_str:
+        raise ValueError('START_DATE (or DATE) must be set.')
+
+    try:
+        date_range = build_date_range(start_date_str, task_env.get('END_DATE'))
+    except DegenerateDateRange as e:
+        raise WorkflowTerminatingError(str(e)) from e
 
     if transformation in TRANSFORMATIONS_NEEDING_PV_SITE and pv_system_id is None:
         raise ValueError('PV_SYSTEM_ID must be set for PV steps.')
 
-    logger.info('Starting %s for %s', transformation, date_range)
+    task_hash = task_env.get('TASK_HASH', '')
+    descriptor: dict[str, str] = {
+        'transform_step': transformation.value,
+        'start_date': start_date_str,
+    }
+    if pv_system_id is not None:
+        descriptor['pv_system_id'] = str(pv_system_id)
+    if location_str:
+        descriptor['location'] = location_str
+    if task_env.get('END_DATE'):
+        descriptor['end_date'] = task_env['END_DATE']
 
-    task_hash = os.environ.get('TASK_HASH', '')
-    descriptor = _build_transform_descriptor(
-        transformation, start_date_str, pv_system_id, location_str
-    )
-    orchestrator = WorkflowOrchestrator(
-        workflow_name, run_date, ledger_fs=ledger_fs, run_label=run_label
-    )
+    logger.info('Starting %s for %s', transformation, date_range)
 
     try:
         _run_transform_step(
             transformation,
-            raw_fs,
-            cleaned_fs,
-            batches_fs,
-            prepared_fs,
+            shared.raw_fs,
+            shared.cleaned_fs,
+            shared.batches_fs,
+            shared.prepared_fs,
             config,
             pv_system_id,
             location_str,
@@ -300,6 +359,106 @@ def main() -> None:
         raise
 
     orchestrator.record_outcome(task_hash, descriptor, 'completed')
+
+
+def _run_process_transform_chunk(
+    run_date: str,
+    config: DataTransformationConfig,
+    manifests_fs: FileSystem,
+    ledger_fs: FileSystem | None,
+) -> None:
+    """Run every transform unit listed in one manifest phase-part file.
+
+    The transform-backfill workflow's queue routinely exceeds Cloud
+    Workflows' 100K-step-per-execution ceiling when each unit is a
+    separate Cloud Run dispatch (~50 workflow steps/unit × tens of
+    thousands of units). The fix is to dispatch one Cloud Run execution
+    per chunk file and process the chunk's rows in-container, so the
+    workflow's step count scales with chunk count (hundreds) not unit
+    count (tens of thousands).
+
+    Required env vars:
+
+    * ``CHUNK_FILE``  -- relative path of the chunk file on
+      ``manifests_fs`` (e.g.
+      ``<run_date>/<workflow>.phase-0.part-3.json``).
+    * ``INDEX_FILE``  -- relative path of the manifest index, used to
+      recover the phase-level ``common_env`` and ``task_keys`` schema
+      so the chunk file can stay row-only.
+    * ``PHASE_INDEX`` -- which phase this chunk belongs to, indexing
+      ``index.phases[]``.
+
+    Per-unit ``Exception`` failures are logged and swallowed (the
+    orchestrator's ledger entry already records ``failed`` for that
+    unit's task_hash), so the chunk runs to completion and other units
+    aren't blocked. ``WorkflowTerminatingError`` propagates and aborts
+    the chunk (Cloud Run exit 2 → workflow's outer except re-raises
+    and skips the commit step).
+    """
+    chunk_file = os.environ.get('CHUNK_FILE')
+    if not chunk_file:
+        raise WorkflowTerminatingError(
+            'CHUNK_FILE is required for process_transform_chunk'
+        )
+    index_file = os.environ.get('INDEX_FILE')
+    if not index_file:
+        raise WorkflowTerminatingError(
+            'INDEX_FILE is required for process_transform_chunk'
+        )
+    phase_index_raw = os.environ.get('PHASE_INDEX')
+    if phase_index_raw is None:
+        raise WorkflowTerminatingError(
+            'PHASE_INDEX is required for process_transform_chunk'
+        )
+    phase_index = int(phase_index_raw)
+
+    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+    run_label = os.environ.get('RUN_LABEL', '')
+
+    index = json.loads(manifests_fs.read_text(index_file))
+    phase = index['phases'][phase_index]
+    common_env: dict[str, str] = {e['name']: e['value'] for e in phase['common_env']}
+    task_keys: list[str] = phase['task_keys']
+
+    chunk = json.loads(manifests_fs.read_text(chunk_file))
+    rows: list[list[str | None]] = chunk['rows']
+
+    shared = _build_chunk_runtime(config, workflow_name, run_date, run_label)
+    orchestrator = WorkflowOrchestrator(
+        workflow_name, run_date, ledger_fs=ledger_fs, run_label=run_label
+    )
+
+    logger.info(
+        'process_transform_chunk: %d units in phase %d (%s)',
+        len(rows),
+        phase_index,
+        chunk_file,
+    )
+    succeeded = 0
+    failed = 0
+    for row in rows:
+        task_env = dict(common_env)
+        for k, v in zip(task_keys, row, strict=True):
+            if v is not None:
+                task_env[k] = v
+        try:
+            _run_one_transform_unit(task_env, shared, config, orchestrator)
+            succeeded += 1
+        except WorkflowTerminatingError:
+            # Terminating errors abort the whole chunk so the outer
+            # workflow leaves the marker unchanged. Re-raise to main().
+            raise
+        except Exception:
+            # Non-terminating failure: ledger already recorded 'failed';
+            # log and continue so the rest of the chunk still runs.
+            logger.exception('Unit failed; continuing with next unit')
+            failed += 1
+    logger.info(
+        'process_transform_chunk: %d succeeded, %d failed (chunk %s)',
+        succeeded,
+        failed,
+        chunk_file,
+    )
 
 
 def _run_transform_step(

@@ -160,21 +160,45 @@ in order, fetches each part file, and expands every task as
 sending the resulting env-list as `containerOverrides.env`.
 
 Chunk size is `TASKS_PER_PHASE_FILE` rows (500) in
-`pv_prospect.etl.orchestration`. Two distinct Workflows runtime
-ceilings drive this — the binding one in practice is *memory*, not
-the HTTP-response limit:
+`pv_prospect.etl.orchestration`. Three Workflows runtime ceilings
+drive this — the binding one is the **step-count limit**:
 
-- **2 MiB per-step HTTP-response limit.** Row encoding sits at ~130 B
-  each, so even thousands of rows per part fit on their own.
-- **256 MiB per-execution memory limit.** Each iteration of the inner
-  `parallel: for:` block fans out one workflow branch per row, and
-  every branch holds its own `task_op` / `task_op_done` / `exec`
-  Cloud Run API responses (~5–15 KiB each) plus framework overhead.
-  Retained per-branch state of thousands of branches blows past the
-  256 MiB budget — which is what the weather-grid transform backfill
-  hit at ~20 K tasks/phase even after the hoisting fix. 500-row chunks
-  keep each parallel block's branch count to a few hundred, so the
-  retained state is reclaimed at chunk boundaries.
+- **100 K steps per execution.** Per-unit Cloud Run dispatch costs
+  ~50 workflow steps (start_job + polling inside `wait_for_operation`
+  and `await_job`). The weather-grid backfill reaches ~40 K units
+  total across all phases — far past the 2 M workflow steps that
+  would require. The transform-backfill workflow therefore dispatches
+  *one Cloud Run execution per chunk file*, not per unit, and the
+  container loops over the chunk's rows in-process (see
+  [Chunk dispatch contract](#chunk-dispatch-contract) below). Chunk
+  count is hundreds, well under the step limit.
+- **2 MiB per-step HTTP-response limit.** Each `googleapis.storage.v1.objects.get`
+  fetches a chunk file as a single HTTP response. 500-row chunks at
+  ~130 B/row are ~65 KiB each, with ~30× headroom.
+- **256 MiB per-execution memory limit.** With per-chunk dispatch the
+  workflow only holds a few dozen `task_op` / `await_job` results in
+  flight at peak, so memory stays well under the cap.
+
+#### Chunk dispatch contract
+
+For each chunk file in `phases[i].files`, the workflow dispatches one
+Cloud Run job execution with `JOB_TYPE=process_transform_chunk` and
+these env vars:
+
+| Env | Value |
+|---|---|
+| `INDEX_FILE` | `tracking/manifests/<run_date>/<workflow>.json` |
+| `PHASE_INDEX` | integer index into `index.phases[]` |
+| `CHUNK_FILE` | `tracking/manifests/<run_date>/<chunk-part-file>` |
+| `WORKFLOW_NAME`, `RUN_DATE` | as elsewhere |
+
+The container re-fetches the index to recover `phases[PHASE_INDEX]`'s
+`common_env` and `task_keys`, then walks the chunk's rows
+(`_run_one_transform_unit` per row) — recording per-unit ledger
+entries exactly as the per-unit dispatch path does. Per-unit
+exceptions are logged and swallowed; `WorkflowTerminatingError`
+propagates and exits the chunk with code 2 (so the workflow's outer
+`except` re-raises and skips the marker commit).
 
 ### Task-Outcome Ledger
 

@@ -63,6 +63,7 @@ resource "google_workflows_workflow" "transform_backfill" {
               # orchestrator manifest and its next-marker sidecar at this
               # run_date.
               - run_date: $${text.substring(time.format(sys.now()), 0, 10)}
+              - index_object: $${"tracking/manifests/" + run_date + "/" + workflow_name + ".json"}
 
         - run_pipeline:
             try:
@@ -99,115 +100,103 @@ resource "google_workflows_workflow" "transform_backfill" {
                     args:
                       execution_name: $${plan_backfill_op_done.response.name}
 
-                # ---------- 2. fetch + execute the v2 phased manifest ----------
+                # ---------- 2. execute the v2 phased manifest ----------
                 # The index document carries one descriptor per phase:
-                # {files, common_env, task_keys}. We iterate per-phase
-                # then per-chunk-file inside that phase, fetching one
-                # phase-part file (just {rows}) at a time so no single
-                # HTTP response exceeds the Workflows 2 MiB limit even
-                # when a phase holds ~20K tasks.
+                # {files, common_env, task_keys}. We iterate the
+                # phases sequentially (clean -> prepare -> assemble);
+                # within each phase, the chunk files are dispatched in
+                # parallel. Each chunk dispatch is *one* Cloud Run job
+                # execution that processes every unit listed in that
+                # chunk file in-container — so the workflow's step
+                # count scales with chunk count (hundreds), not unit
+                # count (tens of thousands). Cloud Workflows caps
+                # executions at 100K steps; per-unit dispatch blew past
+                # that on the weather-grid backfill at ~40K units total.
                 - fetch_manifest_index:
                     call: googleapis.storage.v1.objects.get
                     args:
                       bucket: $${bucket}
-                      object: $${text.url_encode("tracking/manifests/" + run_date + "/" + workflow_name + ".json")}
+                      object: $${text.url_encode(index_object)}
                       alt: media
                     result: manifest_index_raw
                 - decode_manifest_index:
                     assign:
                       - manifest_index: $${json.decode(manifest_index_raw)}
                       - phase_descriptors: $${manifest_index.phases}
+                      - phase_index: 0
 
                 - execute_phases:
                     for:
                       value: phase_descriptor
                       in: $${phase_descriptors}
                       steps:
-                        - phase_init:
-                            assign:
-                              - phase_common_env: $${phase_descriptor.common_env}
-                              - phase_task_keys: $${phase_descriptor.task_keys}
-                        - execute_phase_parts:
-                            for:
-                              value: phase_part_file
-                              in: $${phase_descriptor.files}
-                              steps:
-                                - fetch_phase_part:
-                                    call: googleapis.storage.v1.objects.get
-                                    args:
-                                      bucket: $${bucket}
-                                      object: $${text.url_encode("tracking/manifests/" + run_date + "/" + phase_part_file)}
-                                      alt: media
-                                    result: phase_part_raw
-                                - decode_phase_part:
-                                    assign:
-                                      - phase_part: $${json.decode(phase_part_raw)}
-                                      - rows: $${phase_part.rows}
-                                - check_part_empty:
-                                    switch:
-                                      - condition: $${len(rows) == 0}
-                                        next: continue_part
-                                - dispatch_tasks:
-                                    parallel:
-                                      for:
-                                        value: row
-                                        in: $${rows}
+                        - dispatch_chunks:
+                            parallel:
+                              for:
+                                value: phase_part_file
+                                in: $${phase_descriptor.files}
+                                steps:
+                                  - run_chunk:
+                                      try:
                                         steps:
-                                          - build_task_env:
-                                              call: expand_task_env
+                                          - start_chunk_job:
+                                              call: googleapis.run.v2.projects.locations.jobs.run
                                               args:
-                                                common_env: $${phase_common_env}
-                                                task_keys: $${phase_task_keys}
-                                                row: $${row}
-                                              result: task_env
-                                          - run_task:
-                                              try:
-                                                steps:
-                                                  - start_job:
-                                                      call: googleapis.run.v2.projects.locations.jobs.run
-                                                      args:
-                                                        name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
-                                                        body:
-                                                          overrides:
-                                                            containerOverrides:
-                                                              - env: $${task_env}
-                                                      result: task_op
-                                                  - wait_task_op:
-                                                      call: wait_for_operation
-                                                      args:
-                                                        operation_name: $${task_op.name}
-                                                      result: task_op_done
-                                                  - wait_task:
-                                                      call: await_job
-                                                      args:
-                                                        execution_name: $${task_op_done.response.name}
-                                              # No workflow-level retry — in line with
-                                              # the extraction backfills. Branch on the
-                                              # container exit code surfaced by await_job:
-                                              # 2 -> WorkflowTerminatingError, re-raise so
-                                              # the run_pipeline try aborts before the
-                                              # commit step, leaving the marker unchanged.
-                                              # 1 (or unknown) -> log and swallow so the
-                                              # run still reaches commit (predictable
-                                              # cadence; the ledger records the failure).
-                                              except:
-                                                as: task_err
-                                                steps:
-                                                  - extract_exit_code:
-                                                      assign:
-                                                        - failed_exit_code: $${default(map.get(task_err, ["data", "exit_code"]), 1)}
-                                                  - branch_on_exit_code:
-                                                      switch:
-                                                        - condition: $${failed_exit_code == 2}
-                                                          raise: $${task_err}
-                                                  - log_task_failure:
-                                                      call: sys.log
-                                                      args:
-                                                        data: '$${"Task failed (exit_code=" + string(failed_exit_code) + "), continuing: " + json.encode_to_string(task_err)}'
-                                                        severity: "WARNING"
-                                - continue_part:
-                                    assign:
-                                      - _dummy: true
+                                                name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                                                body:
+                                                  overrides:
+                                                    containerOverrides:
+                                                      - env:
+                                                          - name: JOB_TYPE
+                                                            value: process_transform_chunk
+                                                          - name: WORKFLOW_NAME
+                                                            value: $${workflow_name}
+                                                          - name: RUN_DATE
+                                                            value: $${run_date}
+                                                          - name: INDEX_FILE
+                                                            value: $${index_object}
+                                                          - name: PHASE_INDEX
+                                                            value: $${string(phase_index)}
+                                                          - name: CHUNK_FILE
+                                                            value: $${"tracking/manifests/" + run_date + "/" + phase_part_file}
+                                              result: chunk_op
+                                          - wait_chunk_op:
+                                              call: wait_for_operation
+                                              args:
+                                                operation_name: $${chunk_op.name}
+                                              result: chunk_op_done
+                                          - wait_chunk:
+                                              call: await_job
+                                              args:
+                                                execution_name: $${chunk_op_done.response.name}
+                                      # Per-chunk failure handling matches the old
+                                      # per-task except: exit 2 (WorkflowTerminating)
+                                      # re-raises so the commit step is skipped and
+                                      # the marker stays put; exit 1 (or unknown)
+                                      # logs and swallows so the rest of the phase's
+                                      # chunks still complete. Per-unit failures
+                                      # inside the chunk are already swallowed by
+                                      # the container — they surface only in the
+                                      # ledger as 'failed' entries, not in the
+                                      # chunk's exit code.
+                                      except:
+                                        as: chunk_err
+                                        steps:
+                                          - extract_exit_code:
+                                              assign:
+                                                - failed_exit_code: $${default(map.get(chunk_err, ["data", "exit_code"]), 1)}
+                                          - branch_on_exit_code:
+                                              switch:
+                                                - condition: $${failed_exit_code == 2}
+                                                  raise: $${chunk_err}
+                                          - log_chunk_failure:
+                                              call: sys.log
+                                              args:
+                                                data: '$${"Chunk failed (exit_code=" + string(failed_exit_code) + "), continuing: " + json.encode_to_string(chunk_err)}'
+                                                severity: "WARNING"
+                        - bump_phase_index:
+                            assign:
+                              - phase_index: $${phase_index + 1}
 
                 # ---------- 3. commit_transform_backfill ----------
                 # Promotes the next-marker sidecar to the live marker.
@@ -277,48 +266,6 @@ resource "google_workflows_workflow" "transform_backfill" {
 
         - done:
             return: "completed"
-
-    # Reconstructs a Cloud Run env list from the v2 phased manifest's
-    # (common_env, task_keys, row) tuple: starts with the phase-level
-    # constants and appends one {name, value} pair per non-null cell
-    # in the positional row, aligned to task_keys. A null cell signals
-    # "this task does not carry this env-var" — emitting an empty
-    # string would change the absent-key semantics the container
-    # currently relies on, so we skip the entry entirely.
-    #
-    # The {name, value} entry is built via an `assign` step (YAML map
-    # syntax) rather than an inline `{...}` expression, since the
-    # Workflows expression parser only accepts list/primitive literals,
-    # not map literals, inside an expression body.
-    expand_task_env:
-      params: [common_env, task_keys, row]
-      steps:
-        - init:
-            assign:
-              - task_extras: []
-              - idx: 0
-        - extras_loop:
-            for:
-              value: row_value
-              in: $${row}
-              steps:
-                - maybe_append:
-                    switch:
-                      - condition: $${row_value != null}
-                        steps:
-                          - build_entry:
-                              assign:
-                                - new_entry:
-                                    name: $${task_keys[idx]}
-                                    value: $${row_value}
-                          - append_extra:
-                              assign:
-                                - task_extras: $${list.concat(task_extras, [new_entry])}
-                - bump_idx:
-                    assign:
-                      - idx: $${idx + 1}
-        - return_env:
-            return: $${list.concat(common_env, task_extras)}
 
     wait_for_operation:
       params: [operation_name]

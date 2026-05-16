@@ -221,12 +221,16 @@ module "artifact_registry_transform" {
 }
 
 module "cloud_run_transform" {
-  source                = "./modules/cloud_run_job"
-  job_name              = "data-transformation"
-  region                = var.region
-  image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/data-transformation/data-transformation"
-  image_tag             = var.transformer_image_tag
-  timeout               = "900s"
+  source    = "./modules/cloud_run_job"
+  job_name  = "data-transformation"
+  region    = var.region
+  image_url = "${var.region}-docker.pkg.dev/${var.project_id}/data-transformation/data-transformation"
+  image_tag = var.transformer_image_tag
+  # 2-hour ceiling so the transform-backfill `process_transform_chunk`
+  # job has room to walk its 500-unit chunk in-container. Daily-transform
+  # per-task executions finish in seconds and are unaffected — Cloud Run
+  # bills actual runtime, not the timeout.
+  timeout               = "7200s"
   cpu                   = "2"
   memory                = "2Gi"
   service_account_email = google_service_account.pipeline.email
