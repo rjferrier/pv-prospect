@@ -111,7 +111,7 @@ def extract_and_load(
                     meta_path, json.dumps(ts.metadata), overwrite=True
                 )
 
-        logger.info('%s: success', task)
+        logger.debug('%s: success', task)
         return Result.success(task)
 
     except Exception as e:

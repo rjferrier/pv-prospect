@@ -222,7 +222,7 @@ def _extract_one_site(
             dr,
             dry_run,
         )
-        logger.info('%s %s: %s', site, dr, result.type.value)
+        logger.debug('%s %s: %s', site, dr, result.type.value)
         if result.type == ResultType.FAILURE:
             failures.append(f'{site} {dr}')
     return failures
@@ -314,7 +314,7 @@ def _run_extract_and_load(
             descriptor['end_date'] = end_date_str
 
         if site_hash in completed:
-            logger.info('%s: skipped (ledger has completed entry)', site)
+            logger.debug('%s: skipped (ledger has completed entry)', site)
             continue
 
         try:

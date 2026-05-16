@@ -68,7 +68,7 @@ def read_csv(fs: FileSystem, path: str) -> pd.DataFrame:
 def write_csv(fs: FileSystem, df: pd.DataFrame, path: str, header: bool = True) -> None:
     """Write a DataFrame as CSV to a FileSystem."""
     fs.write_text(path, df.to_csv(index=False, header=header))
-    logger.info('Written to: %s', path)
+    logger.debug('Written to: %s', path)
 
 
 def read_metadata(fs: FileSystem, csv_path: str) -> dict[str, Any]:
@@ -119,7 +119,7 @@ def run_clean_weather(
     in_path = build_time_series_csv_file_path(
         TIMESERIES_FOLDER, weather_data_source, site, date_range
     )
-    logger.info('[clean_weather] Processing %s', in_path)
+    logger.debug('[clean_weather] Processing %s', in_path)
     df = read_csv(raw_fs, in_path)
     if df.empty:
         raise ValueError(f'CSV is empty: {in_path}')
@@ -157,7 +157,7 @@ def run_clean_pv(
         path = build_time_series_csv_file_path(
             TIMESERIES_FOLDER, pv_data_source, pv_site, day_range
         )
-        logger.info('[clean_pv] Processing %s', path)
+        logger.debug('[clean_pv] Processing %s', path)
         df = read_csv(raw_fs, path)
         if df.empty:
             raise ValueError(f'CSV is empty: {path}')
@@ -184,7 +184,7 @@ def run_prepare_weather(
             site,
             day_range,
         )
-        logger.info('[prepare_weather] Processing %s', path)
+        logger.debug('[prepare_weather] Processing %s', path)
         metadata = read_metadata(cleaned_fs, path)
         cleaned_df = read_csv(cleaned_fs, path)
         prepared_df = _prepare_weather_transform(cleaned_df)
@@ -234,7 +234,7 @@ def run_prepare_pv(
             )
             continue
 
-        logger.info(
+        logger.debug(
             '[prepare_pv] Joining weather=%s with pv=%s', weather_path, in_pv_path
         )
         pv_df = read_csv(cleaned_fs, in_pv_path)
