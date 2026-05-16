@@ -159,10 +159,22 @@ in order, fetches each part file, and expands every task as
 `common_env + zip(task_keys, row)` (skipping `null` cells) before
 sending the resulting env-list as `containerOverrides.env`.
 
-Chunk size is `TASKS_PER_PHASE_FILE` rows (5000) in
-`pv_prospect.etl.orchestration`. At the current ~130 B/row, that's
-≈650 KiB per part — ~3× headroom under the 2 MiB limit, with capacity
-to scale as the queue grows or as task_keys widens.
+Chunk size is `TASKS_PER_PHASE_FILE` rows (500) in
+`pv_prospect.etl.orchestration`. Two distinct Workflows runtime
+ceilings drive this — the binding one in practice is *memory*, not
+the HTTP-response limit:
+
+- **2 MiB per-step HTTP-response limit.** Row encoding sits at ~130 B
+  each, so even thousands of rows per part fit on their own.
+- **256 MiB per-execution memory limit.** Each iteration of the inner
+  `parallel: for:` block fans out one workflow branch per row, and
+  every branch holds its own `task_op` / `task_op_done` / `exec`
+  Cloud Run API responses (~5–15 KiB each) plus framework overhead.
+  Retained per-branch state of thousands of branches blows past the
+  256 MiB budget — which is what the weather-grid transform backfill
+  hit at ~20 K tasks/phase even after the hoisting fix. 500-row chunks
+  keep each parallel block's branch count to a few hundred, so the
+  retained state is reclaimed at chunk boundaries.
 
 ### Task-Outcome Ledger
 

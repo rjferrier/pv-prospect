@@ -265,13 +265,26 @@ class WorkflowOrchestrator:
 
 PHASED_MANIFEST_VERSION = 2
 
-# Maximum rows per chunked phase-part file. The Cloud Workflows 2 MiB
-# HTTP-response limit is the hard ceiling; the actual ceiling we engineer
-# against is closer to 1 MiB so a growing average row size (e.g. a wider
-# task_keys schema or longer per-field values) doesn't push fetches over.
-# Weather-grid transform-backfill rows currently sit at ~130 bytes each,
-# so 5000 rows ≈ 650 KiB — about 3x headroom under 2 MiB.
-TASKS_PER_PHASE_FILE = 5000
+# Maximum rows per chunked phase-part file. Two distinct Cloud Workflows
+# runtime ceilings drive this — the binding one in practice is memory,
+# not the HTTP-response limit:
+#
+#   * 2 MiB per-step HTTP-response limit. Row encoding sits at ~130 B
+#     each (5 keys × ~25 B), so even 5000 rows ≈ 650 KiB stays well
+#     under this limit on its own.
+#
+#   * 256 MiB per-execution memory limit. Each iteration of the inner
+#     `parallel: for: in: rows` block fans out one workflow branch per
+#     row, and every branch holds its own `task_op` / `task_op_done` /
+#     `exec` (Cloud Run API responses ~5–15 KiB each, plus framework
+#     overhead). The retained per-branch state of 5000 branches sums to
+#     well over the 256 MiB budget — which is what the weather-grid
+#     transform backfill blew past at ~20 K tasks/phase. Keeping each
+#     chunk's parallel block to a few hundred branches at most bounds
+#     this. 500 × ~30 KiB per branch ≈ 15 MiB per chunk; the parallel
+#     block's memory is reclaimed when the block completes, so the
+#     ceiling is per-chunk, not cumulative.
+TASKS_PER_PHASE_FILE = 500
 
 
 def pack_phases(
