@@ -152,7 +152,15 @@ def run_clean_pv(
     pv_site: PVSite,
     date_range: DateRange,
 ) -> None:
-    """Clean raw PV CSVs for a date range (one file per day)."""
+    """Clean raw PV CSVs for a date range (one file per day).
+
+    Empty per-day CSVs are skipped with a warning, mirroring
+    :func:`run_clean_weather`'s behaviour for no-data days within a
+    window. The PVOutput extractor records the API call as ``completed``
+    even when the system returned no readings (offline, newly-installed,
+    decommissioned, ...), so the empty file is the truth about that day
+    — not a corruption signal — and shouldn't fail the whole window.
+    """
     for day_range in date_range.split_by(Period.DAY):
         path = build_time_series_csv_file_path(
             TIMESERIES_FOLDER, pv_data_source, pv_site, day_range
@@ -160,7 +168,12 @@ def run_clean_pv(
         logger.debug('[clean_pv] Processing %s', path)
         df = read_csv(raw_fs, path)
         if df.empty:
-            raise ValueError(f'CSV is empty: {path}')
+            logger.warning(
+                '[clean_pv] No data for %s in %s',
+                day_range.start.strftime('%Y%m%d'),
+                path,
+            )
+            continue
         write_csv(
             cleaned_fs,
             _clean_pv_transform(df),
