@@ -22,14 +22,29 @@ class GcsStorageConfig(StorageConfig):
         )
 
 
+# The default urllib3 connection pool size per host on google-cloud-storage's
+# underlying Session is 10. Concurrent callers beyond that get "Connection
+# pool is full, discarding connection" warnings and pay a fresh TLS handshake
+# for each discarded slot. The in-container transform-backfill handler runs
+# with a ThreadPoolExecutor of MAX_WORKERS=32 by default, so we size the pool
+# to 64 — 2× headroom over the default worker count.
+_HTTP_POOL_SIZE = 64
+
+
 class GcsFileSystem:
     """Thin I/O adapter for Google Cloud Storage."""
 
     def __init__(self, bucket_name: str, prefix: str = '') -> None:
         import google.cloud.storage as gcs  # noqa: PLC0415
         import google.cloud.storage_control_v2 as storage_control_v2  # noqa: PLC0415
+        import requests.adapters  # type: ignore[import-untyped]  # noqa: PLC0415
 
         self._client = gcs.Client()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=_HTTP_POOL_SIZE, pool_maxsize=_HTTP_POOL_SIZE
+        )
+        self._client._http.mount('https://', adapter)
+        self._client._http.mount('http://', adapter)
         self._bucket = self._client.bucket(bucket_name)
         self._control_client = storage_control_v2.StorageControlClient()
         self._prefix = prefix.strip('/')
