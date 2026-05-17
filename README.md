@@ -119,20 +119,26 @@ Workflows on a daily or weekly basis:
 * **Data Transformation (`pv-prospect-transform`)**: Runs at **05:30 UTC**.
   Orchestrates the data cleaning and preparation steps to generate the prepared
   datasets for all data extracted earlier in the day.
-* **PV-Sites Transformation Backfill (`pv-prospect-transform-pv-sites-backfill`)**:
-  Runs at **06:00 UTC**. Plans its work from the PV-sites extraction backfill's
-  committed task-outcome ledger rather than a cursor of its own:
-  `plan_transform_backfill` turns each `completed` extraction entry into a
-  `clean → prepare → assemble` task graph over that entry's window. A small
-  **consumed-through marker** bounds each run to the next `MAX_EXTRACT_RUNS`
-  (default 4) unconsumed extraction ledgers; `commit_transform_backfill`
-  advances it *unconditionally*, so a transiently-failed transform task is a
-  recorded hole rather than a perpetual retry.
+* **PV-Sites Transformation Backfill (`pv-prospect-daily-transform-pv-sites-backfill`)**:
+  Runs at **06:00 UTC**. Unlike the other pipelines, this one has no Cloud
+  Workflow — Cloud Scheduler invokes the `data-transformation` Cloud Run Job
+  directly with `JOB_TYPE=run_transform_backfill`. The job plans, runs (with
+  internal thread-pool parallelism over the clean → prepare → assemble
+  phases), consolidates its ledger, and commits the marker — all in a single
+  execution. Plans its work from the PV-sites extraction backfill's
+  committed task-outcome ledger rather than a cursor of its own: each
+  `completed` extraction entry becomes a transform unit over that entry's
+  window. A small **consumed-through marker** bounds each run to the next
+  `MAX_EXTRACT_RUNS` (default 4) unconsumed extraction ledgers; the marker
+  advances at the end of the run only if every phase completes (an exit-2
+  terminating error skips the commit). Per-unit failures inside a phase are
+  logged-and-swallowed, so a transiently-failed transform task is a recorded
+  hole rather than a perpetual retry.
 * **Weather-Grid Transformation Backfill
-  (`pv-prospect-transform-weather-grid-backfill`)**: Runs at **06:30 UTC**. Same
-  pattern as above but planning from the weather-grid extraction backfill's
-  ledger (weather-only task graph). Uses an independent marker so it can advance
-  separately from the PV-sites transform backfill.
+  (`pv-prospect-daily-transform-weather-grid-backfill`)**: Runs at **06:30 UTC**.
+  Same pattern as above but planning from the weather-grid extraction
+  backfill's ledger (weather-only task graph). Uses an independent marker so
+  it can advance separately from the PV-sites transform backfill.
 * **Data Versioning (`data-versioner`)**: Runs weekly at **Sunday 23:00 UTC**.
   Snapshots prepared CSV data and trained model artefacts, producing a versioned
   dataset for the next training run.
@@ -191,21 +197,24 @@ sleep so the rate limit is respected. The checkpoint is deleted on success.
 
 #### Resuming a Transformation Backfill after a timeout
 
-The transform backfills (`pv-prospect-transform-pv-sites-backfill` and
-`pv-prospect-transform-weather-grid-backfill`) record every task's outcome in
-the shared `WorkflowOrchestrator` task-outcome ledger. To resume after a failed
-run, re-trigger the same workflow:
+The transform backfills run as Cloud Run Job executions (not workflows), so
+re-trigger them directly:
 
 ```bash
-gcloud workflows run pv-prospect-transform-pv-sites-backfill \
-  --location=europe-west2
+gcloud run jobs execute data-transformation \
+  --region=europe-west2 \
+  --update-env-vars=JOB_TYPE=run_transform_backfill,BACKFILL_SCOPE=pv_sites
 ```
 
-The consumed-through marker is only advanced by `commit_transform_backfill` at
-the end of a run, so a run that crashed before commit re-derives the same plan
-from the extraction ledger on re-trigger and simply re-does its idempotent
-`clean` / `prepare` / `assemble` work. To deliberately re-transform history
-(e.g. after a feature-spec change), reset the marker at
+(Use `BACKFILL_SCOPE=weather_grid` for the weather-grid backfill.)
+
+The consumed-through marker is only advanced at the end of a successful run,
+so a run that crashed before commit re-derives the same plan from the
+extraction ledger on re-trigger. The orchestrator's
+`filter_remaining_tasks` reads the per-task ledger entries already written
+by the prior attempt and skips them, so a second attempt only runs the
+unfinished units. To deliberately re-transform history (e.g. after a
+feature-spec change), reset the marker at
 `gs://<staging-bucket>/tracking/cursors/pv-prospect-transform-<scope>-backfill.json`
-to `{"consumed_through": ""}` and the next runs re-derive every task from the
-oldest extraction ledger forward.
+to `{"consumed_through": ""}` and the next runs re-derive every task from
+the oldest extraction ledger forward.

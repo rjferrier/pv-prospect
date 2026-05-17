@@ -1,10 +1,11 @@
-"""Tests for plan_transform_backfill."""
+"""Tests for plan_units."""
 
 import json
 
 from pv_prospect.data_transformation.processing import (
     ConsumedMarker,
-    plan_transform_backfill,
+    TransformUnit,
+    plan_units,
     save_marker,
     workflow_name_for,
 )
@@ -12,7 +13,6 @@ from pv_prospect.etl import BackfillScope
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem
 
-_RUN_DATE = '2026-05-15'
 _PV_EXTRACT_WF = 'pv-prospect-extract-pv-sites-backfill'
 _WEATHER_EXTRACT_WF = 'pv-prospect-extract-weather-grid-backfill'
 
@@ -43,64 +43,13 @@ def _plan(
     *,
     marker: str = '',
     max_extract_runs: int = 4,
-) -> tuple[FakeFileSystem, FakeFileSystem, str]:
-    """Run plan_transform_backfill against in-memory filesystems.
-
-    Returns ``(manifests_fs, cursors_fs, next_marker)``.
-    """
+) -> tuple[list[TransformUnit], str]:
+    """Run plan_units against in-memory filesystems and return its result."""
     ledger_fs = FakeFileSystem(ledger_files)
-    manifests_fs = FakeFileSystem()
     cursors_fs = FakeFileSystem()
     if marker:
         save_marker(cursors_fs, workflow_name_for(scope), ConsumedMarker(marker))
-    next_marker = plan_transform_backfill(
-        scope, _RUN_DATE, ledger_fs, manifests_fs, cursors_fs, max_extract_runs
-    )
-    return manifests_fs, cursors_fs, next_marker
-
-
-def _phases(
-    manifests_fs: FakeFileSystem, scope: BackfillScope
-) -> list[list[list[dict[str, str]]]]:
-    """Read the v2 phased manifest back as the original phases-of-env-lists.
-
-    Concatenates each phase's chunked part files in order, then
-    reconstructs each task's env from the phase descriptor's
-    ``common_env`` plus the per-row ``zip(task_keys, row)``, skipping
-    ``None`` cells (which represent keys absent from that task).
-    """
-    workflow_name = workflow_name_for(scope)
-    index = json.loads(manifests_fs.read_text(f'{_RUN_DATE}/{workflow_name}.json'))
-    phases: list[list[list[dict[str, str]]]] = []
-    for descriptor in index['phases']:
-        common_env = descriptor['common_env']
-        task_keys = descriptor['task_keys']
-        rows: list[list[str | None]] = []
-        for part_file in descriptor['files']:
-            part = json.loads(manifests_fs.read_text(f'{_RUN_DATE}/{part_file}'))
-            rows.extend(part['rows'])
-        phase = [
-            common_env
-            + [
-                {'name': k, 'value': v}
-                for k, v in zip(task_keys, row, strict=False)
-                if v is not None
-            ]
-            for row in rows
-        ]
-        phases.append(phase)
-    return phases
-
-
-def _env(task: list[dict[str, str]]) -> dict[str, str]:
-    return {e['name']: e['value'] for e in task}
-
-
-def _sidecar_next_marker(manifests_fs: FakeFileSystem, scope: BackfillScope) -> str:
-    sidecar = json.loads(
-        manifests_fs.read_text(f'{_RUN_DATE}/{workflow_name_for(scope)}.marker.json')
-    )
-    return sidecar['next_marker']
+    return plan_units(scope, ledger_fs, cursors_fs, max_extract_runs)
 
 
 def test_consumes_only_ledgers_above_the_marker() -> None:
@@ -126,10 +75,9 @@ def test_consumes_only_ledgers_above_the_marker() -> None:
     }
     marker = f'2026-05-12-020000-{_PV_EXTRACT_WF}.jsonl'
 
-    manifests_fs, _, _ = _plan(BackfillScope.PV_SITES, ledgers, marker=marker)
+    units, _ = _plan(BackfillScope.PV_SITES, ledgers, marker=marker)
 
-    clean = _phases(manifests_fs, BackfillScope.PV_SITES)[0]
-    assert [_env(t)['PV_SYSTEM_ID'] for t in clean] == ['222']
+    assert [u.pv_system_id for u in units] == [222]
 
 
 def test_consumes_oldest_first_capped_at_max_extract_runs() -> None:
@@ -146,12 +94,9 @@ def test_consumes_oldest_first_capped_at_max_extract_runs() -> None:
         for day in (10, 11, 12, 13, 14)
     }
 
-    manifests_fs, _, next_marker = _plan(
-        BackfillScope.PV_SITES, ledgers, max_extract_runs=2
-    )
+    units, next_marker = _plan(BackfillScope.PV_SITES, ledgers, max_extract_runs=2)
 
-    clean = _phases(manifests_fs, BackfillScope.PV_SITES)[0]
-    assert [_env(t)['PV_SYSTEM_ID'] for t in clean] == ['10', '11']
+    assert [u.pv_system_id for u in units] == [10, 11]
     assert next_marker == f'2026-05-11-020000-{_PV_EXTRACT_WF}.jsonl'
 
 
@@ -179,13 +124,12 @@ def test_skips_failed_extraction_entries() -> None:
         )
     }
 
-    manifests_fs, _, _ = _plan(BackfillScope.PV_SITES, ledgers)
+    units, _ = _plan(BackfillScope.PV_SITES, ledgers)
 
-    clean = _phases(manifests_fs, BackfillScope.PV_SITES)[0]
-    assert [_env(t)['PV_SYSTEM_ID'] for t in clean] == ['222']
+    assert [u.pv_system_id for u in units] == [222]
 
 
-def test_pv_sites_pv_and_weather_entries_both_become_units() -> None:
+def test_pv_sites_pv_and_weather_descriptors_both_become_units() -> None:
     ledgers = {
         _ledger_path('2026-05-14', '024844', _PV_EXTRACT_WF): (
             _ledger_line(
@@ -209,21 +153,9 @@ def test_pv_sites_pv_and_weather_entries_both_become_units() -> None:
         )
     }
 
-    manifests_fs, _, _ = _plan(BackfillScope.PV_SITES, ledgers)
+    units, _ = _plan(BackfillScope.PV_SITES, ledgers)
 
-    clean, prepare, assemble = _phases(manifests_fs, BackfillScope.PV_SITES)
-    assert {_env(t)['TRANSFORM_STEP'] for t in clean} == {
-        'clean_pv',
-        'clean_weather',
-    }
-    assert {_env(t)['TRANSFORM_STEP'] for t in prepare} == {
-        'prepare_pv',
-        'prepare_weather',
-    }
-    assert [_env(t)['TRANSFORM_STEP'] for t in assemble] == [
-        'assemble_pv',
-        'assemble_weather',
-    ]
+    assert {u.kind for u in units} == {'pv', 'weather'}
 
 
 def test_weather_grid_ledger_spanning_windows_yields_per_task_windows() -> None:
@@ -250,19 +182,16 @@ def test_weather_grid_ledger_spanning_windows_yields_per_task_windows() -> None:
         )
     }
 
-    manifests_fs, _, _ = _plan(BackfillScope.WEATHER_GRID, ledgers)
+    units, _ = _plan(BackfillScope.WEATHER_GRID, ledgers)
 
-    clean = _phases(manifests_fs, BackfillScope.WEATHER_GRID)[0]
-    windows = {
-        _env(t)['LOCATION']: (_env(t)['START_DATE'], _env(t)['END_DATE']) for t in clean
-    }
+    windows = {u.location: (u.start_date, u.end_date) for u in units}
     assert windows == {
         '50.06,-5.16': ('2026-01-01', '2026-01-15'),
         '51.00,-4.00': ('2026-02-01', '2026-02-15'),
     }
 
 
-def test_no_unconsumed_ledgers_writes_empty_manifest_and_keeps_marker() -> None:
+def test_no_unconsumed_ledgers_returns_empty_units_and_keeps_marker() -> None:
     ledger_name = _ledger_path('2026-05-14', '020000', _PV_EXTRACT_WF)
     ledgers = {
         ledger_name: _ledger_line(
@@ -277,13 +206,13 @@ def test_no_unconsumed_ledgers_writes_empty_manifest_and_keeps_marker() -> None:
     }
     marker = f'2026-05-14-020000-{_PV_EXTRACT_WF}.jsonl'
 
-    manifests_fs, _, next_marker = _plan(BackfillScope.PV_SITES, ledgers, marker=marker)
+    units, next_marker = _plan(BackfillScope.PV_SITES, ledgers, marker=marker)
 
-    assert _phases(manifests_fs, BackfillScope.PV_SITES) == [[], [], []]
+    assert units == []
     assert next_marker == marker
 
 
-def test_next_marker_sidecar_holds_highest_consumed_ledger_name() -> None:
+def test_next_marker_is_highest_consumed_ledger_name() -> None:
     ledgers = {
         _ledger_path('2026-05-13', '020000', _PV_EXTRACT_WF): _ledger_line(
             'completed',
@@ -305,11 +234,9 @@ def test_next_marker_sidecar_holds_highest_consumed_ledger_name() -> None:
         ),
     }
 
-    manifests_fs, _, next_marker = _plan(BackfillScope.PV_SITES, ledgers)
+    _, next_marker = _plan(BackfillScope.PV_SITES, ledgers)
 
-    highest = f'2026-05-14-020000-{_PV_EXTRACT_WF}.jsonl'
-    assert next_marker == highest
-    assert _sidecar_next_marker(manifests_fs, BackfillScope.PV_SITES) == highest
+    assert next_marker == f'2026-05-14-020000-{_PV_EXTRACT_WF}.jsonl'
 
 
 def test_first_run_consumes_from_the_oldest_ledger() -> None:
@@ -327,7 +254,6 @@ def test_first_run_consumes_from_the_oldest_ledger() -> None:
         ),
     }
 
-    manifests_fs, _, _ = _plan(BackfillScope.PV_SITES, ledgers)
+    units, _ = _plan(BackfillScope.PV_SITES, ledgers)
 
-    clean = _phases(manifests_fs, BackfillScope.PV_SITES)[0]
-    assert [_env(t)['PV_SYSTEM_ID'] for t in clean] == ['111']
+    assert [u.pv_system_id for u in units] == [111]

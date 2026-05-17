@@ -226,13 +226,15 @@ module "cloud_run_transform" {
   region    = var.region
   image_url = "${var.region}-docker.pkg.dev/${var.project_id}/data-transformation/data-transformation"
   image_tag = var.transformer_image_tag
-  # 2-hour ceiling so the transform-backfill `process_transform_chunk`
-  # job has room to walk its 500-unit chunk in-container. Daily-transform
-  # per-task executions finish in seconds and are unaffected — Cloud Run
-  # bills actual runtime, not the timeout.
-  timeout               = "7200s"
-  cpu                   = "2"
-  memory                = "2Gi"
+  # Tight enough to surface a runaway loop quickly; generous enough that
+  # the in-container transform-backfill (`run_transform_backfill`) has
+  # room to plan, run all phases with parallel threads, consolidate and
+  # commit in a single execution even for the weather-grid scope's
+  # ~40 K-unit backlog. Daily-transform per-task executions finish in
+  # seconds — Cloud Run bills actual runtime, not the timeout.
+  timeout               = "14400s"
+  cpu                   = "4"
+  memory                = "8Gi"
   service_account_email = google_service_account.pipeline.email
   env_vars = {
     TRANSFORM_STEP       = "clean_weather"
@@ -272,54 +274,44 @@ module "transformer_scheduler" {
   depends_on = [google_project_service.apis, module.transformer_workflow]
 }
 
-module "transformer_pv_sites_backfill_workflow" {
-  source = "./modules/transform/backfill_workflow"
-  region = var.region
-
-  service_account_email = google_service_account.pipeline.email
-  cloud_run_job_name    = module.cloud_run_transform.job_name
-  staging_bucket_name   = module.storage.staging_bucket_name
-  backfill_scope        = "pv_sites"
-  workflow_name_suffix  = "pv-sites"
-
-  depends_on = [google_project_service.apis, module.cloud_run_transform]
-}
-
+# Transform backfill is in-container (no Cloud Workflow): the scheduler
+# invokes the data-transformation Cloud Run Job directly with
+# JOB_TYPE=run_transform_backfill and a BACKFILL_SCOPE, and the
+# container handles plan + run + consolidate + commit in a single
+# execution. See pv_prospect.data_transformation.processing.entrypoint
+# (_run_transform_backfill) for the handler.
 module "transformer_pv_sites_backfill_scheduler" {
-  source = "./modules/scheduler"
-  region = var.region
+  source = "./modules/cloud_run_scheduler"
 
+  project_id            = var.project_id
+  region                = var.region
   scheduler_job_name    = "pv-prospect-daily-transform-pv-sites-backfill"
-  workflow_id           = module.transformer_pv_sites_backfill_workflow.workflow_id
-  service_account_email = google_service_account.pipeline.email
+  job_name              = module.cloud_run_transform.job_name
   schedule              = var.transformer_pv_sites_backfill_scheduler_cron
-
-  depends_on = [google_project_service.apis, module.transformer_pv_sites_backfill_workflow]
-}
-
-module "transformer_weather_grid_backfill_workflow" {
-  source = "./modules/transform/backfill_workflow"
-  region = var.region
-
   service_account_email = google_service_account.pipeline.email
-  cloud_run_job_name    = module.cloud_run_transform.job_name
-  staging_bucket_name   = module.storage.staging_bucket_name
-  backfill_scope        = "weather_grid"
-  workflow_name_suffix  = "weather-grid"
+  env_overrides = {
+    JOB_TYPE       = "run_transform_backfill"
+    BACKFILL_SCOPE = "pv_sites"
+  }
 
   depends_on = [google_project_service.apis, module.cloud_run_transform]
 }
 
 module "transformer_weather_grid_backfill_scheduler" {
-  source = "./modules/scheduler"
-  region = var.region
+  source = "./modules/cloud_run_scheduler"
 
+  project_id            = var.project_id
+  region                = var.region
   scheduler_job_name    = "pv-prospect-daily-transform-weather-grid-backfill"
-  workflow_id           = module.transformer_weather_grid_backfill_workflow.workflow_id
-  service_account_email = google_service_account.pipeline.email
+  job_name              = module.cloud_run_transform.job_name
   schedule              = var.transformer_weather_grid_backfill_scheduler_cron
+  service_account_email = google_service_account.pipeline.email
+  env_overrides = {
+    JOB_TYPE       = "run_transform_backfill"
+    BACKFILL_SCOPE = "weather_grid"
+  }
 
-  depends_on = [google_project_service.apis, module.transformer_weather_grid_backfill_workflow]
+  depends_on = [google_project_service.apis, module.cloud_run_transform]
 }
 
 # ---------------------------------------------------------------------------
@@ -508,19 +500,9 @@ output "extractor_weather_grid_backfill_scheduler_job_name" {
   description = "Weather grid backfill Cloud Scheduler job name"
 }
 
-output "transformer_pv_sites_backfill_workflow_name" {
-  value       = module.transformer_pv_sites_backfill_workflow.workflow_name
-  description = "PV-sites transform backfill workflow name"
-}
-
 output "transformer_pv_sites_backfill_scheduler_job_name" {
   value       = module.transformer_pv_sites_backfill_scheduler.scheduler_job_name
   description = "PV-sites transform backfill Cloud Scheduler job name"
-}
-
-output "transformer_weather_grid_backfill_workflow_name" {
-  value       = module.transformer_weather_grid_backfill_workflow.workflow_name
-  description = "Weather-grid transform backfill workflow name"
 }
 
 output "transformer_weather_grid_backfill_scheduler_job_name" {

@@ -21,7 +21,7 @@ This is a Python monorepo with four primary packages and supporting directories:
 | `pv-prospect-data-extraction/` | API extraction pipeline (PVOutput + OpenMeteo) with manifest planning and backfill cursors |
 | `pv-prospect-data-transformation/` | Data cleaning and processing pipeline |
 | `pv-prospect-model/` | ML model training (early stage) |
-| `terraform/` | GCP infrastructure (Cloud Scheduler -> Workflows -> Cloud Run Jobs) |
+| `terraform/` | GCP infrastructure (Cloud Scheduler -> Workflows -> Cloud Run Jobs for daily / extract; Cloud Scheduler -> Cloud Run Jobs direct for transform backfill) |
 
 Each package has its own `pyproject.toml`, `.venv`, and is installed with Poetry.
 Local deps are declared as

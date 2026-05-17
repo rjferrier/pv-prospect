@@ -31,8 +31,7 @@ gs://pv-prospect-staging/
 │   ├── prepared-batches/  (parquet)
 │   └── prepared/          (parquet)
 ├── tracking/
-│   ├── manifests/<run_date>/<workflow>.json           (orchestrator phases manifest — for the daily transform/extract; extract-backfill workflows embed phases inside this same path alongside their date window + next-cursor)
-│   ├── manifests/<run_date>/<workflow>.marker.json    (transformation backfill next-marker sidecar)
+│   ├── manifests/<run_date>/<workflow>.json           (orchestrator phases manifest — for the daily transform/extract; extract-backfill workflows embed phases inside this same path alongside their date window + next-cursor. Transform backfills don't write manifests — see Transformation Backfills.)
 │   ├── cursors/<workflow>.json                        (extraction backfill cursors / transformation backfill consumed-through markers — same path, different schema)
 │   ├── ledger/<run_date>/<workflow>/<task_hash>.jsonl (per-task ledger entries, mid-run)
 │   ├── ledger/<run_date>/<run_date>-<HHMMSS>-<workflow>.jsonl  (consolidated, post-consolidation)
@@ -97,108 +96,10 @@ Manifest path: `tracking/manifests/<run_date>/<workflow_name>.json`
 An **extraction** backfill workflow's planner writes a single document at
 this path carrying the date-window plan (start_date, end_date, next_cursor)
 *and* the orchestrator phases list — the Cloud Workflow consumes both from
-one file. A **transformation** backfill writes the manifest in the
-**phased v2 layout** (see below) — its planner derives the plan from the
-extraction ledger rather than a cursor — plus a small
-`<workflow_name>.marker.json` next-marker sidecar.
-
-#### Phased (v2) manifest layout
-
-Used by `plan_transform_backfill` via
-`WorkflowOrchestrator.write_phased_manifest`. The v1 single-document shape
-inlines every task's full env-list, which for the weather-grid transform
-backfill reaches ~10–20 K tasks per phase — far past the Cloud Workflows
-2 MiB per-step HTTP-response limit, so the workflow can't even fetch its
-own plan. The v2 layout splits the manifest into an index plus chunked
-per-phase part files, and hoists each phase's constant env-vars so the
-part files carry only the varying fields. Two independent compactions
-do the work: hoisting shrinks per-row bytes; chunking bounds per-file
-row count regardless of how big the queue gets.
-
-```
-tracking/manifests/<run_date>/<workflow>.json                  (index)
-tracking/manifests/<run_date>/<workflow>.phase-0.part-0.json   (clean,   part 0)
-tracking/manifests/<run_date>/<workflow>.phase-0.part-1.json   (clean,   part 1)
-tracking/manifests/<run_date>/<workflow>.phase-1.part-0.json   (prepare, part 0)
-...
-tracking/manifests/<run_date>/<workflow>.phase-2.part-0.json   (assemble)
-```
-
-Index document:
-
-```json
-{
-  "version": 2,
-  "phases": [
-    {
-      "files": ["<workflow>.phase-0.part-0.json", "<workflow>.phase-0.part-1.json"],
-      "common_env": [{"name": "TRANSFORM_STEP", "value": "clean_weather"}, ...],
-      "task_keys": ["DATE", "END_DATE", "LOCATION", "START_DATE", "TASK_HASH"]
-    },
-    ...
-  ]
-}
-```
-
-Per phase-part document:
-
-```json
-{
-  "rows": [
-    ["2026-04-17", "2026-05-01", "50.18,-5.24", "2026-04-17", "0d28..."],
-    ...
-  ]
-}
-```
-
-Each row is positional in `task_keys` order; `null` denotes "this task
-doesn't carry that env-var" (preserves the legacy absent-key semantics
-when a phase mixes tasks with and without optional fields like
-`PV_SYSTEM_ID`). At dispatch the Cloud Workflow walks `phases[i].files`
-in order, fetches each part file, and expands every task as
-`common_env + zip(task_keys, row)` (skipping `null` cells) before
-sending the resulting env-list as `containerOverrides.env`.
-
-Chunk size is `TASKS_PER_PHASE_FILE` rows (500) in
-`pv_prospect.etl.orchestration`. Three Workflows runtime ceilings
-drive this — the binding one is the **step-count limit**:
-
-- **100 K steps per execution.** Per-unit Cloud Run dispatch costs
-  ~50 workflow steps (start_job + polling inside `wait_for_operation`
-  and `await_job`). The weather-grid backfill reaches ~40 K units
-  total across all phases — far past the 2 M workflow steps that
-  would require. The transform-backfill workflow therefore dispatches
-  *one Cloud Run execution per chunk file*, not per unit, and the
-  container loops over the chunk's rows in-process (see
-  [Chunk dispatch contract](#chunk-dispatch-contract) below). Chunk
-  count is hundreds, well under the step limit.
-- **2 MiB per-step HTTP-response limit.** Each `googleapis.storage.v1.objects.get`
-  fetches a chunk file as a single HTTP response. 500-row chunks at
-  ~130 B/row are ~65 KiB each, with ~30× headroom.
-- **256 MiB per-execution memory limit.** With per-chunk dispatch the
-  workflow only holds a few dozen `task_op` / `await_job` results in
-  flight at peak, so memory stays well under the cap.
-
-#### Chunk dispatch contract
-
-For each chunk file in `phases[i].files`, the workflow dispatches one
-Cloud Run job execution with `JOB_TYPE=process_transform_chunk` and
-these env vars:
-
-| Env | Value |
-|---|---|
-| `INDEX_FILE` | `tracking/manifests/<run_date>/<workflow>.json` |
-| `PHASE_INDEX` | integer index into `index.phases[]` |
-| `CHUNK_FILE` | `tracking/manifests/<run_date>/<chunk-part-file>` |
-| `WORKFLOW_NAME`, `RUN_DATE` | as elsewhere |
-
-The container re-fetches the index to recover `phases[PHASE_INDEX]`'s
-`common_env` and `task_keys`, then walks the chunk's rows
-(`_run_one_transform_unit` per row) — recording per-unit ledger
-entries exactly as the per-unit dispatch path does. Per-unit
-exceptions are logged and swallowed; `WorkflowTerminatingError`
-propagates and exits the chunk with code 2 (so the workflow's outer
-`except` re-raises and skips the marker commit).
+one file. The **transformation** backfills don't write a manifest at all —
+they don't run inside a Cloud Workflow at all; planning, execution, and
+commit happen in a single Cloud Run Job execution (see
+[Transformation Backfills](#transformation-backfills)).
 
 ### Task-Outcome Ledger
 
@@ -275,11 +176,13 @@ design:
   than a perpetual retry. This is the "predictable cadence" trade-off the
   backfills opt into.
 
-The transformation side mirrors this split: the daily transform
-(`pv-prospect-transform`) self-filters, while the transformation backfills do
-not — their consumed-through marker (see
-[Transformation Backfills](#transformation-backfills)) plays the
-cadence-bounding role the extraction backfills' cursor plays.
+The transformation side splits differently: the daily transform
+(`pv-prospect-transform`) self-filters via the orchestrator at plan time;
+the transformation backfill self-filters at run time (inside the same
+in-container handler that does the work — see
+[Transformation Backfills](#transformation-backfills)). In both
+transform cases the goal is the same: skip units already recorded as
+`completed` so re-runs only do the unfinished work.
 
 ### Write-Audit Logs
 
@@ -395,41 +298,78 @@ yesterday's position and tomorrow's run re-plans the same window.
 
 ### Transformation Backfills
 
-The transformation backfills do **not** use the cursor/plan-commit pattern. A
-transformation is a recomputable derivative of the durable extraction harvest,
-so rather than marching a cursor of their own they plan from the extraction
-backfill's committed record. Each run:
+The transformation backfills do **not** use the cursor/plan-commit pattern
+and do **not** run inside a Cloud Workflow. A transformation is a
+recomputable derivative of the durable extraction harvest, so rather than
+marching a cursor of their own they plan from the extraction backfill's
+committed record. And because all the per-unit work is GCS-bound and runs
+quickly, the entire run fits comfortably inside a single Cloud Run Job
+execution.
 
-1. Calls `plan_transform_backfill` (with `BACKFILL_SCOPE`). It loads the
-   scope's **consumed-through marker** from `tracking/cursors/<workflow>.json`,
-   lists the corresponding extraction backfill's consolidated ledgers, and
-   takes the oldest `MAX_EXTRACT_RUNS` (default 4) whose filename sorts above
-   the marker. Every `completed` extraction entry becomes a transform unit
-   `(data_source, identifier, window)`; `failed` entries are skipped — no raw
-   data means no transform task, correctly leaving a hole. The resulting
-   `clean → prepare → assemble` phases are written as a **phased (v2)
-   manifest** — an index at `tracking/manifests/<run_date>/<workflow>.json`
-   plus one `<workflow>.phase-<N>.json` per phase (see [Phased (v2) manifest
-   layout](#phased-v2-manifest-layout)) — alongside a
-   `<workflow>.marker.json` sidecar recording the `next_marker`.
-2. Executes the phased manifest using the same dispatcher the daily transform
-   uses; per-task ledger entries record each outcome.
-3. Calls `commit_transform_backfill`, which promotes the sidecar's
-   `next_marker` to the live marker. This is **unconditional** — it runs even
-   after swallowed per-task (exit-1) failures, so the marker advances at a
-   predictable cadence and a transiently-failed transform task is a recorded
-   hole, not a perpetual retry. An exit-2 `WorkflowTerminatingError` aborts the
-   run before commit, leaving the marker unchanged for the next run to
-   re-derive.
+Cloud Scheduler invokes the `data-transformation` Cloud Run Job directly
+(no Workflow), with `JOB_TYPE=run_transform_backfill` and a
+`BACKFILL_SCOPE` (`pv_sites` or `weather_grid`). The handler
+(`_run_transform_backfill` in
+`pv_prospect.data_transformation.processing.entrypoint`) does the full run:
 
-Because the plan is a pure function of the extraction ledger and the marker,
-the backfill planner does not self-filter against its own ledger (unlike the
-daily transform). Resetting the marker to the empty string re-derives every
-transform task from the oldest extraction ledger forward — the supported way
-to re-transform after a feature-spec change.
+1. **Plan** — `plan_units(scope, ledger_fs, cursors_fs, max_extract_runs)`
+   loads the scope's **consumed-through marker** from
+   `tracking/cursors/<workflow>.json`, lists the corresponding extraction
+   backfill's consolidated ledgers, takes the oldest `MAX_EXTRACT_RUNS`
+   (default 4) whose filename sorts above the marker, and turns every
+   `completed` descriptor into a `TransformUnit`. Returns the units plus
+   the `next_marker` that the marker should advance to once the work
+   succeeds. `failed` extraction entries are skipped (no raw data → no
+   transform task, correctly leaving a hole).
+2. **Filter** — `WorkflowOrchestrator.filter_remaining_tasks` drops units
+   whose hashes already appear `completed` in any prior consolidated
+   ledger or any per-task entry under the current run-date. This makes
+   the run idempotent: a second invocation re-plans the same units but
+   only the unfinished ones run.
+3. **Run** — `build_transform_phases` orders the units into clean →
+   prepare → assemble; `_run_phase_parallel` runs each phase via a
+   `ThreadPoolExecutor` (`MAX_WORKERS=32` by default), so all phase-0
+   tasks finish before phase-1 starts. Per-unit ledger entries are
+   written from worker threads — concurrent writes target distinct
+   `<run_date>/<workflow>/<task_hash>.jsonl` paths, so no contention.
+   Per-unit `Exception` is logged and swallowed; the failed entry is in
+   the ledger and the rest of the phase continues.
+   `WorkflowTerminatingError` propagates: pending tasks are cancelled,
+   in-flight tasks finish, and the handler raises out without advancing
+   the marker.
+4. **Consolidate** — `consolidate_logs` and `consolidate_ledger` are
+   called in-process, merging per-task entries into the single
+   `<run_date>-<HHMMSS>-<workflow>.jsonl` consolidated file the
+   cross-day resume scan reads.
+5. **Commit** — `save_marker(cursors_fs, workflow_name,
+   ConsumedMarker(next_marker))` advances the marker.
 
-The two scopes use independent markers, so a hiccup transforming the weather
-grid does not block PV-sites progress (or vice versa).
+Because the plan is a pure function of the extraction ledger and the
+marker, resetting the marker to the empty string re-derives every
+transform task from the oldest extraction ledger forward — the supported
+way to re-transform after a feature-spec change.
+
+The two scopes use independent markers, so a hiccup transforming the
+weather grid does not block PV-sites progress (or vice versa).
+
+#### Why no Workflow?
+
+The transform-backfill briefly ran as a Cloud Workflow (with chunked
+manifests on GCS and per-chunk Cloud Run dispatch) but that path
+collided with multiple Workflows runtime ceilings — the 2 MiB
+per-HTTP-response limit on manifest fetches, the 256 MiB per-execution
+memory budget when fanning out parallel branches, and the hard 100 K
+step-count limit at ~50 steps per unit. Each accommodation (sharded
+manifest files, hoisted common env, in-container chunk handlers) added
+machinery that wasn't intrinsic to the work — and ultimately a path-
+prefix mismatch between the chunk-dispatcher's env vars and the
+container's storage backend silently advanced the cursor over un-run
+work. Running the whole backfill inside one Cloud Run Job execution
+removes all four problems at once: GCS reads use the storage client
+(no 2 MiB cap), parallelism is bounded by a thread pool (memory under
+control), and there are no workflow steps to count. The trade-off is
+that one Cloud Run timeout aborts the whole run; the catch-up backlog
+is small enough that this hasn't been a real concern.
 
 ## Retry and Rate-Limit Handling
 

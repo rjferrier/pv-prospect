@@ -1,22 +1,29 @@
 """Cloud Run Job entrypoint for Data Transformation.
 
-Reads task parameters from environment variables set by the Cloud Workflow
-and calls the corresponding core function.
+Reads task parameters from environment variables and calls the
+corresponding core function.
 
 Environment variables
 ---------------------
 JOB_TYPE
-    ``plan_transform``, ``plan_transform_backfill``,
-    ``commit_transform_backfill``, or ``consolidate_logs``. If unset the
-    job runs a single transform step (selected by ``TRANSFORM_STEP``).
+    ``plan_transform`` (daily transform planner),
+    ``run_transform_backfill`` (in-container backfill: plan + run +
+    commit + consolidate, all in one execution), or ``consolidate_logs``
+    (daily transform's end-of-run step). If unset the job runs a single
+    transform step (selected by ``TRANSFORM_STEP``) — the per-task
+    dispatch shape used by the daily-transform workflow.
 BACKFILL_SCOPE
-    Required for ``plan_transform_backfill`` and
-    ``commit_transform_backfill``. ``pv_sites`` or ``weather_grid`` —
-    selects which transform backfill (and its consumed-through marker) to
-    plan or commit.
+    Required for ``run_transform_backfill``. ``pv_sites`` or
+    ``weather_grid`` — selects which backfill (and its consumed-through
+    marker) to run.
 MAX_EXTRACT_RUNS
-    (Optional, ``plan_transform_backfill`` only) how many unconsumed
+    (Optional, ``run_transform_backfill`` only) how many unconsumed
     extraction consolidated ledgers one run may consume. Defaults to 4.
+MAX_WORKERS
+    (Optional, ``run_transform_backfill`` only) thread-pool size used to
+    parallelise the units within each phase. Defaults to 32. Transform
+    work is GCS-bound, so threading (not multiprocessing) is the right
+    primitive.
 TRANSFORM_STEP
     ``clean_weather``, ``clean_pv``, ``prepare_weather``, ``prepare_pv``,
     ``assemble_weather``, or ``assemble_pv``
@@ -39,6 +46,7 @@ LOCATION
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
 
@@ -54,17 +62,19 @@ from pv_prospect.data_sources import resolve_site
 from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.processing import (
     TRANSFORMATIONS_NEEDING_PV_SITE,
+    ConsumedMarker,
     Transformation,
     TransformUnit,
     assemble_prepared_pv,
     assemble_prepared_weather,
     build_transform_phases,
-    commit_transform_backfill,
-    plan_transform_backfill,
+    plan_units,
     run_clean_pv,
     run_clean_weather,
     run_prepare_pv,
     run_prepare_weather,
+    save_marker,
+    workflow_name_for,
 )
 from pv_prospect.data_transformation.resources import (
     get_config_dir as get_dt_config_dir,
@@ -187,39 +197,23 @@ def main() -> None:
             run_date, _required(manifests_fs, 'manifests_storage'), ledger_fs
         )
         return
-    elif job_type == 'plan_transform_backfill':
-        _run_plan_transform_backfill(
+    elif job_type == 'run_transform_backfill':
+        _run_transform_backfill(
             run_date,
+            config,
             _required(ledger_fs, 'ledger_storage'),
-            _required(manifests_fs, 'manifests_storage'),
-            _required(cursors_fs, 'cursors_storage'),
-        )
-        return
-    elif job_type == 'commit_transform_backfill':
-        _run_commit_transform_backfill(
-            run_date,
-            _required(manifests_fs, 'manifests_storage'),
             _required(cursors_fs, 'cursors_storage'),
         )
         return
     elif job_type == 'consolidate_logs':
         _run_consolidate_logs(config, run_date)
         return
-    elif job_type == 'process_transform_chunk':
-        _run_process_transform_chunk(
-            run_date,
-            config,
-            _required(manifests_fs, 'manifests_storage'),
-            ledger_fs,
-        )
-        return
 
-    # Per-task path (legacy daily-transform dispatch shape: one Cloud Run
-    # task per transform unit). The chunk path above is what the transform
-    # backfill uses now — see `_run_process_transform_chunk` for why.
+    # Per-task path: one Cloud Run task per transform unit. This shape is
+    # how the daily-transform workflow still dispatches individual steps.
     workflow_name = os.environ.get('WORKFLOW_NAME', '')
     run_label = os.environ.get('RUN_LABEL', '')
-    shared = _build_chunk_runtime(config, workflow_name, run_date, run_label)
+    shared = _build_runtime(config, workflow_name, run_date, run_label)
     orchestrator = WorkflowOrchestrator(
         workflow_name, run_date, ledger_fs=ledger_fs, run_label=run_label
     )
@@ -245,10 +239,11 @@ def _task_env_from_environ() -> dict[str, str]:
 
 
 @dataclass(frozen=True)
-class _ChunkRuntime:
-    """Shared per-chunk resources. Built once, reused for every unit in the
-    chunk to amortise config loading, GCS handle setup, and the
-    PV-site/location-mapping repo load."""
+class _Runtime:
+    """Shared per-execution resources. Built once, reused for every unit
+    handled in the same Cloud Run Job execution to amortise config
+    loading, GCS handle setup, and the PV-site / location-mapping repo
+    load."""
 
     raw_fs: FileSystem
     cleaned_fs: FileSystem
@@ -256,12 +251,12 @@ class _ChunkRuntime:
     prepared_fs: FileSystem
 
 
-def _build_chunk_runtime(
+def _build_runtime(
     config: DataTransformationConfig,
     workflow_name: str,
     run_date: str,
     run_label: str,
-) -> _ChunkRuntime:
+) -> _Runtime:
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
     cleaned_fs = _get_logging_filesystem(
@@ -289,23 +284,22 @@ def _build_chunk_runtime(
         run_label,
     )
     _load_resources(resources_fs)
-    return _ChunkRuntime(raw_fs, cleaned_fs, batches_fs, prepared_fs)
+    return _Runtime(raw_fs, cleaned_fs, batches_fs, prepared_fs)
 
 
 def _run_one_transform_unit(
     task_env: dict[str, str],
-    shared: _ChunkRuntime,
+    shared: _Runtime,
     config: DataTransformationConfig,
     orchestrator: WorkflowOrchestrator,
 ) -> None:
     """Run a single transform unit described by *task_env*.
 
-    *task_env* is the per-task env-var dict — either parsed from
-    ``os.environ`` (daily-transform per-task dispatch) or reconstructed
-    from a manifest row plus the phase's hoisted common env (transform-
-    backfill chunk dispatch). The shared runtime + config are loaded
-    once per Cloud Run execution; the orchestrator owns the ledger
-    writes.
+    *task_env* is the per-task env-var dict — parsed from ``os.environ``
+    in the daily-transform per-task dispatch, or built from a planned
+    unit's env-list in the transform-backfill in-container handler. The
+    shared runtime + config are loaded once per Cloud Run execution; the
+    orchestrator owns the ledger writes.
 
     Records a ``failed`` ledger entry and re-raises on any exception,
     or a ``completed`` entry on success.
@@ -361,104 +355,141 @@ def _run_one_transform_unit(
     orchestrator.record_outcome(task_hash, descriptor, 'completed')
 
 
-def _run_process_transform_chunk(
+_DEFAULT_MAX_EXTRACT_RUNS = 4
+_DEFAULT_MAX_WORKERS = 32
+
+
+def _run_transform_backfill(
     run_date: str,
     config: DataTransformationConfig,
-    manifests_fs: FileSystem,
-    ledger_fs: FileSystem | None,
+    ledger_fs: FileSystem,
+    cursors_fs: FileSystem,
 ) -> None:
-    """Run every transform unit listed in one manifest phase-part file.
+    """Plan, run, and commit a transform-backfill scope end-to-end.
 
-    The transform-backfill workflow's queue routinely exceeds Cloud
-    Workflows' 100K-step-per-execution ceiling when each unit is a
-    separate Cloud Run dispatch (~50 workflow steps/unit × tens of
-    thousands of units). The fix is to dispatch one Cloud Run execution
-    per chunk file and process the chunk's rows in-container, so the
-    workflow's step count scales with chunk count (hundreds) not unit
-    count (tens of thousands).
+    Reads the consumed-through marker, picks the next ``MAX_EXTRACT_RUNS``
+    unconsumed extraction ledgers, turns their completed descriptors
+    into transform units, runs the clean → prepare → assemble phases
+    (each phase fanned out across a thread pool), consolidates the
+    per-task ledger, then advances the marker. Per-task ledger entries
+    record outcomes for cross-run resume; the marker only advances when
+    every phase completes without a terminating error.
 
-    Required env vars:
-
-    * ``CHUNK_FILE``  -- relative path of the chunk file on
-      ``manifests_fs`` (e.g.
-      ``<run_date>/<workflow>.phase-0.part-3.json``).
-    * ``INDEX_FILE``  -- relative path of the manifest index, used to
-      recover the phase-level ``common_env`` and ``task_keys`` schema
-      so the chunk file can stay row-only.
-    * ``PHASE_INDEX`` -- which phase this chunk belongs to, indexing
-      ``index.phases[]``.
-
-    Per-unit ``Exception`` failures are logged and swallowed (the
-    orchestrator's ledger entry already records ``failed`` for that
-    unit's task_hash), so the chunk runs to completion and other units
-    aren't blocked. ``WorkflowTerminatingError`` propagates and aborts
-    the chunk (Cloud Run exit 2 → workflow's outer except re-raises
-    and skips the commit step).
+    Replaces the workflow-orchestrated plan / dispatch / commit /
+    consolidate split. Transform work is GCS-bound, so a thread pool
+    inside one Cloud Run Job execution is the right primitive — and
+    one execution per backfill run avoids the Workflows ceilings
+    (2 MiB HTTP, 100 K steps, 256 MiB memory) that a multi-step
+    dispatch had to tip-toe around.
     """
-    chunk_file = os.environ.get('CHUNK_FILE')
-    if not chunk_file:
-        raise WorkflowTerminatingError(
-            'CHUNK_FILE is required for process_transform_chunk'
-        )
-    index_file = os.environ.get('INDEX_FILE')
-    if not index_file:
-        raise WorkflowTerminatingError(
-            'INDEX_FILE is required for process_transform_chunk'
-        )
-    phase_index_raw = os.environ.get('PHASE_INDEX')
-    if phase_index_raw is None:
-        raise WorkflowTerminatingError(
-            'PHASE_INDEX is required for process_transform_chunk'
-        )
-    phase_index = int(phase_index_raw)
-
-    workflow_name = os.environ.get('WORKFLOW_NAME', '')
+    scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
+    max_extract_runs = int(
+        os.environ.get('MAX_EXTRACT_RUNS') or _DEFAULT_MAX_EXTRACT_RUNS
+    )
+    max_workers = int(os.environ.get('MAX_WORKERS') or _DEFAULT_MAX_WORKERS)
+    workflow_name = workflow_name_for(scope)
     run_label = os.environ.get('RUN_LABEL', '')
 
-    index = json.loads(manifests_fs.read_text(index_file))
-    phase = index['phases'][phase_index]
-    common_env: dict[str, str] = {e['name']: e['value'] for e in phase['common_env']}
-    task_keys: list[str] = phase['task_keys']
+    units, next_marker = plan_units(scope, ledger_fs, cursors_fs, max_extract_runs)
+    if not units:
+        logger.info(
+            'run_transform_backfill[%s]: no unconsumed extract ledgers; '
+            'marker stays at %r',
+            scope.value,
+            next_marker,
+        )
+        return
+    logger.info(
+        'run_transform_backfill[%s]: %d units planned; will advance marker to %r',
+        scope.value,
+        len(units),
+        next_marker,
+    )
 
-    chunk = json.loads(manifests_fs.read_text(chunk_file))
-    rows: list[list[str | None]] = chunk['rows']
-
-    shared = _build_chunk_runtime(config, workflow_name, run_date, run_label)
     orchestrator = WorkflowOrchestrator(
         workflow_name, run_date, ledger_fs=ledger_fs, run_label=run_label
     )
+    phases = build_transform_phases(units, workflow_name, run_date)
+    remaining = [orchestrator.filter_remaining_tasks(phase) for phase in phases]
+    shared = _build_runtime(config, workflow_name, run_date, run_label)
 
+    for index, phase in enumerate(remaining):
+        logger.info(
+            'run_transform_backfill[%s]: phase %d running (%d units, workers=%d)',
+            scope.value,
+            index,
+            len(phase),
+            max_workers,
+        )
+        _run_phase_parallel(phase, shared, config, orchestrator, max_workers)
+
+    # Consolidate per-task ledger entries into a single
+    # <date>-<HHMMSS>-<workflow>.jsonl so cross-day resume can see them
+    # via the consolidated-ledger scan path.
+    _run_consolidate_logs_for(config, run_date, workflow_name, run_label)
+
+    save_marker(cursors_fs, workflow_name, ConsumedMarker(consumed_through=next_marker))
     logger.info(
-        'process_transform_chunk: %d units in phase %d (%s)',
-        len(rows),
-        phase_index,
-        chunk_file,
+        'run_transform_backfill[%s]: marker advanced to %r', scope.value, next_marker
     )
-    succeeded = 0
-    failed = 0
-    for row in rows:
-        task_env = dict(common_env)
-        for k, v in zip(task_keys, row, strict=True):
-            if v is not None:
-                task_env[k] = v
-        try:
-            _run_one_transform_unit(task_env, shared, config, orchestrator)
-            succeeded += 1
-        except WorkflowTerminatingError:
-            # Terminating errors abort the whole chunk so the outer
-            # workflow leaves the marker unchanged. Re-raise to main().
-            raise
-        except Exception:
-            # Non-terminating failure: ledger already recorded 'failed';
-            # log and continue so the rest of the chunk still runs.
-            logger.exception('Unit failed; continuing with next unit')
-            failed += 1
-    logger.info(
-        'process_transform_chunk: %d succeeded, %d failed (chunk %s)',
-        succeeded,
-        failed,
-        chunk_file,
-    )
+
+
+def _run_phase_parallel(
+    phase: list[list[dict[str, str]]],
+    shared: _Runtime,
+    config: DataTransformationConfig,
+    orchestrator: WorkflowOrchestrator,
+    max_workers: int,
+) -> None:
+    """Run *phase*'s tasks concurrently via a thread pool.
+
+    Per-unit ``Exception`` is logged-and-swallowed — the per-task ledger
+    entry already records 'failed'; the rest of the phase continues so a
+    transient hole doesn't block the whole run. A
+    :class:`WorkflowTerminatingError` propagates: pending tasks are
+    cancelled, in-flight tasks finish, and this re-raises out of the
+    handler so the marker stays put for re-planning next run.
+    """
+    if not phase:
+        return
+
+    def run_unit(env_list: list[dict[str, str]]) -> None:
+        task_env = {e['name']: e['value'] for e in env_list}
+        _run_one_transform_unit(task_env, shared, config, orchestrator)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(run_unit, env) for env in phase]
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except WorkflowTerminatingError:
+                for pending in futures:
+                    pending.cancel()
+                raise
+            except Exception:
+                logger.exception('Unit failed; continuing with next unit in phase')
+
+
+def _run_consolidate_logs_for(
+    config: DataTransformationConfig,
+    run_date: str,
+    workflow_name: str,
+    run_label: str,
+) -> None:
+    """Consolidate this workflow's per-task logs and ledger entries.
+
+    Called by the in-container backfill handler at the end of a run, in
+    the same process as the work. (The daily-transform workflow still
+    runs the same operation as a separate Cloud Run step via the
+    ``consolidate_logs`` JOB_TYPE handler.)
+    """
+    run_date_obj = date.fromisoformat(run_date)
+    if config.log_storage:
+        log_fs = get_filesystem(config.log_storage)
+        consolidate_logs(log_fs, workflow_name, run_date_obj, run_label=run_label)
+    if config.ledger_storage:
+        ledger_fs = get_filesystem(config.ledger_storage)
+        consolidate_ledger(ledger_fs, workflow_name, run_date_obj, run_label=run_label)
 
 
 def _run_transform_step(
@@ -590,43 +621,6 @@ def parse_backfill_scope(raw: str) -> BackfillScope:
             f'BACKFILL_SCOPE must be one of '
             f'{[s.value for s in BackfillScope]!r}; got {raw!r}'
         ) from e
-
-
-_DEFAULT_MAX_EXTRACT_RUNS = 4
-
-
-def _run_plan_transform_backfill(
-    run_date: str,
-    ledger_fs: FileSystem,
-    manifests_fs: FileSystem,
-    cursors_fs: FileSystem,
-) -> None:
-    scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
-    max_extract_runs = int(
-        os.environ.get('MAX_EXTRACT_RUNS') or _DEFAULT_MAX_EXTRACT_RUNS
-    )
-    next_marker = plan_transform_backfill(
-        scope, run_date, ledger_fs, manifests_fs, cursors_fs, max_extract_runs
-    )
-    logger.info(
-        'plan_transform_backfill[%s]: wrote manifest, next_marker=%r',
-        scope.value,
-        next_marker,
-    )
-
-
-def _run_commit_transform_backfill(
-    run_date: str,
-    manifests_fs: FileSystem,
-    cursors_fs: FileSystem,
-) -> None:
-    scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
-    next_marker = commit_transform_backfill(scope, run_date, manifests_fs, cursors_fs)
-    logger.info(
-        'commit_transform_backfill[%s]: advanced marker to %r',
-        scope.value,
-        next_marker,
-    )
 
 
 if __name__ == '__main__':

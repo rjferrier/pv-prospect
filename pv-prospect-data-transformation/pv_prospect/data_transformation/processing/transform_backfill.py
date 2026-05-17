@@ -4,10 +4,7 @@ The transform backfill plans from the *extraction* backfill's durable
 record rather than from a cursor of its own. The extraction backfill's
 consolidated ledger already enumerates exactly which ``(site/location,
 data_source, window)`` tuples have raw data; this module reads those
-``completed`` entries and turns them into transform tasks. There is no
-transform cursor — the :class:`BackfillCursor` vs
-``WeatherGridBackfillCursor`` shape divergence is purely an extraction
-concern and does not reach the transform side at all.
+``completed`` entries and turns them into transform tasks.
 
 What this module owns:
 
@@ -15,13 +12,15 @@ What this module owns:
     :func:`build_transform_phases` (shared with the daily transform);
   * :class:`ConsumedMarker` — a small high-water mark over extraction
     consolidated-ledger filenames that bounds each run's work and
-    advances unconditionally, replacing the old transform cursor;
-  * :func:`plan_transform_backfill` / :func:`commit_transform_backfill`,
-    the per-:class:`BackfillScope` plan/commit pair.
+    advances unconditionally;
+  * :func:`plan_units`, which returns the units to transform plus the
+    marker value to advance to once the work succeeds.
 
-Resetting the marker re-derives every transform task from the durable
-extraction record — the supported way to re-transform after a
-feature-spec change.
+The plan/commit split is collapsed into a single in-container backfill
+handler (see :mod:`pv_prospect.data_transformation.processing.entrypoint`
+``_run_transform_backfill``). Resetting the marker re-derives every
+transform task from the durable extraction record — the supported way
+to re-transform after a feature-spec change.
 """
 
 import json
@@ -31,7 +30,6 @@ from typing import Literal
 from pv_prospect.data_sources import DataSourceType
 from pv_prospect.etl import (
     BackfillScope,
-    WorkflowOrchestrator,
     build_env_list,
     inject_task_hash,
 )
@@ -228,15 +226,6 @@ def _marker_filename(workflow_name: str) -> str:
     return f'{workflow_name}.json'
 
 
-def _marker_sidecar_path(workflow_name: str, run_date: str) -> str:
-    """Next-marker sidecar path, relative to the manifests filesystem.
-
-    Written by :func:`plan_transform_backfill` alongside the orchestrator
-    manifest and read by :func:`commit_transform_backfill`.
-    """
-    return f'{run_date}/{workflow_name}.marker.json'
-
-
 def load_marker(cursors_fs: FileSystem, workflow_name: str) -> ConsumedMarker:
     """Load the live marker for *workflow_name*, or an initial empty one."""
     path = _marker_filename(workflow_name)
@@ -253,7 +242,7 @@ def save_marker(
 
 
 # ---------------------------------------------------------------------------
-# Plan / commit
+# Planning
 # ---------------------------------------------------------------------------
 
 
@@ -285,29 +274,27 @@ def _descriptor_to_unit(descriptor: dict[str, str]) -> TransformUnit | None:
     return None
 
 
-def plan_transform_backfill(
+def plan_units(
     scope: BackfillScope,
-    run_date: str,
     ledger_fs: FileSystem,
-    manifests_fs: FileSystem,
     cursors_fs: FileSystem,
     max_extract_runs: int,
-) -> str:
-    """Plan *scope*'s transform backfill from extraction's committed ledger.
+) -> tuple[list[TransformUnit], str]:
+    """Plan *scope*'s transform units from extraction's committed ledger.
 
     Lists the extraction backfill's consolidated ledgers, keeps those
     above the live marker, takes the oldest *max_extract_runs* of them,
-    and turns every ``completed`` entry into a :class:`TransformUnit`
-    (``failed`` extraction entries are skipped — no raw data means no
-    transform task, correctly leaving a hole). The resulting clean →
-    prepare → assemble phases are written straight to the orchestrator
-    manifest at ``<run_date>/<workflow>.json``; a sidecar
-    ``<run_date>/<workflow>.marker.json`` records the ``next_marker``.
+    and turns every ``completed`` entry into a :class:`TransformUnit`.
+    ``failed`` extraction entries are skipped — no raw data means no
+    transform task, correctly leaving a hole.
 
-    The planner does **not** self-filter against the transform's own
-    ledger — the marker already prevents re-consuming a completed run,
-    and not self-filtering keeps the plan a pure function of the
-    extraction record. Returns the chosen ``next_marker``.
+    Returns ``(units, next_marker)``. The caller is expected to run the
+    units and only then advance the live marker (via :func:`save_marker`)
+    to ``next_marker``. When no unconsumed ledgers exist, returns an
+    empty unit list and the unchanged marker, so callers can no-op
+    cleanly without touching state.
+
+    Pure planning — no manifests are written and no marker is advanced.
     """
     workflow_name = workflow_name_for(scope)
     marker = load_marker(cursors_fs, workflow_name)
@@ -323,41 +310,5 @@ def plan_transform_backfill(
             if unit is not None:
                 units.append(unit)
 
-    phases = build_transform_phases(units, workflow_name, run_date)
-    # Phased (v2) manifest: index + per-phase files. The weather-grid
-    # backfill phases routinely reach ~10 K tasks each, and the v1 single-
-    # document shape blew past the Cloud Workflows 2 MiB HTTP-response
-    # limit. The v2 split hoists each phase's constant env into the index
-    # and keeps per-phase rows compact (positional, varying-only) so each
-    # phase fetch stays well under the limit.
-    WorkflowOrchestrator(
-        workflow_name, run_date, manifests_fs=manifests_fs
-    ).write_phased_manifest(phases)
-
     next_marker = chosen[-1].name if chosen else marker.consumed_through
-    manifests_fs.write_text(
-        _marker_sidecar_path(workflow_name, run_date),
-        json.dumps({'next_marker': next_marker}),
-    )
-    return next_marker
-
-
-def commit_transform_backfill(
-    scope: BackfillScope,
-    run_date: str,
-    manifests_fs: FileSystem,
-    cursors_fs: FileSystem,
-) -> str:
-    """Promote the manifest sidecar's ``next_marker`` to the live marker.
-
-    Reads ``<run_date>/<workflow>.marker.json`` written by
-    :func:`plan_transform_backfill`. Unconditional — the workflow runs
-    this even after swallowed per-task failures, so the marker advances
-    at a predictable cadence and a transiently-failed transform task is a
-    recorded hole, not a perpetual retry. Returns the new marker value.
-    """
-    workflow_name = workflow_name_for(scope)
-    sidecar = manifests_fs.read_text(_marker_sidecar_path(workflow_name, run_date))
-    next_marker = json.loads(sidecar)['next_marker']
-    save_marker(cursors_fs, workflow_name, ConsumedMarker(consumed_through=next_marker))
-    return next_marker
+    return units, next_marker

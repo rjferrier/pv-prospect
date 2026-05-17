@@ -95,7 +95,7 @@ variable "transformer_pv_sites_backfill_scheduler_cron" {
 variable "transformer_weather_grid_backfill_scheduler_cron" {
   type        = string
   default     = "0 8 * * *"
-  description = "Cron schedule for daily weather-grid transform backfill (default: 08:00 UTC). Must start after the weather-grid extract finishes and its ledger is consolidated, otherwise plan_transform_backfill sees no new ledgers and emits empty phases. Under the default extract schedule (03:20 + ~3h 24min wall) the extract finishes ~06:44 and consolidate adds a few minutes; 08:00 gives ~1h margin."
+  description = "Cron schedule for daily weather-grid transform backfill (default: 08:00 UTC). Must start after the weather-grid extract finishes and its ledger is consolidated, otherwise the in-container backfill (run_transform_backfill) sees no unconsumed ledgers and exits with no work. Under the default extract schedule (03:20 + ~3h 24min wall) the extract finishes ~06:44 and consolidate adds a few minutes; 08:00 gives ~1h margin."
 }
 
 variable "versioner_image_tag" {
