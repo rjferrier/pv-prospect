@@ -334,7 +334,7 @@ def _run_one_transform_unit(
     if task_env.get('END_DATE'):
         descriptor['end_date'] = task_env['END_DATE']
 
-    logger.info('Starting %s for %s', transformation, date_range)
+    logger.debug('Starting %s for %s', transformation, date_range)
 
     try:
         _run_transform_step(

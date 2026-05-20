@@ -1,6 +1,6 @@
 from .config_parser import get_config
 from .env_mapper import VarMapping, map_from_env
-from .logging_config import configure_logging
+from .logging_config import configure_logging, resolve_log_level
 from .pv_site_repo import (
     build_pv_site_repo,
     get_all_pv_system_ids,
@@ -13,6 +13,7 @@ __all__ = [
     'get_pv_site_by_system_id',
     'get_config',
     'configure_logging',
+    'resolve_log_level',
     'map_from_env',
     'VarMapping',
 ]
