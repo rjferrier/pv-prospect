@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from pv_prospect.etl.storage.logging_fs import LoggingFileSystem
+from pv_prospect.etl.storage.logging_fs import LogCollector, LoggingFileSystem
 
 from ...helpers import FakeFileSystem
 
@@ -242,3 +242,53 @@ def test_multiple_writes_with_different_timestamps() -> None:
 
     assert '2025-06-24/wf/103015000000.txt' in log_fs._files
     assert '2025-06-24/wf/103015500000.txt' in log_fs._files
+
+
+def test_write_text_records_to_log_collector_when_set() -> None:
+    inner = FakeFileSystem()
+    log_fs = FakeFileSystem()
+    collector = LogCollector('wf', '2025-06-24')
+    fs = LoggingFileSystem(
+        inner,
+        log_fs,
+        'wf',
+        '2025-06-24',
+        'cleaned',
+        log_collector=collector,
+        now=_fixed_now,
+    )
+
+    fs.write_text('data/file.csv', 'content')
+
+    assert inner._files['data/file.csv'] == 'content'
+    assert log_fs._files == {}  # no per-write scratch file
+
+    flushed = FakeFileSystem()
+    collector.flush(flushed, now=_fixed_now)
+    assert next(iter(flushed._files.values())) == (
+        '2025-06-24T10:30:15.123456+00:00 CREATED cleaned/data/file.csv\n'
+    )
+
+
+def test_write_bytes_records_to_log_collector_when_set() -> None:
+    inner = FakeFileSystem()
+    log_fs = FakeFileSystem()
+    collector = LogCollector('wf', '2025-06-24')
+    fs = LoggingFileSystem(
+        inner,
+        log_fs,
+        'wf',
+        '2025-06-24',
+        'raw',
+        log_collector=collector,
+        now=_fixed_now,
+    )
+
+    fs.write_bytes('data/file.bin', b'\x00\x01')
+
+    assert inner._binary_files['data/file.bin'] == b'\x00\x01'
+    assert log_fs._files == {}
+
+    flushed = FakeFileSystem()
+    collector.flush(flushed, now=_fixed_now)
+    assert 'raw/data/file.bin' in next(iter(flushed._files.values()))

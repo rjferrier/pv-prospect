@@ -141,13 +141,25 @@ its file. The end-of-workflow `consolidate_logs` job calls
 `<ledger_storage>/<run_date>/<run_date>-<HHMMSS>-<workflow>.jsonl` sorted by
 `recorded_at` and deletes the originals.
 
+This per-task fan-out exists because a *distributed* workflow's tasks are
+separate processes that can only safely record an outcome to a file of their
+own. A *single-process* workflow — the transformation backfill — instead passes
+a `LedgerCollector` (`pv_prospect.etl.storage.ledger`) to the orchestrator:
+`record_outcome` buffers each entry in a thread-safe in-memory list, and a
+single end-of-run `flush` writes the consolidated
+`<run_date>-<HHMMSS>-<workflow>.jsonl` directly. No per-task files are created,
+so there is nothing for `consolidate_ledger` to merge — which avoids re-reading
+tens of thousands of tiny objects one GCS round-trip at a time, an O(N) step
+that does not fit a Cloud Run timeout at backfill scale.
+
 `filter_remaining_tasks()` consults the ledger and skips any task whose hash
 appears with `status='completed'`. Task identity is computed by
 `compute_task_hash(env)` over each task's env at filter time, so neither the
 planner nor the container needs to pre-inject a `TASK_HASH` env entry.
 `filter_remaining_tasks` scans:
 
-1. The current run's per-task files under `<run_date>/<workflow>/`.
+1. The current run's per-task files under `<run_date>/<workflow>/` — skipped
+   when the orchestrator uses a `LedgerCollector`, which writes none.
 2. Every consolidated ledger file ever produced for this workflow
    (`<*>/<*>-*-<workflow>.jsonl`), to preserve cross-day resume.
 
@@ -191,6 +203,13 @@ one-line breadcrumb at
 `tracking/logs/<run_date>/<workflow>/<HHMMSSffffff>.txt` for every write
 (content: ISO timestamp + `CREATED <label>/<path>`). `consolidate_logs`
 merges these into a single `<run_date>-<HHMMSS>-<workflow>.txt` at end of run.
+
+As with the ledger, this per-write fan-out is the *distributed*-workflow path.
+A single-process workflow gives each `LoggingFileSystem` a shared in-memory
+`LogCollector` (`pv_prospect.etl.storage.logging_fs`); breadcrumbs are buffered
+and a single end-of-run `flush` writes the consolidated
+`<run_date>-<HHMMSS>-<workflow>.txt` — no per-write files, no consolidation
+scan.
 
 This is independent from the JSONL outcome ledger above: write-audit logs
 record *file writes*, the ledger records *task outcomes*.
@@ -323,24 +342,27 @@ Cloud Scheduler invokes the `data-transformation` Cloud Run Job directly
    transform task, correctly leaving a hole).
 2. **Filter** — `WorkflowOrchestrator.filter_remaining_tasks` drops units
    whose hashes already appear `completed` in any prior consolidated
-   ledger or any per-task entry under the current run-date. This makes
-   the run idempotent: a second invocation re-plans the same units but
-   only the unfinished ones run.
+   ledger. (The backfill writes no per-task ledger files, so a fresh run
+   resumes from the consolidated layer alone.) This makes the run
+   idempotent: a second invocation re-plans the same units but only the
+   unfinished ones run.
 3. **Run** — `build_transform_phases` orders the units into clean →
    prepare → assemble; `_run_phase_parallel` runs each phase via a
    `ThreadPoolExecutor` (`MAX_WORKERS=32` by default), so all phase-0
-   tasks finish before phase-1 starts. Per-unit ledger entries are
-   written from worker threads — concurrent writes target distinct
-   `<run_date>/<workflow>/<task_hash>.jsonl` paths, so no contention.
-   Per-unit `Exception` is logged and swallowed; the failed entry is in
-   the ledger and the rest of the phase continues.
-   `WorkflowTerminatingError` propagates: pending tasks are cancelled,
-   in-flight tasks finish, and the handler raises out without advancing
-   the marker.
-4. **Consolidate** — `consolidate_logs` and `consolidate_ledger` are
-   called in-process, merging per-task entries into the single
-   `<run_date>-<HHMMSS>-<workflow>.jsonl` consolidated file the
-   cross-day resume scan reads.
+   tasks finish before phase-1 starts. Per-unit ledger entries and
+   write-audit log lines are recorded from worker threads into the
+   in-memory, thread-safe `LedgerCollector` / `LogCollector`, so there is
+   no per-task GCS write and no write contention. Per-unit `Exception` is
+   logged and swallowed; the failed entry is in the ledger and the rest
+   of the phase continues. `WorkflowTerminatingError` propagates: pending
+   tasks are cancelled, in-flight tasks finish, and the handler raises
+   out without advancing the marker.
+4. **Flush** — the `LedgerCollector` and `LogCollector` are each flushed
+   once, writing a single consolidated
+   `<run_date>-<HHMMSS>-<workflow>.jsonl` / `.txt` — the same files the
+   cross-day resume scan reads. Because the run is one process there is
+   no per-task fan-out and so no O(N) consolidation step; each flush is a
+   single GCS write.
 5. **Commit** — `save_marker(cursors_fs, workflow_name,
    ConsumedMarker(next_marker))` advances the marker.
 

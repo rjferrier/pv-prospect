@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 
 from pv_prospect.etl import WorkflowOrchestrator
+from pv_prospect.etl.storage import LedgerCollector
 
 from ..helpers import FakeFileSystem
 
@@ -134,3 +135,35 @@ def test_run_label_namespaces_the_per_task_path() -> None:
     entries = _read_entries(ledger_fs, '2025-06-24/wf/run1/abc.jsonl')
     assert entries[0]['task_hash'] == 'abc'
     assert '2025-06-24/wf/abc.jsonl' not in ledger_fs._files
+
+
+def test_routes_to_ledger_collector_when_configured() -> None:
+    collector = LedgerCollector('wf', '2025-06-24')
+    orchestrator = WorkflowOrchestrator('wf', '2025-06-24', ledger_collector=collector)
+
+    orchestrator.record_outcome(
+        'abc', {'system_id': '89665'}, 'completed', now=_fixed_now
+    )
+
+    ledger_fs = FakeFileSystem()
+    collector.flush(ledger_fs, now=_fixed_now)
+    [path] = list(ledger_fs._files)
+    entries = _read_entries(ledger_fs, path)
+    assert entries[0]['task_hash'] == 'abc'
+    assert entries[0]['status'] == 'completed'
+
+
+def test_ledger_collector_writes_no_per_task_files() -> None:
+    """With a collector, record_outcome buffers in memory and leaves the
+    per-task ledger filesystem untouched."""
+    ledger_fs = FakeFileSystem()
+    orchestrator = WorkflowOrchestrator(
+        'wf',
+        '2025-06-24',
+        ledger_fs=ledger_fs,
+        ledger_collector=LedgerCollector('wf', '2025-06-24'),
+    )
+
+    orchestrator.record_outcome('abc', {}, 'completed', now=_fixed_now)
+
+    assert ledger_fs._files == {}

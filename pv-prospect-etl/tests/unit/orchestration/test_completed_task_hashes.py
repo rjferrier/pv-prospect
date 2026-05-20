@@ -3,6 +3,7 @@
 import json
 
 from pv_prospect.etl import WorkflowOrchestrator
+from pv_prospect.etl.storage import LedgerCollector
 
 from ..helpers import FakeFileSystem
 
@@ -119,6 +120,27 @@ def test_unions_per_task_and_consolidated_sources() -> None:
     orchestrator = WorkflowOrchestrator('wf', '2025-06-24', ledger_fs=ledger_fs)
 
     assert orchestrator.completed_task_hashes() == {'today', 'yesterday'}
+
+
+def test_collector_mode_skips_per_task_scan_keeps_consolidated() -> None:
+    """With a LedgerCollector, per-task files are not scanned — that mode
+    writes none — but the consolidated-ledger scan still drives resume."""
+    ledger_fs = FakeFileSystem(
+        {
+            '2025-06-24/wf/stray.jsonl': _ledger_line('stray', 'completed'),
+            '2025-06-23/2025-06-23-110000-wf.jsonl': _ledger_line(
+                'yesterday', 'completed', run_date='2025-06-23'
+            ),
+        }
+    )
+    orchestrator = WorkflowOrchestrator(
+        'wf',
+        '2025-06-24',
+        ledger_fs=ledger_fs,
+        ledger_collector=LedgerCollector('wf', '2025-06-24'),
+    )
+
+    assert orchestrator.completed_task_hashes() == {'yesterday'}
 
 
 def test_run_label_scopes_per_task_lookup_to_its_own_scratch_dir() -> None:

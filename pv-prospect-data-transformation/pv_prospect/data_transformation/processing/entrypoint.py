@@ -92,6 +92,8 @@ from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
     AnyStorageConfig,
     FileSystem,
+    LedgerCollector,
+    LogCollector,
     LoggingFileSystem,
     consolidate_ledger,
     consolidate_logs,
@@ -125,12 +127,19 @@ def _get_logging_filesystem(
     run_date: str,
     label: str,
     run_label: str,
+    log_collector: LogCollector | None = None,
 ) -> FileSystem:
     fs: FileSystem = get_filesystem(storage_config)
     if workflow_name and log_storage:
         log_fs = get_filesystem(log_storage)
         return LoggingFileSystem(
-            fs, log_fs, workflow_name, run_date, label, run_label=run_label
+            fs,
+            log_fs,
+            workflow_name,
+            run_date,
+            label,
+            run_label=run_label,
+            log_collector=log_collector,
         )
     logger.warning(
         'Write-logging disabled for %s (no WORKFLOW_NAME or log_storage)', label
@@ -256,6 +265,7 @@ def _build_runtime(
     workflow_name: str,
     run_date: str,
     run_label: str,
+    log_collector: LogCollector | None = None,
 ) -> _Runtime:
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
@@ -266,6 +276,7 @@ def _build_runtime(
         run_date,
         'cleaned',
         run_label,
+        log_collector,
     )
     batches_fs = _get_logging_filesystem(
         config.staged_prepared_batches_data_storage,
@@ -274,6 +285,7 @@ def _build_runtime(
         run_date,
         'prepared-batches',
         run_label,
+        log_collector,
     )
     prepared_fs = _get_logging_filesystem(
         config.staged_prepared_data_storage,
@@ -282,6 +294,7 @@ def _build_runtime(
         run_date,
         'prepared',
         run_label,
+        log_collector,
     )
     _load_resources(resources_fs)
     return _Runtime(raw_fs, cleaned_fs, batches_fs, prepared_fs)
@@ -370,10 +383,17 @@ def _run_transform_backfill(
     Reads the consumed-through marker, picks the next ``MAX_EXTRACT_RUNS``
     unconsumed extraction ledgers, turns their completed descriptors
     into transform units, runs the clean → prepare → assemble phases
-    (each phase fanned out across a thread pool), consolidates the
-    per-task ledger, then advances the marker. Per-task ledger entries
-    record outcomes for cross-run resume; the marker only advances when
-    every phase completes without a terminating error.
+    (each phase fanned out across a thread pool), writes the run's ledger
+    and write-audit log as one consolidated file each, then advances the
+    marker. The consolidated ledger records outcomes for cross-run
+    resume; the marker only advances when every phase completes without a
+    terminating error and both files are flushed.
+
+    Because the run is a single process, task outcomes and log lines are
+    accumulated in memory (a :class:`LedgerCollector` /
+    :class:`LogCollector`) and written once at the end — there is no
+    per-task file fan-out, so no separate consolidation step that has to
+    re-read tens of thousands of tiny objects.
 
     Replaces the workflow-orchestrated plan / dispatch / commit /
     consolidate split. Transform work is GCS-bound, so a thread pool
@@ -406,12 +426,18 @@ def _run_transform_backfill(
         next_marker,
     )
 
+    ledger_collector = LedgerCollector(workflow_name, run_date, run_label)
+    log_collector = LogCollector(workflow_name, run_date, run_label)
     orchestrator = WorkflowOrchestrator(
-        workflow_name, run_date, ledger_fs=ledger_fs, run_label=run_label
+        workflow_name,
+        run_date,
+        ledger_fs=ledger_fs,
+        run_label=run_label,
+        ledger_collector=ledger_collector,
     )
     phases = build_transform_phases(units, workflow_name, run_date)
     remaining = [orchestrator.filter_remaining_tasks(phase) for phase in phases]
-    shared = _build_runtime(config, workflow_name, run_date, run_label)
+    shared = _build_runtime(config, workflow_name, run_date, run_label, log_collector)
 
     for index, phase in enumerate(remaining):
         logger.info(
@@ -423,10 +449,12 @@ def _run_transform_backfill(
         )
         _run_phase_parallel(phase, shared, config, orchestrator, max_workers)
 
-    # Consolidate per-task ledger entries into a single
-    # <date>-<HHMMSS>-<workflow>.jsonl so cross-day resume can see them
-    # via the consolidated-ledger scan path.
-    _run_consolidate_logs_for(config, run_date, workflow_name, run_label)
+    # Single process: flush the in-memory ledger and write-audit log as
+    # one consolidated file each. No per-task fan-out, so no O(N)
+    # consolidation step that fails to fit its timeout at scale.
+    ledger_collector.flush(ledger_fs)
+    if config.log_storage:
+        log_collector.flush(get_filesystem(config.log_storage))
 
     save_marker(cursors_fs, workflow_name, ConsumedMarker(consumed_through=next_marker))
     logger.info(
@@ -468,28 +496,6 @@ def _run_phase_parallel(
                 raise
             except Exception:
                 logger.exception('Unit failed; continuing with next unit in phase')
-
-
-def _run_consolidate_logs_for(
-    config: DataTransformationConfig,
-    run_date: str,
-    workflow_name: str,
-    run_label: str,
-) -> None:
-    """Consolidate this workflow's per-task logs and ledger entries.
-
-    Called by the in-container backfill handler at the end of a run, in
-    the same process as the work. (The daily-transform workflow still
-    runs the same operation as a separate Cloud Run step via the
-    ``consolidate_logs`` JOB_TYPE handler.)
-    """
-    run_date_obj = date.fromisoformat(run_date)
-    if config.log_storage:
-        log_fs = get_filesystem(config.log_storage)
-        consolidate_logs(log_fs, workflow_name, run_date_obj, run_label=run_label)
-    if config.ledger_storage:
-        ledger_fs = get_filesystem(config.ledger_storage)
-        consolidate_ledger(ledger_fs, workflow_name, run_date_obj, run_label=run_label)
 
 
 def _run_transform_step(

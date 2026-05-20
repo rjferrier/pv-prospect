@@ -124,8 +124,8 @@ Workflows on a daily or weekly basis:
   Workflow — Cloud Scheduler invokes the `data-transformation` Cloud Run Job
   directly with `JOB_TYPE=run_transform_backfill`. The job plans, runs (with
   internal thread-pool parallelism over the clean → prepare → assemble
-  phases), consolidates its ledger, and commits the marker — all in a single
-  execution. Plans its work from the PV-sites extraction backfill's
+  phases), flushes its run ledger to a single consolidated file, and commits
+  the marker — all in a single execution. Plans its work from the PV-sites extraction backfill's
   committed task-outcome ledger rather than a cursor of its own: each
   `completed` extraction entry becomes a transform unit over that entry's
   window. A small **consumed-through marker** bounds each run to the next
@@ -210,10 +210,11 @@ gcloud run jobs execute data-transformation \
 
 The consumed-through marker is only advanced at the end of a successful run,
 so a run that crashed before commit re-derives the same plan from the
-extraction ledger on re-trigger. The orchestrator's
-`filter_remaining_tasks` reads the per-task ledger entries already written
-by the prior attempt and skips them, so a second attempt only runs the
-unfinished units. To deliberately re-transform history (e.g. after a
+extraction ledger on re-trigger. If the prior attempt reached its end-of-run
+ledger flush, the orchestrator's `filter_remaining_tasks` reads that
+consolidated ledger and the re-run skips the finished units; an attempt that
+crashed before the flush re-runs every unit — the clean/prepare/assemble steps
+overwrite idempotently, so that is safe, just repeated work. To deliberately re-transform history (e.g. after a
 feature-spec change), reset the marker at
 `gs://<staging-bucket>/tracking/cursors/pv-prospect-transform-<scope>-backfill.json`
 to `{"consumed_through": ""}` and the next runs re-derive every task from

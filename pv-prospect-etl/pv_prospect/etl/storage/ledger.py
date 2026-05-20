@@ -20,8 +20,9 @@ The schema of each entry is documented at
 import fnmatch
 import json
 import logging
+import threading
 from datetime import date, datetime, timezone
-from typing import Callable
+from typing import Callable, Mapping
 
 from pv_prospect.etl.storage.base import FileEntry, FileSystem
 
@@ -54,6 +55,20 @@ def ledger_entry_path(
     return f'{ledger_prefix(run_date, workflow_name, run_label)}/{task_hash}.jsonl'
 
 
+def consolidated_ledger_path(
+    date_str: str, workflow_name: str, run_label: str = '', now: NowFn = _utc_now
+) -> str:
+    """Return the path of a run's consolidated ledger file.
+
+    ``<date_str>/<date_str>-<HHMMSS>-[<run_label>-]<workflow_name>.jsonl``.
+    The run date leads the name so a lexical sort is also chronological;
+    *run_label* is folded into the stem so same-day runs stay distinct
+    yet still match the ``*-<workflow_name>.jsonl`` discovery pattern.
+    """
+    stem = f'{run_label}-{workflow_name}' if run_label else workflow_name
+    return f'{date_str}/{date_str}-{now().strftime("%H%M%S")}-{stem}.jsonl'
+
+
 def consolidate_ledger(
     ledger_fs: FileSystem,
     workflow_name: str,
@@ -66,12 +81,15 @@ def consolidate_ledger(
     Reads every ``*.jsonl`` under
     ``<run_date>/<workflow_name>[/<run_label>]/``, concatenates the JSON
     lines, sorts them by ``recorded_at``, writes a single consolidated
-    file at
-    ``<run_date>/<run_date>-<HHMMSS>-<workflow_name>[-<run_label>].jsonl``,
-    and removes the per-task files. *run_label* keeps concurrent same-day
-    executions disjoint at the scratch layer; the consolidated layer
-    encodes it in the filename so listings can still distinguish same-day
-    runs.
+    file (see :func:`consolidated_ledger_path`), and removes the per-task
+    files.
+
+    This is the consolidation path for *distributed* workflows, where
+    each task is a separate process that can only record its outcome to
+    its own file. A single-process workflow should instead accumulate
+    outcomes in a :class:`LedgerCollector`, which sidesteps the per-task
+    file fan-out — and the O(N) serial GCS round-trips this function
+    needs to undo it.
     """
     date_str = run_date.strftime('%Y-%m-%d')
     prefix = ledger_prefix(date_str, workflow_name, run_label)
@@ -97,11 +115,9 @@ def consolidate_ledger(
 
     records.sort(key=lambda r: r[0])
 
-    consolidated_stem = f'{run_label}-{workflow_name}' if run_label else workflow_name
-    consolidated_name = (
-        f'{date_str}-{now().strftime("%H%M%S")}-{consolidated_stem}.jsonl'
+    consolidated_path = consolidated_ledger_path(
+        date_str, workflow_name, run_label, now
     )
-    consolidated_path = f'{date_str}/{consolidated_name}'
     ledger_fs.write_text(
         consolidated_path, '\n'.join(line for _, line in records) + '\n'
     )
@@ -111,6 +127,73 @@ def consolidate_ledger(
 
     for entry in entries:
         ledger_fs.delete(entry.path)
+
+
+class LedgerCollector:
+    """In-memory accumulator of task-outcome ledger entries.
+
+    A drop-in alternative to per-task ledger files for a *single-process*
+    workflow: every task records its outcome into one shared, thread-safe
+    buffer and :meth:`flush` writes a single consolidated ledger file at
+    the end. This sidesteps the per-task file fan-out — and the O(N)
+    serial-GCS-round-trip :func:`consolidate_ledger` it forces — which
+    does not fit its time budget once a run has tens of thousands of
+    tasks.
+
+    Idempotent on completed entries like
+    :meth:`WorkflowOrchestrator.record_outcome`: a second ``completed``
+    entry for a task hash already seen as ``completed`` is dropped;
+    ``failed`` entries always accumulate.
+    """
+
+    def __init__(self, workflow_name: str, run_date: str, run_label: str = '') -> None:
+        self._workflow_name = workflow_name
+        self._run_date = run_date
+        self._run_label = run_label
+        self._lock = threading.Lock()
+        self._entries: list[dict[str, object]] = []
+        self._completed: set[str] = set()
+
+    def record(self, entry: Mapping[str, object]) -> None:
+        """Buffer one ledger *entry*.
+
+        *entry* is the dict shape produced by
+        :meth:`WorkflowOrchestrator.record_outcome`. Thread-safe; a
+        repeated ``completed`` entry for the same ``task_hash`` is
+        dropped.
+        """
+        stored = dict(entry)
+        task_hash = str(stored.get('task_hash', ''))
+        with self._lock:
+            if stored.get('status') == 'completed':
+                if task_hash in self._completed:
+                    return
+                self._completed.add(task_hash)
+            self._entries.append(stored)
+
+    def flush(self, ledger_fs: FileSystem, now: NowFn = _utc_now) -> None:
+        """Write the buffered entries as one consolidated ledger file.
+
+        Entries are sorted by ``recorded_at`` and written to the path
+        :func:`consolidated_ledger_path` returns — the same path
+        :func:`consolidate_ledger` produces — so
+        :func:`list_consolidated_ledgers` discovers it identically. A
+        no-op when nothing was recorded.
+        """
+        with self._lock:
+            entries = sorted(self._entries, key=lambda e: str(e.get('recorded_at', '')))
+        if not entries:
+            logger.info(
+                'No ledger entries to flush for %s/%s',
+                self._run_date,
+                self._workflow_name,
+            )
+            return
+        path = consolidated_ledger_path(
+            self._run_date, self._workflow_name, self._run_label, now
+        )
+        ledger_fs.write_text(path, '\n'.join(json.dumps(e) for e in entries) + '\n')
+        logger.info('Consolidated %d ledger entries into %s', len(entries), path)
 
 
 def list_consolidated_ledgers(
