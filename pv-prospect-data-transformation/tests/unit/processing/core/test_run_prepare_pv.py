@@ -17,7 +17,10 @@ from pv_prospect.common.domain import (
     System,
 )
 from pv_prospect.data_sources import DataSource, build_time_series_csv_file_path
-from pv_prospect.data_transformation.processing import run_prepare_pv
+from pv_prospect.data_transformation.processing import (
+    PreparedBatchCollector,
+    run_prepare_pv,
+)
 from pv_prospect.etl import TIMESERIES_FOLDER
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem
@@ -174,3 +177,25 @@ def test_skips_when_cleaned_pv_missing(
     )
 
     assert not batches_fs._files
+
+
+def test_collector_path_buffers_frame_instead_of_writing_batch(
+    cleaned_fs: FakeFileSystem,
+    batches_fs: FakeFileSystem,
+    pv_site: PVSite,
+) -> None:
+    collector = PreparedBatchCollector()
+
+    run_prepare_pv(
+        cleaned_fs,
+        batches_fs,
+        _PV_DESCRIPTOR,
+        _WEATHER_DESCRIPTOR,
+        pv_site,
+        _DATE_RANGE,
+        lambda _: pv_site,
+        collector=collector,
+    )
+
+    assert batches_fs._files == {}  # no batch CSV written
+    assert len(collector.pv_frames(_SYSTEM_ID)) == 1

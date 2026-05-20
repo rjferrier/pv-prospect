@@ -7,6 +7,7 @@ All parameters are explicit — no environment variable reads.
 import io
 import json
 import logging
+import threading
 from typing import Any, Callable
 
 import pandas as pd
@@ -30,7 +31,7 @@ from pv_prospect.data_transformation.transformations import (
     prepare_weather as _prepare_weather_transform,
 )
 from pv_prospect.etl import TIMESERIES_FOLDER
-from pv_prospect.etl.storage import FileSystem
+from pv_prospect.etl.storage import FileEntry, FileSystem
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,19 @@ def write_csv(fs: FileSystem, df: pd.DataFrame, path: str, header: bool = True) 
     logger.debug('Written to: %s', path)
 
 
+def _read_batch_csv(
+    fs: FileSystem, path: str, expected_columns: list[str]
+) -> pd.DataFrame:
+    """Read one prepared-batch CSV, validating its column layout."""
+    df = pd.read_csv(io.StringIO(fs.read_text(path)))
+    if list(df.columns) != expected_columns:
+        raise ValueError(
+            f'Batch {path} has columns {list(df.columns)!r},'
+            f' expected {expected_columns!r}'
+        )
+    return df
+
+
 def read_metadata(fs: FileSystem, csv_path: str) -> dict[str, Any]:
     """Read the metadata JSON companion to a CSV file."""
     meta_path = csv_path_to_metadata_path(csv_path)
@@ -93,6 +107,50 @@ def _weather_batch_path(location_id: str, date_str: str) -> str:
 
 def _pv_batch_path(system_id: int, date_str: str) -> str:
     return f'{PV_BATCH_PREFIX}/{system_id}_{date_str}.csv'
+
+
+# ---------------------------------------------------------------------------
+# Prepared-batch collector
+# ---------------------------------------------------------------------------
+
+
+class PreparedBatchCollector:
+    """In-memory accumulator of prepared DataFrames for a single-process run.
+
+    Replaces the prepared-batch CSV files as the ``prepare`` → ``assemble``
+    handoff when the whole transform runs in one process (the backfill).
+    ``prepare_*`` adds a frame; ``assemble_*`` drains the matching frames
+    and merges them — so there is no per-batch GCS write, list, read, or
+    delete. The distributed daily transform leaves the collector unset and
+    keeps the batch CSVs, which are its only cross-process handoff.
+
+    Thread-safe: ``prepare`` fans its units across a thread pool.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._weather: list[pd.DataFrame] = []
+        self._pv: dict[int, list[pd.DataFrame]] = {}
+
+    def add_weather(self, df: pd.DataFrame) -> None:
+        """Buffer one prepared weather frame. Thread-safe."""
+        with self._lock:
+            self._weather.append(df)
+
+    def add_pv(self, system_id: int, df: pd.DataFrame) -> None:
+        """Buffer one prepared PV frame for *system_id*. Thread-safe."""
+        with self._lock:
+            self._pv.setdefault(system_id, []).append(df)
+
+    def weather_frames(self) -> list[pd.DataFrame]:
+        """Return the buffered prepared weather frames."""
+        with self._lock:
+            return list(self._weather)
+
+    def pv_frames(self, system_id: int) -> list[pd.DataFrame]:
+        """Return the buffered prepared PV frames for *system_id*."""
+        with self._lock:
+            return list(self._pv.get(system_id, []))
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +245,17 @@ def run_prepare_weather(
     weather_data_source: DataSource,
     site: AnySite,
     date_range: DateRange,
+    collector: PreparedBatchCollector | None = None,
 ) -> None:
-    """Prepare cleaned weather CSVs for a date range into batch files."""
+    """Prepare cleaned weather CSVs for a date range.
+
+    Each day's prepared frame is written as a batch CSV to *batches_fs*.
+    When a *collector* is supplied (the single-process backfill), the
+    unit's days are buffered in memory as one concatenated frame instead,
+    so :func:`assemble_prepared_weather` can merge them without the
+    per-batch GCS round-trip.
+    """
+    day_frames: list[pd.DataFrame] = []
     for day_range in date_range.split_by(Period.DAY):
         date_str = day_range.start.strftime('%Y%m%d')
         path = build_time_series_csv_file_path(
@@ -204,14 +271,19 @@ def run_prepare_weather(
         prepared_df.insert(0, 'latitude', metadata['latitude'])
         prepared_df.insert(1, 'longitude', metadata['longitude'])
         prepared_df.insert(2, 'elevation', metadata['elevation'])
-        write_csv(
-            batches_fs,
-            prepared_df,
-            _weather_batch_path(
-                site.location.to_coordinate_string(filename_friendly=True),
-                date_str,
-            ),
-        )
+        if collector is not None:
+            day_frames.append(prepared_df)
+        else:
+            write_csv(
+                batches_fs,
+                prepared_df,
+                _weather_batch_path(
+                    site.location.to_coordinate_string(filename_friendly=True),
+                    date_str,
+                ),
+            )
+    if collector is not None and day_frames:
+        collector.add_weather(pd.concat(day_frames, ignore_index=True))
 
 
 def run_prepare_pv(
@@ -222,9 +294,16 @@ def run_prepare_pv(
     pv_site: PVSite,
     date_range: DateRange,
     get_pv_site: Callable[[int], PVSite],
+    collector: PreparedBatchCollector | None = None,
 ) -> None:
-    """Join cleaned PV and weather data for a date range into batch files."""
+    """Join cleaned PV and weather data for a date range.
+
+    Each day's joined frame is written as a batch CSV to *batches_fs*.
+    When a *collector* is supplied it is buffered in memory as one
+    concatenated frame instead, for :func:`assemble_prepared_pv` to merge.
+    """
     pv_site_full = get_pv_site(pv_site.pvo_sys_id)
+    day_frames: list[pd.DataFrame] = []
 
     for day_range in date_range.split_by(Period.DAY):
         date_str = day_range.start.strftime('%Y%m%d')
@@ -257,11 +336,16 @@ def run_prepare_pv(
             pv_df=pv_df,
             pv_site=pv_site_full,
         )
-        write_csv(
-            batches_fs,
-            prepared_df,
-            _pv_batch_path(pv_site.pvo_sys_id, date_str),
-        )
+        if collector is not None:
+            day_frames.append(prepared_df)
+        else:
+            write_csv(
+                batches_fs,
+                prepared_df,
+                _pv_batch_path(pv_site.pvo_sys_id, date_str),
+            )
+    if collector is not None and day_frames:
+        collector.add_pv(pv_site.pvo_sys_id, pd.concat(day_frames, ignore_index=True))
 
 
 # ---------------------------------------------------------------------------
@@ -272,30 +356,33 @@ def run_prepare_pv(
 def assemble_prepared_weather(
     batches_fs: FileSystem,
     prepared_fs: FileSystem,
+    collector: PreparedBatchCollector | None = None,
 ) -> None:
-    """Merge weather batch CSVs into a single master CSV."""
-    batch_files = batches_fs.list_files(WEATHER_BATCH_PREFIX, '*.csv')
-    if not batch_files:
+    """Merge prepared weather frames into the single master CSV.
+
+    The batch frames come from the in-memory *collector* when supplied
+    (the single-process backfill), otherwise from the batch CSVs on
+    *batches_fs*, which are deleted once merged.
+    """
+    batch_files: list[FileEntry] = []
+    if collector is not None:
+        batch_frames = collector.weather_frames()
+    else:
+        batch_files = batches_fs.list_files(WEATHER_BATCH_PREFIX, '*.csv')
+        batch_frames = [
+            _read_batch_csv(batches_fs, entry.path, WEATHER_COLUMNS)
+            for entry in batch_files
+        ]
+    if not batch_frames:
         logger.warning('[assemble_weather] No batches to assemble.')
         return
 
     frames: list[pd.DataFrame] = []
-
     try:
-        existing = read_csv(prepared_fs, PREPARED_WEATHER_PATH)
-        frames.append(existing)
+        frames.append(read_csv(prepared_fs, PREPARED_WEATHER_PATH))
     except FileNotFoundError:
         pass
-
-    for entry in batch_files:
-        content = batches_fs.read_text(entry.path)
-        df = pd.read_csv(io.StringIO(content))
-        if list(df.columns) != WEATHER_COLUMNS:
-            raise ValueError(
-                f'Batch {entry.path} has columns {list(df.columns)!r},'
-                f' expected {WEATHER_COLUMNS!r}'
-            )
-        frames.append(df)
+    frames.extend(batch_frames)
 
     combined = pd.concat(frames, ignore_index=True)
     combined = combined.drop_duplicates(
@@ -314,32 +401,34 @@ def assemble_prepared_pv(
     batches_fs: FileSystem,
     prepared_fs: FileSystem,
     system_id: int,
+    collector: PreparedBatchCollector | None = None,
 ) -> None:
-    """Merge PV batch CSVs for a single system into a master CSV."""
-    all_pv_batches = batches_fs.list_files(PV_BATCH_PREFIX, '*.csv')
-    batch_files = [e for e in all_pv_batches if e.name.startswith(f'{system_id}_')]
-    if not batch_files:
+    """Merge prepared PV frames for a single system into its master CSV.
+
+    The batch frames come from the in-memory *collector* when supplied,
+    otherwise from this system's batch CSVs on *batches_fs*, which are
+    deleted once merged.
+    """
+    batch_files: list[FileEntry] = []
+    if collector is not None:
+        batch_frames = collector.pv_frames(system_id)
+    else:
+        all_pv_batches = batches_fs.list_files(PV_BATCH_PREFIX, '*.csv')
+        batch_files = [e for e in all_pv_batches if e.name.startswith(f'{system_id}_')]
+        batch_frames = [
+            _read_batch_csv(batches_fs, entry.path, PV_COLUMNS) for entry in batch_files
+        ]
+    if not batch_frames:
         logger.warning('[assemble_pv] No batches for system %s.', system_id)
         return
 
     frames: list[pd.DataFrame] = []
-
     master_path = _prepared_pv_path(system_id)
     try:
-        existing = read_csv(prepared_fs, master_path)
-        frames.append(existing)
+        frames.append(read_csv(prepared_fs, master_path))
     except FileNotFoundError:
         pass
-
-    for entry in batch_files:
-        content = batches_fs.read_text(entry.path)
-        df = pd.read_csv(io.StringIO(content))
-        if list(df.columns) != PV_COLUMNS:
-            raise ValueError(
-                f'Batch {entry.path} has columns {list(df.columns)!r},'
-                f' expected {PV_COLUMNS!r}'
-            )
-        frames.append(df)
+    frames.extend(batch_frames)
 
     combined = pd.concat(frames, ignore_index=True)
     combined = combined.drop_duplicates(subset=['time'], keep='last')

@@ -63,6 +63,7 @@ from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.processing import (
     TRANSFORMATIONS_NEEDING_PV_SITE,
     ConsumedMarker,
+    PreparedBatchCollector,
     Transformation,
     TransformUnit,
     assemble_prepared_pv,
@@ -252,12 +253,18 @@ class _Runtime:
     """Shared per-execution resources. Built once, reused for every unit
     handled in the same Cloud Run Job execution to amortise config
     loading, GCS handle setup, and the PV-site / location-mapping repo
-    load."""
+    load.
+
+    ``prepared_batches`` is set only for the in-container backfill: it
+    carries prepared frames from the ``prepare`` phase to the ``assemble``
+    phase in memory, so no batch CSVs are written to ``batches_fs``. The
+    daily transform leaves it ``None`` and uses ``batches_fs``."""
 
     raw_fs: FileSystem
     cleaned_fs: FileSystem
     batches_fs: FileSystem
     prepared_fs: FileSystem
+    prepared_batches: PreparedBatchCollector | None = None
 
 
 def _build_runtime(
@@ -266,6 +273,7 @@ def _build_runtime(
     run_date: str,
     run_label: str,
     log_collector: LogCollector | None = None,
+    prepared_batches: PreparedBatchCollector | None = None,
 ) -> _Runtime:
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
@@ -297,7 +305,7 @@ def _build_runtime(
         log_collector,
     )
     _load_resources(resources_fs)
-    return _Runtime(raw_fs, cleaned_fs, batches_fs, prepared_fs)
+    return _Runtime(raw_fs, cleaned_fs, batches_fs, prepared_fs, prepared_batches)
 
 
 def _run_one_transform_unit(
@@ -360,6 +368,7 @@ def _run_one_transform_unit(
             pv_system_id,
             location_str,
             date_range,
+            shared.prepared_batches,
         )
     except Exception as e:
         orchestrator.record_outcome(task_hash, descriptor, 'failed', error=repr(e))
@@ -389,11 +398,13 @@ def _run_transform_backfill(
     resume; the marker only advances when every phase completes without a
     terminating error and both files are flushed.
 
-    Because the run is a single process, task outcomes and log lines are
-    accumulated in memory (a :class:`LedgerCollector` /
-    :class:`LogCollector`) and written once at the end — there is no
-    per-task file fan-out, so no separate consolidation step that has to
-    re-read tens of thousands of tiny objects.
+    Because the run is a single process, task outcomes, log lines, and
+    prepared batch frames are kept in memory (a :class:`LedgerCollector`,
+    :class:`LogCollector`, and :class:`PreparedBatchCollector`) instead of
+    fanned out to per-task / per-batch GCS files — eliminating both the
+    end-of-run ledger consolidation and the ``prepare`` → ``assemble``
+    batch round-trip, each of which otherwise re-reads tens of thousands
+    of tiny objects one at a time.
 
     Replaces the workflow-orchestrated plan / dispatch / commit /
     consolidate split. Transform work is GCS-bound, so a thread pool
@@ -428,6 +439,7 @@ def _run_transform_backfill(
 
     ledger_collector = LedgerCollector(workflow_name, run_date, run_label)
     log_collector = LogCollector(workflow_name, run_date, run_label)
+    prepared_batches = PreparedBatchCollector()
     orchestrator = WorkflowOrchestrator(
         workflow_name,
         run_date,
@@ -437,7 +449,9 @@ def _run_transform_backfill(
     )
     phases = build_transform_phases(units, workflow_name, run_date)
     remaining = [orchestrator.filter_remaining_tasks(phase) for phase in phases]
-    shared = _build_runtime(config, workflow_name, run_date, run_label, log_collector)
+    shared = _build_runtime(
+        config, workflow_name, run_date, run_label, log_collector, prepared_batches
+    )
 
     for index, phase in enumerate(remaining):
         logger.info(
@@ -508,6 +522,7 @@ def _run_transform_step(
     pv_system_id: int | None,
     location_str: str | None,
     date_range: DateRange,
+    prepared_batches: PreparedBatchCollector | None = None,
 ) -> None:
     if transformation is Transformation.CLEAN_WEATHER:
         site = resolve_site(
@@ -547,6 +562,7 @@ def _run_transform_step(
             config.data_sources.weather,
             site,
             date_range,
+            collector=prepared_batches,
         )
 
     elif transformation is Transformation.PREPARE_PV:
@@ -559,13 +575,19 @@ def _run_transform_step(
             pv_site,
             date_range,
             get_pv_site_by_system_id,
+            collector=prepared_batches,
         )
 
     elif transformation is Transformation.ASSEMBLE_WEATHER:
-        assemble_prepared_weather(batches_fs, prepared_fs)
+        assemble_prepared_weather(batches_fs, prepared_fs, prepared_batches)
 
     elif transformation is Transformation.ASSEMBLE_PV:
-        assemble_prepared_pv(batches_fs, prepared_fs, pv_system_id)  # type: ignore[arg-type]
+        assemble_prepared_pv(
+            batches_fs,
+            prepared_fs,
+            pv_system_id,  # type: ignore[arg-type]
+            prepared_batches,
+        )
 
     else:
         raise WorkflowTerminatingError(f'unknown TRANSFORM_STEP={transformation}')

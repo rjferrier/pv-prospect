@@ -41,14 +41,27 @@ row by the **start** of the window it represents — a daily aggregate of
 
 ### Assembly (prepared-batches → prepared)
 
-The prepare steps fan out across dates in parallel. Once all batches are written, a single-threaded assembly step merges them into cumulative master CSVs. This avoids per-date format overhead (cleaned data is tens of rows per file).
+The prepare steps fan out across dates in parallel; the assembly step then
+merges their output into cumulative master CSVs.
+
+**Two hand-off modes.** In the *daily transform*, `prepare` and `assemble`
+run as separate Cloud Run tasks, so `prepare` writes batch CSVs to
+`prepared-batches/` and `assemble` reads, merges, and deletes them. In the
+*in-container backfill*, the whole transform runs in one process: `prepare`
+contributes each unit's prepared frame to an in-memory
+`PreparedBatchCollector` and `assemble` drains it — no batch CSV is written,
+listed, read, or deleted. The backfill processes hundreds of thousands of
+units per run, for which the per-batch GCS round-trip does not scale. The
+batch-CSV inputs described below are therefore the daily transform's; a
+backfill assemble takes the same frames from the collector.
 
 #### `assemble_weather`
-- **Input**: All weather batch CSVs (`prepared-batches/weather/`).
-- **Role**: Merges batches with any existing master, deduplicates on `(latitude, longitude, time)` keeping the latest value, sorts, and deletes consumed batches.
+- **Input**: All weather batch CSVs (`prepared-batches/weather/`), or the
+  collector's weather frames.
+- **Role**: Merges batches with any existing master, deduplicates on `(latitude, longitude, time)` keeping the latest value, sorts, and (CSV path only) deletes consumed batches.
 - **Output**: Cumulative weather CSV (`prepared/weather.csv`).
 
 #### `assemble_pv`
-- **Input**: Batch CSVs for a single PV system (`prepared-batches/pv/{system_id}_*.csv`).
-- **Role**: Merges batches with any existing master for that system, deduplicates on `time` keeping the latest value, sorts, and deletes consumed batches.
+- **Input**: Batch CSVs for a single PV system (`prepared-batches/pv/{system_id}_*.csv`), or the collector's frames for that system.
+- **Role**: Merges batches with any existing master for that system, deduplicates on `time` keeping the latest value, sorts, and (CSV path only) deletes consumed batches.
 - **Output**: Per-system cumulative CSV (`prepared/pv/{system_id}.csv`).

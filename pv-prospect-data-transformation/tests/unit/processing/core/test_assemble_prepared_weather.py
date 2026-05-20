@@ -5,6 +5,7 @@ import io
 import pandas as pd
 from pv_prospect.data_transformation.processing import (
     WEATHER_COLUMNS,
+    PreparedBatchCollector,
     assemble_prepared_weather,
 )
 
@@ -15,6 +16,10 @@ def _batch_csv(rows: list[list[object]]) -> str:
     header = 'latitude,longitude,elevation,time,temperature,direct_normal_irradiance,diffuse_radiation'
     data = '\n'.join(','.join(str(v) for v in row) for row in rows)
     return header + '\n' + data + '\n'
+
+
+def _batch_frame(rows: list[list[object]]) -> pd.DataFrame:
+    return pd.read_csv(io.StringIO(_batch_csv(rows)))
 
 
 def test_merges_multiple_batches_into_master() -> None:
@@ -121,5 +126,82 @@ def test_no_batches_is_noop() -> None:
     prepared_fs = FakeFileSystem()
 
     assemble_prepared_weather(batches_fs, prepared_fs)
+
+    assert not prepared_fs.exists('weather.csv')
+
+
+def test_collector_path_merges_frames_into_master() -> None:
+    collector = PreparedBatchCollector()
+    collector.add_weather(
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]])
+    )
+    collector.add_weather(
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]])
+    )
+    prepared_fs = FakeFileSystem()
+
+    assemble_prepared_weather(FakeFileSystem(), prepared_fs, collector)
+
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
+    assert len(result) == 2
+    assert list(result.columns) == WEATHER_COLUMNS
+
+
+def test_collector_path_leaves_batch_files_untouched() -> None:
+    collector = PreparedBatchCollector()
+    collector.add_weather(
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]])
+    )
+    batches_fs = FakeFileSystem(
+        files={
+            'weather/loc1_20260115.csv': _batch_csv(
+                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
+            ),
+        }
+    )
+    prepared_fs = FakeFileSystem()
+
+    assemble_prepared_weather(batches_fs, prepared_fs, collector)
+
+    # The GCS batch file is neither merged into the master nor deleted.
+    assert batches_fs.exists('weather/loc1_20260115.csv')
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
+    assert result['time'].tolist() == ['2026-01-16']
+
+
+def test_collector_path_keeps_master_data_absent_from_collector() -> None:
+    """A prepare unit skipped on a re-run is absent from the in-memory
+    collector, but assemble still includes it via the cumulative master."""
+    existing_master = pd.DataFrame(
+        {
+            'latitude': [50.49],
+            'longitude': [-3.54],
+            'elevation': [120.0],
+            'time': ['2026-01-14'],
+            'temperature': [7.0],
+            'direct_normal_irradiance': [180.0],
+            'diffuse_radiation': [55.0],
+        }
+    )
+    prepared_fs = FakeFileSystem(
+        binary_files={
+            'weather.csv': existing_master.to_csv(index=False).encode('utf-8'),
+        }
+    )
+    collector = PreparedBatchCollector()
+    collector.add_weather(
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]])
+    )
+
+    assemble_prepared_weather(FakeFileSystem(), prepared_fs, collector)
+
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
+    assert sorted(result['time'].tolist()) == ['2026-01-14', '2026-01-15']
+
+
+def test_collector_path_with_no_frames_is_noop() -> None:
+    prepared_fs = FakeFileSystem()
+
+    assemble_prepared_weather(FakeFileSystem(), prepared_fs, PreparedBatchCollector())
 
     assert not prepared_fs.exists('weather.csv')

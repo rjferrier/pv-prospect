@@ -13,7 +13,11 @@ from pv_prospect.data_sources import (
     build_time_series_csv_file_path,
     csv_path_to_metadata_path,
 )
-from pv_prospect.data_transformation.processing import run_prepare_weather
+from pv_prospect.data_transformation.processing import (
+    WEATHER_COLUMNS,
+    PreparedBatchCollector,
+    run_prepare_weather,
+)
 from pv_prospect.etl import TIMESERIES_FOLDER
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem
@@ -167,3 +171,25 @@ def test_daily_row_is_labelled_with_input_date(
     content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
     df = pd.read_csv(io.StringIO(content), parse_dates=['time'])
     assert list(df['time']) == [pd.Timestamp('2026-01-15 00:00:00')]
+
+
+def test_collector_path_buffers_frame_instead_of_writing_batch(
+    cleaned_fs: FakeFileSystem,
+    batches_fs: FakeFileSystem,
+    grid_point: ArbitrarySite,
+) -> None:
+    collector = PreparedBatchCollector()
+
+    run_prepare_weather(
+        cleaned_fs,
+        batches_fs,
+        DataSource.OPENMETEO_HISTORICAL,
+        grid_point,
+        _DATE_RANGE,
+        collector=collector,
+    )
+
+    assert batches_fs._files == {}  # no batch CSV written
+    frames = collector.weather_frames()
+    assert len(frames) == 1
+    assert list(frames[0].columns) == WEATHER_COLUMNS

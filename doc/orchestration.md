@@ -349,14 +349,17 @@ Cloud Scheduler invokes the `data-transformation` Cloud Run Job directly
 3. **Run** — `build_transform_phases` orders the units into clean →
    prepare → assemble; `_run_phase_parallel` runs each phase via a
    `ThreadPoolExecutor` (`MAX_WORKERS=32` by default), so all phase-0
-   tasks finish before phase-1 starts. Per-unit ledger entries and
-   write-audit log lines are recorded from worker threads into the
-   in-memory, thread-safe `LedgerCollector` / `LogCollector`, so there is
-   no per-task GCS write and no write contention. Per-unit `Exception` is
-   logged and swallowed; the failed entry is in the ledger and the rest
-   of the phase continues. `WorkflowTerminatingError` propagates: pending
-   tasks are cancelled, in-flight tasks finish, and the handler raises
-   out without advancing the marker.
+   tasks finish before phase-1 starts. Three in-memory, thread-safe
+   collectors replace GCS fan-out between worker threads and across
+   phases: a `LedgerCollector` (task outcomes) and a `LogCollector`
+   (write-audit lines), plus a `PreparedBatchCollector` — `prepare`
+   contributes each unit's prepared frame to it and `assemble` drains it,
+   so the prepare → assemble hand-off needs no per-batch CSV on GCS.
+   Per-unit `Exception` is logged and swallowed; the failed entry is in
+   the ledger and the rest of the phase continues.
+   `WorkflowTerminatingError` propagates: pending tasks are cancelled,
+   in-flight tasks finish, and the handler raises out without advancing
+   the marker.
 4. **Flush** — the `LedgerCollector` and `LogCollector` are each flushed
    once, writing a single consolidated
    `<run_date>-<HHMMSS>-<workflow>.jsonl` / `.txt` — the same files the
