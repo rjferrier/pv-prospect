@@ -365,11 +365,22 @@ def _merge_prepared_frames(frames: list[pd.DataFrame], keys: list[str]) -> pd.Da
     ``sort_values`` raises ``TypeError`` comparing ``Timestamp`` with
     ``str``.
 
+    The conversion is pinned to ``format='ISO8601'``. A master's ``time``
+    column can hold a mix of ``YYYY-MM-DD`` and ``YYYY-MM-DD HH:MM:SS``
+    strings — ``to_csv`` renders a midnight ``Timestamp`` as a bare date
+    but one with a time component in full, so a master appended to over
+    several runs accumulates both. The default format-inferring
+    ``to_datetime`` locks onto the first row's format and then raises on
+    any row that differs; every value is ISO 8601 regardless, so parsing
+    each independently as ISO 8601 is both correct and strict. Writing the
+    merged frame back from a proper ``datetime64`` column also re-heals
+    the master to a single serialisation.
+
     *keys* drives both de-duplication (``keep='last'``, so freshly prepared
     rows win over the master) and the final sort.
     """
     combined = pd.concat(frames, ignore_index=True)
-    combined['time'] = pd.to_datetime(combined['time'])
+    combined['time'] = pd.to_datetime(combined['time'], format='ISO8601')
     combined = combined.drop_duplicates(subset=keys, keep='last')
     return combined.sort_values(keys).reset_index(drop=True)
 

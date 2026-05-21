@@ -235,6 +235,34 @@ def test_collector_path_deduplicates_against_string_master() -> None:
     assert result['temperature'].iloc[0] == 8.5  # freshly prepared value wins
 
 
+def test_collector_path_merges_into_master_with_mixed_time_formats() -> None:
+    """Regression: a master's 'time' column can mix bare-date and
+    full-datetime strings — to_csv renders a midnight Timestamp as a bare
+    date but one with a time component in full, so a master appended to
+    over several runs accumulates both. The merge must parse every row as
+    ISO 8601 rather than inferring one format from the first row."""
+    master_csv = (
+        'latitude,longitude,elevation,time,temperature,'
+        'direct_normal_irradiance,diffuse_radiation\n'
+        '50.49,-3.54,120.0,2026-01-14 00:00:00,7.0,180.0,55.0\n'
+        '50.49,-3.54,120.0,2026-01-15,7.5,185.0,57.0\n'
+    )
+    prepared_fs = FakeFileSystem(
+        binary_files={'weather.csv': master_csv.encode('utf-8')},
+    )
+    collector = PreparedBatchCollector()
+    collector.add_weather(
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]])
+    )
+
+    assemble_prepared_weather(FakeFileSystem(), prepared_fs, collector)
+
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
+    assert len(result) == 3
+    # The merged master is re-healed to a single serialisation.
+    assert sorted(result['time'].tolist()) == ['2026-01-14', '2026-01-15', '2026-01-16']
+
+
 def test_collector_path_with_no_frames_is_noop() -> None:
     prepared_fs = FakeFileSystem()
 

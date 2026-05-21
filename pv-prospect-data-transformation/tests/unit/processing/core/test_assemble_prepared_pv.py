@@ -173,6 +173,31 @@ def test_collector_path_merges_into_existing_string_master() -> None:
     assert sorted(result['time'].tolist()) == ['2026-01-14', '2026-01-15']
 
 
+def test_collector_path_merges_into_master_with_mixed_time_formats() -> None:
+    """Regression: a master's 'time' column can mix bare-date and
+    full-datetime strings — to_csv renders a midnight Timestamp as a bare
+    date but one with a time component in full, so a master appended to
+    over several runs accumulates both. The merge must parse every row as
+    ISO 8601 rather than inferring one format from the first row."""
+    master_csv = (
+        'time,temperature,plane_of_array_irradiance,power\n'
+        '2026-01-14 00:00:00,7.0,280.0,1400.0\n'
+        '2026-01-15,7.5,285.0,1450.0\n'
+    )
+    prepared_fs = FakeFileSystem(
+        binary_files={'pv/89665.csv': master_csv.encode('utf-8')},
+    )
+    collector = PreparedBatchCollector()
+    collector.add_pv(89665, _batch_frame([['2026-01-16', 9.0, 310.0, 1600.0]]))
+
+    assemble_prepared_pv(FakeFileSystem(), prepared_fs, 89665, collector)
+
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text('pv/89665.csv')))
+    assert len(result) == 3
+    # The merged master is re-healed to a single serialisation.
+    assert sorted(result['time'].tolist()) == ['2026-01-14', '2026-01-15', '2026-01-16']
+
+
 def test_collector_path_deduplicates_against_string_master() -> None:
     """A re-prepared day in the (datetime64) collector must replace the
     matching (string) master row — drop_duplicates only works once both
