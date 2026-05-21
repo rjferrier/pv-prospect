@@ -19,7 +19,11 @@ def _batch_csv(rows: list[list[object]]) -> str:
 
 
 def _batch_frame(rows: list[list[object]]) -> pd.DataFrame:
-    return pd.read_csv(io.StringIO(_batch_csv(rows)))
+    """A prepared frame as the in-memory collector receives it from
+    prepare_weather: the 'time' column is datetime64, not str."""
+    frame = pd.read_csv(io.StringIO(_batch_csv(rows)))
+    frame['time'] = pd.to_datetime(frame['time'])
+    return frame
 
 
 def test_merges_multiple_batches_into_master() -> None:
@@ -197,6 +201,38 @@ def test_collector_path_keeps_master_data_absent_from_collector() -> None:
 
     result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
     assert sorted(result['time'].tolist()) == ['2026-01-14', '2026-01-15']
+
+
+def test_collector_path_deduplicates_against_string_master() -> None:
+    """A re-prepared day in the (datetime64) collector must replace the
+    matching (string) master row — drop_duplicates only works once both
+    'time' columns are normalised to the same dtype."""
+    existing_master = pd.DataFrame(
+        {
+            'latitude': [50.49],
+            'longitude': [-3.54],
+            'elevation': [120.0],
+            'time': ['2026-01-15'],
+            'temperature': [7.0],
+            'direct_normal_irradiance': [180.0],
+            'diffuse_radiation': [55.0],
+        }
+    )
+    prepared_fs = FakeFileSystem(
+        binary_files={
+            'weather.csv': existing_master.to_csv(index=False).encode('utf-8'),
+        }
+    )
+    collector = PreparedBatchCollector()
+    collector.add_weather(
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]])
+    )
+
+    assemble_prepared_weather(FakeFileSystem(), prepared_fs, collector)
+
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
+    assert len(result) == 1
+    assert result['temperature'].iloc[0] == 8.5  # freshly prepared value wins
 
 
 def test_collector_path_with_no_frames_is_noop() -> None:

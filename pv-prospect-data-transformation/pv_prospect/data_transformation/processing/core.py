@@ -353,6 +353,27 @@ def run_prepare_pv(
 # ---------------------------------------------------------------------------
 
 
+def _merge_prepared_frames(frames: list[pd.DataFrame], keys: list[str]) -> pd.DataFrame:
+    """Concatenate prepared *frames*, then de-duplicate and sort on *keys*.
+
+    Normalises ``time`` to ``datetime64`` first. The cumulative master is
+    read back from CSV as ``str``, while the in-memory collector frames
+    carry pandas ``Timestamp`` values straight from ``prepare_*``. A
+    mixed-type ``time`` column breaks both following steps:
+    ``drop_duplicates`` would treat a ``str`` and an equal ``Timestamp`` as
+    distinct (so a re-prepared day wouldn't replace its master row), and
+    ``sort_values`` raises ``TypeError`` comparing ``Timestamp`` with
+    ``str``.
+
+    *keys* drives both de-duplication (``keep='last'``, so freshly prepared
+    rows win over the master) and the final sort.
+    """
+    combined = pd.concat(frames, ignore_index=True)
+    combined['time'] = pd.to_datetime(combined['time'])
+    combined = combined.drop_duplicates(subset=keys, keep='last')
+    return combined.sort_values(keys).reset_index(drop=True)
+
+
 def assemble_prepared_weather(
     batches_fs: FileSystem,
     prepared_fs: FileSystem,
@@ -384,13 +405,7 @@ def assemble_prepared_weather(
         pass
     frames.extend(batch_frames)
 
-    combined = pd.concat(frames, ignore_index=True)
-    combined = combined.drop_duplicates(
-        subset=['latitude', 'longitude', 'time'], keep='last'
-    )
-    combined = combined.sort_values(['latitude', 'longitude', 'time']).reset_index(
-        drop=True
-    )
+    combined = _merge_prepared_frames(frames, ['latitude', 'longitude', 'time'])
     write_csv(prepared_fs, combined, PREPARED_WEATHER_PATH)
 
     for entry in batch_files:
@@ -430,9 +445,7 @@ def assemble_prepared_pv(
         pass
     frames.extend(batch_frames)
 
-    combined = pd.concat(frames, ignore_index=True)
-    combined = combined.drop_duplicates(subset=['time'], keep='last')
-    combined = combined.sort_values('time').reset_index(drop=True)
+    combined = _merge_prepared_frames(frames, ['time'])
     write_csv(prepared_fs, combined, master_path)
 
     for entry in batch_files:
