@@ -92,12 +92,12 @@ the project.
 2. **Transformation** (`pv-prospect-data-transformation`): Four-step pipeline
    across two stages in a single GCS bucket (`staging/`):
    - **Clean** (raw -> cleaned): `clean_weather` and `clean_pv` read from `raw/`,
-     write Parquet to `cleaned/`
+     write CSV to `cleaned/`
    - **Prepare** (cleaned -> prepared): `prepare_weather` and `prepare_pv` read
-     from `cleaned/`, write Parquet to `prepared/`
+     from `cleaned/`, write CSV to `prepared/`
    - The Clean stage must complete for all data sources before Prepare runs, since
      `prepare_pv` requires both cleaned weather and cleaned PV data.
-3. **Model training** (`pv-prospect-model`): Consumes prepared Parquet data from
+3. **Model training** (`pv-prospect-model`): Consumes prepared CSV data from
    `staging/prepared/`.
 
 Production runs on GCP: Cloud Scheduler triggers daily, Cloud Workflows

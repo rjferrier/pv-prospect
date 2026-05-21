@@ -27,9 +27,9 @@ The staging bucket has three top-level prefixes:
 gs://pv-prospect-staging/
 ├── data/
 │   ├── raw/               (extracted CSV)
-│   ├── cleaned/           (parquet)
-│   ├── prepared-batches/  (parquet)
-│   └── prepared/          (parquet)
+│   ├── cleaned/           (CSV)
+│   ├── prepared-batches/  (headerless micro-batch CSV)
+│   └── prepared/          (cumulative CSV)
 ├── tracking/
 │   ├── manifests/<run_date>/<workflow>.json           (orchestrator phases manifest — for the daily transform/extract; extract-backfill workflows embed phases inside this same path alongside their date window + next-cursor. Transform backfills don't write manifests — see Transformation Backfills.)
 │   ├── cursors/<workflow>.json                        (extraction backfill cursors / transformation backfill consumed-through markers — same path, different schema)
