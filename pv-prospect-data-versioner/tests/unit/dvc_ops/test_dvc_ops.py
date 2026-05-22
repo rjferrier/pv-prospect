@@ -4,8 +4,16 @@ from pv_prospect.data_versioner.dvc_ops import inject_remote
 def test_inject_remote_adds_field_to_each_out() -> None:
     dvc_data = {
         'outs': [
-            {'md5': 'abc123', 'size': 100, 'path': 'data/prepared/weather.csv'},
-            {'md5': 'def456', 'size': 200, 'path': 'data/prepared/pv/89665.csv'},
+            {
+                'md5': 'abc123',
+                'size': 100,
+                'path': 'data/prepared/weather/weather_2026-05-01_2026-05-15_0-07.csv',
+            },
+            {
+                'md5': 'def456',
+                'size': 200,
+                'path': 'data/prepared/pv/89665/pv_89665_2026-05-01_2026-05-08.csv',
+            },
         ]
     }
 
@@ -16,9 +24,10 @@ def test_inject_remote_adds_field_to_each_out() -> None:
 
 
 def test_inject_remote_preserves_existing_fields() -> None:
+    weather_path = 'data/prepared/weather/weather_2026-05-01_2026-05-15_0-07.csv'
     dvc_data = {
         'outs': [
-            {'md5': 'abc123', 'size': 100, 'path': 'data/prepared/weather.csv'},
+            {'md5': 'abc123', 'size': 100, 'path': weather_path},
         ]
     }
 
@@ -27,7 +36,7 @@ def test_inject_remote_preserves_existing_fields() -> None:
     out = dvc_data['outs'][0]
     assert out['md5'] == 'abc123'
     assert out['size'] == 100
-    assert out['path'] == 'data/prepared/weather.csv'
+    assert out['path'] == weather_path
     assert out['remote'] == 'versioned-raw'
 
 

@@ -10,9 +10,11 @@ The versioner sits downstream of the daily extraction and transformation
 pipelines and upstream of model training:
 
 - **Input** — the `prepared/` prefix on the staging bucket, populated by the
-  transformation pipeline's assembly step. Two file shapes:
-  - `weather.csv` — single cumulative weather master.
-  - `pv/<system_id>.csv` — one cumulative master per PV system.
+  transformation pipeline's assembly step. Two partitioned, content-named
+  corpora:
+  - `weather/weather_{start}_{end}_{gv}-{NN}.csv` — grid-point weather.
+  - `pv/<system_id>/pv_<system_id>_{start}_{end}.csv` — PV power joined with
+    on-site weather, one subtree per PV system.
 - **Output** — a commit + annotated tag on the
   [`pv-prospect-instance`](https://github.com/rjferrier/pv-prospect-instance)
   repository, plus the underlying CSV bytes pushed to the `feature` DVC remote
@@ -34,14 +36,18 @@ half-written clone behind.
 `verify_readiness` (in `readiness.py`) is the gate: it refuses to version if
 the prepared data isn't in the shape model training expects.
 
-- `weather.csv` must exist at the root of the `prepared/` prefix.
-- At least one `pv/*.csv` must exist.
+- Every CSV under `weather/` and `pv/` must match its content-named
+  partition shape (see the input layout above) — a stray or old-format file
+  blocks versioning rather than being snapshotted silently.
+- At least one partition file must be present to version. The versioner is a
+  pure snapshotter, so it does not require any particular corpus to be
+  populated — a cycle that produced only PV partitions is still ready.
 - `prepared-batches/` must be empty — any leftover batch CSV indicates the
   transformation pipeline's assembly step did not complete, and versioning a
   partial state would baseline the next training run against incomplete data.
 
-All three checks accumulate into a single `ReadinessError` so an operator
-sees every failing condition in one pass, not just the first.
+All failing conditions accumulate into a single `ReadinessError` so an
+operator sees every problem in one pass, not just the first.
 
 ### 2. SSH setup
 
@@ -93,9 +99,10 @@ prefixes on the staging bucket and then `rmdir`s the residual folder
 hierarchy. See [HNS cleanup](#staging-cleanup-on-hierarchical-namespace-hns-buckets)
 below for why the explicit rmdir is necessary.
 
-The next weekly run therefore begins against an empty staging tree, which is
-what makes the readiness check meaningful: a stale `weather.csv` left over
-from the previous week would otherwise pass the existence check silently.
+The next weekly run therefore begins against an empty staging tree, so each
+cycle versions exactly that week's freshly assembled partition files — the
+clean slate is what lets content-named partitions accumulate as disjoint
+`.dvc` entries across tags rather than overwriting one another.
 
 ## Configuration
 
@@ -147,7 +154,8 @@ next weekly run can verify readiness against a fresh write.
 On the hierarchical-namespace staging bucket, folders are first-class entities
 that persist after their last child object is removed. Cleanup therefore deletes
 files and then `rmdir`s every residual ancestor directory deepest-first (e.g.
-`pv/`, plus any subtree under `data/cleaned/`). The root prefixes themselves
+`weather/` and each `pv/<site>/`, plus any subtree under `data/cleaned/`).
+The root prefixes themselves
 (`data/prepared/`, `data/cleaned/`) are left in place; transformation re-uses
 them on its next run.
 

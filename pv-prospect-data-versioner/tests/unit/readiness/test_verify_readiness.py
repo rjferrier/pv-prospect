@@ -51,77 +51,77 @@ class StubFileSystem:
         return results
 
 
-def test_returns_file_paths_when_ready() -> None:
+_WEATHER = 'weather/weather_2026-05-01_2026-05-15_0-07.csv'
+_PV_89665 = 'pv/89665/pv_89665_2026-05-01_2026-05-08.csv'
+_PV_12345 = 'pv/12345/pv_12345_2026-05-01_2026-05-08.csv'
+
+
+def test_returns_sorted_partition_paths_when_ready() -> None:
     prepared_fs = StubFileSystem(
-        {
-            'weather.csv': b'data',
-            'pv/89665.csv': b'data',
-            'pv/12345.csv': b'data',
-        }
+        {_WEATHER: b'data', _PV_89665: b'data', _PV_12345: b'data'}
     )
-    batches_fs = StubFileSystem()
 
-    paths = verify_readiness(prepared_fs, batches_fs)
+    paths = verify_readiness(prepared_fs, StubFileSystem())
 
-    assert 'weather.csv' in paths
-    assert 'pv/89665.csv' in paths
-    assert 'pv/12345.csv' in paths
-    assert len(paths) == 3
+    assert paths == sorted([_WEATHER, _PV_89665, _PV_12345])
 
 
-def test_raises_when_weather_csv_missing() -> None:
+def test_versions_a_single_populated_corpus() -> None:
+    """The versioner snapshots whatever partition files are present; a
+    cycle with only PV partitions (no new weather) is still ready."""
+    prepared_fs = StubFileSystem({_PV_89665: b'data'})
+
+    assert verify_readiness(prepared_fs, StubFileSystem()) == [_PV_89665]
+
+
+def test_rejects_a_misshapen_weather_partition() -> None:
     prepared_fs = StubFileSystem(
-        {
-            'pv/89665.csv': b'data',
-        }
+        {_PV_89665: b'data', 'weather/weather_2026-05-01.csv': b'data'}
     )
-    batches_fs = StubFileSystem()
 
-    with pytest.raises(ReadinessError, match='weather.csv not found'):
-        verify_readiness(prepared_fs, batches_fs)
+    with pytest.raises(ReadinessError, match='Unexpected file in weather/'):
+        verify_readiness(prepared_fs, StubFileSystem())
 
 
-def test_raises_when_no_pv_files() -> None:
+def test_rejects_an_old_format_pv_master() -> None:
+    """A pre-partition ``pv/{site}.csv`` master sits directly under
+    ``pv/`` rather than in a per-site subdirectory, so it fails the shape
+    check rather than being snapshotted silently."""
+    prepared_fs = StubFileSystem({_WEATHER: b'data', 'pv/89665.csv': b'data'})
+
+    with pytest.raises(ReadinessError, match='Unexpected file in pv/'):
+        verify_readiness(prepared_fs, StubFileSystem())
+
+
+def test_rejects_pv_partition_whose_dir_and_filename_site_disagree() -> None:
     prepared_fs = StubFileSystem(
-        {
-            'weather.csv': b'data',
-        }
+        {_WEATHER: b'data', 'pv/89665/pv_12345_2026-05-01_2026-05-08.csv': b'data'}
     )
-    batches_fs = StubFileSystem()
 
-    with pytest.raises(ReadinessError, match='No CSV files found in pv/'):
-        verify_readiness(prepared_fs, batches_fs)
+    with pytest.raises(ReadinessError, match='Unexpected file in pv/'):
+        verify_readiness(prepared_fs, StubFileSystem())
+
+
+def test_raises_when_no_partition_files() -> None:
+    with pytest.raises(ReadinessError, match='No prepared partition files'):
+        verify_readiness(StubFileSystem(), StubFileSystem())
 
 
 def test_raises_when_unassembled_batches_remain() -> None:
-    prepared_fs = StubFileSystem(
-        {
-            'weather.csv': b'data',
-            'pv/89665.csv': b'data',
-        }
-    )
-    batches_fs = StubFileSystem(
-        {
-            'weather/504900_minus35400_20250624.csv': b'data',
-        }
-    )
+    prepared_fs = StubFileSystem({_WEATHER: b'data', _PV_89665: b'data'})
+    batches_fs = StubFileSystem({'pv/89665_20260501.csv': b'data'})
 
     with pytest.raises(ReadinessError, match='unassembled batch file'):
         verify_readiness(prepared_fs, batches_fs)
 
 
-def test_raises_with_all_errors_combined() -> None:
-    prepared_fs = StubFileSystem()
-    batches_fs = StubFileSystem(
-        {
-            'pv/89665_20250624.csv': b'data',
-        }
-    )
+def test_accumulates_all_errors() -> None:
+    prepared_fs = StubFileSystem({'weather/garbage.csv': b'data'})
+    batches_fs = StubFileSystem({'pv/89665_20260501.csv': b'data'})
 
     with pytest.raises(ReadinessError) as exc_info:
         verify_readiness(prepared_fs, batches_fs)
 
     message = str(exc_info.value)
-    assert 'weather.csv not found' in message
-    assert 'No CSV files found' in message
+    assert 'Unexpected file in weather/' in message
     assert 'unassembled batch' in message
