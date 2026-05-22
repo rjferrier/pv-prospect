@@ -76,13 +76,21 @@ class TransformUnit:
     """One ``(entity, window)`` pair to transform.
 
     ``kind`` selects the step family: a ``'pv'`` unit becomes
-    ``clean_pv`` / ``prepare_pv`` / ``assemble_pv`` tasks, a ``'weather'``
-    unit ``clean_weather`` / ``prepare_weather`` / ``assemble_weather``.
+    ``clean_pv`` / ``prepare_pv`` / ``assemble_pv`` tasks. A ``'weather'``
+    unit is one of two sub-kinds, distinguished by ``grid_point_sample_index``:
+    a *grid-weather* unit (``grid_point_sample_index`` set) becomes
+    ``clean_weather`` / ``prepare_weather`` / ``assemble_weather`` and
+    feeds the ``weather/`` corpus; a *PV-site-weather* unit
+    (``grid_point_sample_index`` unset) becomes ``clean_weather`` only — it is
+    cleaned for the ``prepare_pv`` join but carried into no weather corpus.
+
     Exactly one of ``pv_system_id`` / ``location`` identifies the entity;
     a weather unit may be located by either (PV-site weather is keyed by
-    system id, grid weather by a ``lat,lon`` string). ``start_date`` is
-    inclusive and ``end_date`` exclusive; ``end_date`` is ``None`` for the
-    daily single-day transform.
+    system id, grid weather by a ``lat,lon`` string). ``grid_point_sample_index``
+    is the grid-point sample file a grid-weather unit belongs to — its
+    weather partition file groups by it. ``start_date`` is inclusive and
+    ``end_date`` exclusive; ``end_date`` is ``None`` for the daily
+    single-day transform.
     """
 
     kind: Literal['pv', 'weather']
@@ -90,6 +98,7 @@ class TransformUnit:
     end_date: str | None = None
     pv_system_id: int | None = None
     location: str | None = None
+    grid_point_sample_index: int | None = None
 
 
 def _transform_task_env(
@@ -100,13 +109,15 @@ def _transform_task_env(
     run_date: str,
     pv_system_id: int | None = None,
     location: str | None = None,
+    grid_point_sample_index: int | None = None,
 ) -> list[dict[str, str]]:
     """Build the env list for one transform task, with TASK_HASH injected.
 
     ``END_DATE`` is included only when *end_date_str* is set, so the
     container processes the whole ``[START_DATE, END_DATE)`` window. When
     omitted the container falls back to a single day — the daily-transform
-    behaviour.
+    behaviour. ``GRID_POINT_SAMPLE_INDEX`` is included only for grid-weather
+    units; ``prepare_weather`` keys its prepared rows by it.
     """
     env: dict[str, str] = {
         'TRANSFORM_STEP': transform_step,
@@ -121,6 +132,8 @@ def _transform_task_env(
         env['PV_SYSTEM_ID'] = str(pv_system_id)
     if location is not None:
         env['LOCATION'] = location
+    if grid_point_sample_index is not None:
+        env['GRID_POINT_SAMPLE_INDEX'] = str(grid_point_sample_index)
     return inject_task_hash(build_env_list(**env))
 
 
@@ -131,14 +144,18 @@ def build_transform_phases(
 ) -> list[list[list[dict[str, str]]]]:
     """Enumerate the clean / prepare / assemble phases for *units*.
 
-    Each unit becomes a clean task and a prepare task carrying that unit's
-    own ``[START_DATE, END_DATE)`` window, so one run can mix windows
+    Each unit becomes a clean task carrying that unit's own
+    ``[START_DATE, END_DATE)`` window, so one run can mix windows
     (e.g. weather-grid extraction's diagonal march through
-    ``(sample_file, date)`` space). Phase 2 emits one ``assemble_pv`` per
-    distinct ``pv_system_id`` and a single ``assemble_weather`` when any
-    weather unit is present. An assemble task ignores its date window but
-    carries the first-seen relevant unit's window so its task hash is
-    deterministic. The returned phases are unfiltered — the caller applies
+    ``(sample_file, date)`` space). A ``'pv'`` unit and a grid-weather
+    unit also get a prepare task; a PV-site-weather unit
+    (``grid_point_sample_index`` unset) gets only ``clean_weather`` — its
+    cleaned weather feeds the ``prepare_pv`` join and goes no further.
+    Phase 2 emits one ``assemble_pv`` per distinct ``pv_system_id`` and a
+    single ``assemble_weather`` when any grid-weather unit is present. An
+    assemble task ignores its date window but carries the first-seen
+    relevant unit's window so its task hash is deterministic. The returned
+    phases are unfiltered — the caller applies
     :meth:`WorkflowOrchestrator.filter_remaining_tasks` if it wants
     self-filtering (the daily transform does; the backfill does not).
     """
@@ -152,6 +169,7 @@ def build_transform_phases(
             run_date,
             pv_system_id=unit.pv_system_id,
             location=unit.location,
+            grid_point_sample_index=unit.grid_point_sample_index,
         )
 
     clean: list[list[dict[str, str]]] = []
@@ -164,11 +182,15 @@ def build_transform_phases(
             prepare.append(task(unit, 'prepare_pv'))
             if unit.pv_system_id is not None:
                 assemble_pv_units.setdefault(unit.pv_system_id, unit)
-        else:
+        elif unit.grid_point_sample_index is not None:
+            # Grid weather: cleaned, prepared, and assembled into weather/.
             clean.append(task(unit, 'clean_weather'))
             prepare.append(task(unit, 'prepare_weather'))
             if first_weather_unit is None:
                 first_weather_unit = unit
+        else:
+            # PV-site weather: cleaned only, for the prepare_pv join.
+            clean.append(task(unit, 'clean_weather'))
 
     assemble: list[list[dict[str, str]]] = [
         task(unit, 'assemble_pv') for unit in assemble_pv_units.values()
@@ -250,13 +272,17 @@ def _descriptor_to_unit(descriptor: dict[str, str]) -> TransformUnit | None:
     """Map one extraction ledger descriptor to a :class:`TransformUnit`.
 
     The extraction backfill records, per completed task, a descriptor of
-    ``{data_source, start_date, end_date?, pv_system_id | location}``,
-    where ``data_source`` carries the :class:`DataSourceType` value
-    (``'pv'`` / ``'weather'``) propagated from the extract job's
-    ``DATA_SOURCE`` env var — *not* the concrete :class:`DataSource`
-    (e.g. ``'pvoutput'``). Returns ``None`` for a descriptor missing its
-    dates or an identifier so a malformed entry becomes a skipped hole
-    rather than a crash.
+    ``{data_source, start_date, end_date?, pv_system_id | location,
+    grid_point_sample_index?}``, where ``data_source`` carries the
+    :class:`DataSourceType` value (``'pv'`` / ``'weather'``) propagated
+    from the extract job's ``DATA_SOURCE`` env var — *not* the concrete
+    :class:`DataSource` (e.g. ``'pvoutput'``). ``grid_point_sample_index`` is
+    set only by the weather-grid backfill; it identifies the grid-point
+    sample file the window belongs to and so distinguishes a grid-weather
+    unit (which feeds the ``weather/`` corpus) from PV-site weather (which
+    is cleaned only, for the ``prepare_pv`` join). Returns ``None`` for a
+    descriptor missing its dates or an identifier so a malformed entry
+    becomes a skipped hole rather than a crash.
     """
     start_date = descriptor.get('start_date')
     if not start_date:
@@ -265,12 +291,24 @@ def _descriptor_to_unit(descriptor: dict[str, str]) -> TransformUnit | None:
     kind: Literal['pv', 'weather'] = (
         'pv' if descriptor.get('data_source') == DataSourceType.PV.value else 'weather'
     )
+    grid_point_sample_index_str = descriptor.get('grid_point_sample_index')
+    grid_point_sample_index = (
+        int(grid_point_sample_index_str)
+        if grid_point_sample_index_str is not None
+        else None
+    )
     pv_system_id = descriptor.get('pv_system_id')
     if pv_system_id is not None:
         return TransformUnit(kind, start_date, end_date, pv_system_id=int(pv_system_id))
     location = descriptor.get('location')
     if location is not None:
-        return TransformUnit(kind, start_date, end_date, location=location)
+        return TransformUnit(
+            kind,
+            start_date,
+            end_date,
+            location=location,
+            grid_point_sample_index=grid_point_sample_index,
+        )
     return None
 
 

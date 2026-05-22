@@ -14,10 +14,12 @@ A :class:`WeatherGridBackfillCursor` tracks Step 3 progress between runs.
 The persisted manifest carries a ``phases`` list in the same shape as the
 daily-extract orchestrator manifest. Each batch becomes an
 ``extract_and_load`` task env carrying the concrete list of grid-point
-locations (``LOCATIONS``) the container should process. Per-site task
-identity is computed inside the container via
-:func:`pv_prospect.etl.compute_task_hash` so the workflow ledger records
-one entry per ``(site, window)`` pair rather than per batch.
+locations (``LOCATIONS``) the container should process, plus the batch's
+``GRID_POINT_SAMPLE_INDEX`` so each per-site ledger entry's descriptor
+records which sample file the window belongs to. Per-site task identity is
+computed inside the container via :func:`pv_prospect.etl.compute_task_hash`
+so the workflow ledger records one entry per ``(site, window)`` pair rather
+than per batch.
 """
 
 import json
@@ -52,13 +54,13 @@ def _epoch_days(d: date) -> int:
 class Batch:
     """A unit of work: one sample file queried over one date range."""
 
-    sample_file_index: int
+    grid_point_sample_index: int
     start_date: date
     end_date: date
 
     @property
     def sample_file_name(self) -> str:
-        return f'sample_{self.sample_file_index:03d}.csv'
+        return f'sample_{self.grid_point_sample_index:03d}.csv'
 
 
 @dataclass(frozen=True)
@@ -112,7 +114,7 @@ def build_weather_grid_manifest(
 
     # Step 2: trailing 14 days for today's sample file
     step2_batch = Batch(
-        sample_file_index=anchor,
+        grid_point_sample_index=anchor,
         start_date=today - timedelta(days=WEATHER_GRID_BACKFILL_WINDOW_DAYS),
         end_date=today,
     )
@@ -127,7 +129,7 @@ def build_weather_grid_manifest(
         sample_index = (anchor - sample_offset) % num_sample_files
         step3_batches.append(
             Batch(
-                sample_file_index=sample_index,
+                grid_point_sample_index=sample_index,
                 start_date=start_date,
                 end_date=end_date,
             )
@@ -204,8 +206,12 @@ def batch_to_task_env(
     ``containerOverrides.env`` for one Cloud Run Job task. The
     sample-file index is resolved to its concrete list of ``lat,lon``
     strings at plan time and passed as the ``LOCATIONS`` env var (a
-    JSON array). Per-site ``TASK_HASH`` values are computed inside the
-    container; nothing is injected here.
+    JSON array). The index itself rides along as
+    ``GRID_POINT_SAMPLE_INDEX`` so the container can record it in each
+    per-site ledger descriptor; it does not drive resolution
+    (``LOCATIONS`` does) and is excluded from the per-site task hash.
+    Per-site ``TASK_HASH`` values are computed inside the container;
+    nothing is injected here.
     """
     return build_env_list(
         JOB_TYPE='extract_and_load',
@@ -213,6 +219,7 @@ def batch_to_task_env(
         START_DATE=batch.start_date.isoformat(),
         END_DATE=batch.end_date.isoformat(),
         LOCATIONS=json.dumps(locations),
+        GRID_POINT_SAMPLE_INDEX=str(batch.grid_point_sample_index),
         DRY_RUN=dry_run,
         WORKFLOW_NAME=WORKFLOW_NAME,
         RUN_DATE=run_date,
@@ -238,7 +245,7 @@ def build_phases(
     tasks = [
         batch_to_task_env(
             b,
-            read_sample_file(resources_fs, sample_file_path(b.sample_file_index)),
+            read_sample_file(resources_fs, sample_file_path(b.grid_point_sample_index)),
             data_source,
             dry_run,
             run_date,

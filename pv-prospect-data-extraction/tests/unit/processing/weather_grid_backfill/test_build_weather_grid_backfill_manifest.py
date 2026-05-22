@@ -24,7 +24,7 @@ def test_step2_uses_todays_modulus() -> None:
     manifest, _ = build_weather_grid_manifest(_TODAY, _NUM_SAMPLE_FILES, cursor)
 
     expected_index = _epoch_days(_TODAY) % _NUM_SAMPLE_FILES
-    assert manifest.step2_batch.sample_file_index == expected_index
+    assert manifest.step2_batch.grid_point_sample_index == expected_index
 
 
 def test_step2_covers_trailing_14_days() -> None:
@@ -76,7 +76,7 @@ def test_step3_each_batch_uses_different_sample_file() -> None:
     cursor = initial_weather_grid_backfill_cursor(_TODAY)
     manifest, _ = build_weather_grid_manifest(_TODAY, _NUM_SAMPLE_FILES, cursor)
 
-    indices = [b.sample_file_index for b in manifest.step3_batches]
+    indices = [b.grid_point_sample_index for b in manifest.step3_batches]
     assert len(set(indices)) == len(indices)
 
 
@@ -84,8 +84,8 @@ def test_step3_sample_indices_differ_from_step2() -> None:
     cursor = initial_weather_grid_backfill_cursor(_TODAY)
     manifest, _ = build_weather_grid_manifest(_TODAY, _NUM_SAMPLE_FILES, cursor)
 
-    step2_index = manifest.step2_batch.sample_file_index
-    step3_indices = {b.sample_file_index for b in manifest.step3_batches}
+    step2_index = manifest.step2_batch.grid_point_sample_index
+    step3_indices = {b.grid_point_sample_index for b in manifest.step3_batches}
     assert step2_index not in step3_indices
 
 
@@ -125,7 +125,7 @@ def test_sample_file_indices_wrap_around() -> None:
         _TODAY, num_files, cursor, step3_batch_count=6
     )
 
-    indices = [b.sample_file_index for b in manifest.step3_batches]
+    indices = [b.grid_point_sample_index for b in manifest.step3_batches]
     # With 4 files and 6 batches, indices must wrap around
     assert all(0 <= i < num_files for i in indices)
 
@@ -140,5 +140,5 @@ def test_initial_cursor_starts_after_step2_window() -> None:
 
 
 def test_batch_sample_file_name() -> None:
-    batch = Batch(sample_file_index=7, start_date=_TODAY, end_date=_TODAY)
+    batch = Batch(grid_point_sample_index=7, start_date=_TODAY, end_date=_TODAY)
     assert batch.sample_file_name == 'sample_007.csv'

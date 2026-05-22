@@ -41,6 +41,11 @@ LOCATION
     (Optional) comma-separated lat,lon (e.g. ``50.49,-3.54``); required for
     weather steps unless ``PV_SYSTEM_ID`` is provided instead. Exactly one
     of the two must be set.
+GRID_POINT_SAMPLE_INDEX
+    (Optional) integer index of the grid-point sample file a grid-weather
+    unit belongs to. Set only for the weather-grid backfill's
+    ``prepare_weather`` tasks; it groups the prepared rows into one
+    ``weather/`` partition file per (sample file, window).
 """
 
 import json
@@ -240,6 +245,7 @@ def _task_env_from_environ() -> dict[str, str]:
         'TRANSFORM_STEP',
         'PV_SYSTEM_ID',
         'LOCATION',
+        'GRID_POINT_SAMPLE_INDEX',
         'START_DATE',
         'DATE',
         'END_DATE',
@@ -330,6 +336,11 @@ def _run_one_transform_unit(
         int(task_env['PV_SYSTEM_ID']) if task_env.get('PV_SYSTEM_ID') else None
     )
     location_str = task_env.get('LOCATION')
+    grid_point_sample_index = (
+        int(task_env['GRID_POINT_SAMPLE_INDEX'])
+        if task_env.get('GRID_POINT_SAMPLE_INDEX')
+        else None
+    )
 
     start_date_str = task_env.get('START_DATE') or task_env.get('DATE')
     if not start_date_str:
@@ -352,6 +363,8 @@ def _run_one_transform_unit(
         descriptor['pv_system_id'] = str(pv_system_id)
     if location_str:
         descriptor['location'] = location_str
+    if grid_point_sample_index is not None:
+        descriptor['grid_point_sample_index'] = str(grid_point_sample_index)
     if task_env.get('END_DATE'):
         descriptor['end_date'] = task_env['END_DATE']
 
@@ -367,6 +380,7 @@ def _run_one_transform_unit(
             config,
             pv_system_id,
             location_str,
+            grid_point_sample_index,
             date_range,
             shared.prepared_batches,
         )
@@ -521,6 +535,7 @@ def _run_transform_step(
     config: DataTransformationConfig,
     pv_system_id: int | None,
     location_str: str | None,
+    grid_point_sample_index: int | None,
     date_range: DateRange,
     prepared_batches: PreparedBatchCollector | None = None,
 ) -> None:
@@ -550,6 +565,14 @@ def _run_transform_step(
         )
 
     elif transformation is Transformation.PREPARE_WEATHER:
+        # prepare_weather is grid-weather only — it is dispatched solely by
+        # the weather-grid backfill's in-container handler, which always
+        # supplies both the collector and the sample-file index.
+        if prepared_batches is None or grid_point_sample_index is None:
+            raise WorkflowTerminatingError(
+                'prepare_weather requires GRID_POINT_SAMPLE_INDEX and the '
+                'in-container collector (weather-grid backfill only)'
+            )
         site = resolve_site(
             config.data_sources.weather.type,
             get_pv_site_by_system_id,
@@ -558,11 +581,11 @@ def _run_transform_step(
         )
         run_prepare_weather(
             cleaned_fs,
-            batches_fs,
             config.data_sources.weather,
             site,
             date_range,
-            collector=prepared_batches,
+            grid_point_sample_index,
+            prepared_batches,
         )
 
     elif transformation is Transformation.PREPARE_PV:
@@ -579,7 +602,16 @@ def _run_transform_step(
         )
 
     elif transformation is Transformation.ASSEMBLE_WEATHER:
-        assemble_prepared_weather(batches_fs, prepared_fs, prepared_batches)
+        # assemble_weather drains the in-container collector — also
+        # weather-grid backfill only (see prepare_weather above).
+        if prepared_batches is None:
+            raise WorkflowTerminatingError(
+                'assemble_weather requires the in-container collector '
+                '(weather-grid backfill only)'
+            )
+        assemble_prepared_weather(
+            prepared_fs, prepared_batches, config.weather_grid.version
+        )
 
     elif transformation is Transformation.ASSEMBLE_PV:
         assemble_prepared_pv(

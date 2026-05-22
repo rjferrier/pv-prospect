@@ -257,3 +257,45 @@ def test_first_run_consumes_from_the_oldest_ledger() -> None:
     units, _ = _plan(BackfillScope.PV_SITES, ledgers)
 
     assert [u.pv_system_id for u in units] == [111]
+
+
+def test_weather_grid_descriptor_grid_point_sample_index_becomes_a_unit_field() -> None:
+    """The weather-grid extraction descriptor carries the grid-point
+    sample-file index; the planner propagates it onto the unit so the
+    transform can group prepared rows into one weather partition file."""
+    ledgers = {
+        _ledger_path('2026-05-14', '063130', _WEATHER_EXTRACT_WF): _ledger_line(
+            'completed',
+            {
+                'data_source': 'weather',
+                'start_date': '2026-01-01',
+                'end_date': '2026-01-15',
+                'location': '50.06,-5.16',
+                'grid_point_sample_index': '7',
+            },
+        )
+    }
+
+    units, _ = _plan(BackfillScope.WEATHER_GRID, ledgers)
+
+    assert [u.grid_point_sample_index for u in units] == [7]
+
+
+def test_descriptor_without_grid_point_sample_index_yields_none() -> None:
+    """A PV-site weather descriptor carries no sample-file index, so the
+    unit's field stays None — marking it PV-site (clean-only) weather."""
+    ledgers = {
+        _ledger_path('2026-05-14', '024844', _PV_EXTRACT_WF): _ledger_line(
+            'completed',
+            {
+                'data_source': 'weather',
+                'start_date': '2026-03-18',
+                'end_date': '2026-04-15',
+                'pv_system_id': '4708',
+            },
+        )
+    }
+
+    units, _ = _plan(BackfillScope.PV_SITES, ledgers)
+
+    assert [u.grid_point_sample_index for u in units] == [None]

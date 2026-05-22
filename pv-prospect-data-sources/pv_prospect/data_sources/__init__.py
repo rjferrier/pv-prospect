@@ -1,4 +1,4 @@
-from .config import DataSourcesConfig, DataSourceType
+from .config import DataSourcesConfig, DataSourceType, WeatherGridConfig
 from .constants import (
     PV_SITES_CSV_FILE,
     SUPPORTING_RESOURCES,
@@ -32,6 +32,7 @@ __all__ = [
     'PV_SITES_CSV_FILE',
     'SUPPORTING_RESOURCES',
     'WeatherDataSubfolder',
+    'WeatherGridConfig',
     'build_time_series_csv_file_path',
     'csv_path_to_metadata_path',
     'format_date',

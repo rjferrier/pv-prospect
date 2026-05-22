@@ -198,4 +198,6 @@ def test_collector_path_buffers_frame_instead_of_writing_batch(
     )
 
     assert batches_fs._files == {}  # no batch CSV written
-    assert len(collector.pv_frames(_SYSTEM_ID)) == 1
+    groups = collector.pv_groups(_SYSTEM_ID)
+    assert list(groups) == [('2026-06-21', '2026-06-22')]
+    assert len(groups[('2026-06-21', '2026-06-22')]) == 1

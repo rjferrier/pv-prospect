@@ -3,11 +3,14 @@ from pv_prospect.data_sources import DataSource, DataSourceType
 from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.etl.storage.backends import GcsStorageConfig, LocalStorageConfig
 
-_DATA_SOURCES = {
+# Config keys every well-formed config tree carries, merged in from the
+# data-sources package's defaults.
+_SHARED_KEYS = {
     'data_sources': {
         'pv': 'pvoutput',
         'weather': 'openmeteo/historical',
     },
+    'weather_grid': {'version': 0},
 }
 
 
@@ -38,7 +41,7 @@ def test_from_dict_parses_gcs_config():
             'bucket_name': 'my-bucket',
             'prefix': 'prepared',
         },
-        **_DATA_SOURCES,
+        **_SHARED_KEYS,
     }
 
     config = DataTransformationConfig.from_dict(data)
@@ -76,7 +79,7 @@ def test_from_dict_parses_local_config():
             'backend': 'local',
             'prefix': '/tmp/prepared',
         },
-        **_DATA_SOURCES,
+        **_SHARED_KEYS,
     }
 
     config = DataTransformationConfig.from_dict(data)
@@ -108,7 +111,7 @@ def test_from_dict_parses_data_sources():
         'staged_cleaned_data_storage': {'backend': 'local', 'prefix': '/tmp'},
         'staged_prepared_batches_data_storage': {'backend': 'local', 'prefix': '/tmp'},
         'staged_prepared_data_storage': {'backend': 'local', 'prefix': '/tmp'},
-        **_DATA_SOURCES,
+        **_SHARED_KEYS,
     }
 
     config = DataTransformationConfig.from_dict(data)

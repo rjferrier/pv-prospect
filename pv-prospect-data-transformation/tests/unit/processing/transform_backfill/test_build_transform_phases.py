@@ -33,33 +33,90 @@ def test_pv_unit_emits_clean_prepare_assemble_pv() -> None:
     )
 
 
-def test_weather_unit_located_by_pv_system_id() -> None:
-    unit = TransformUnit('weather', '2026-03-18', '2026-04-15', pv_system_id=4708)
+def test_grid_weather_unit_emits_clean_prepare_assemble_weather() -> None:
+    """A weather unit with a sample-file index is grid weather: it is
+    cleaned, prepared, and assembled into the weather corpus."""
+    unit = TransformUnit(
+        'weather',
+        '2026-04-15',
+        '2026-04-29',
+        location='50.49,-3.54',
+        grid_point_sample_index=7,
+    )
 
     clean, prepare, assemble = build_transform_phases([unit], _WORKFLOW, _RUN_DATE)
 
     assert [_env(t)['TRANSFORM_STEP'] for t in clean] == ['clean_weather']
     assert [_env(t)['TRANSFORM_STEP'] for t in prepare] == ['prepare_weather']
-    assert _env(clean[0])['PV_SYSTEM_ID'] == '4708'
     assert [_env(t)['TRANSFORM_STEP'] for t in assemble] == ['assemble_weather']
+    assert _env(clean[0])['LOCATION'] == '50.49,-3.54'
+    assert _env(prepare[0])['LOCATION'] == '50.49,-3.54'
 
 
-def test_weather_unit_located_by_location() -> None:
+def test_grid_weather_clean_and_prepare_carry_the_grid_point_sample_index() -> None:
+    """GRID_POINT_SAMPLE_INDEX rides in the clean/prepare task env so
+    prepare_weather can group its prepared rows into one partition file;
+    assemble_weather drains the whole collector and carries no index."""
+    unit = TransformUnit(
+        'weather',
+        '2026-04-15',
+        '2026-04-29',
+        location='50.49,-3.54',
+        grid_point_sample_index=7,
+    )
+
+    clean, prepare, assemble = build_transform_phases([unit], _WORKFLOW, _RUN_DATE)
+
+    assert _env(clean[0])['GRID_POINT_SAMPLE_INDEX'] == '7'
+    assert _env(prepare[0])['GRID_POINT_SAMPLE_INDEX'] == '7'
+    assert 'GRID_POINT_SAMPLE_INDEX' not in _env(assemble[0])
+
+
+def test_pv_site_weather_unit_emits_clean_weather_only() -> None:
+    """A weather unit with no sample-file index is PV-site weather: it is
+    cleaned for the prepare_pv join but carried into no weather corpus, so
+    it gets neither a prepare nor an assemble task."""
+    unit = TransformUnit('weather', '2026-03-18', '2026-04-15', pv_system_id=4708)
+
+    clean, prepare, assemble = build_transform_phases([unit], _WORKFLOW, _RUN_DATE)
+
+    assert [_env(t)['TRANSFORM_STEP'] for t in clean] == ['clean_weather']
+    assert prepare == []
+    assert assemble == []
+    assert _env(clean[0])['PV_SYSTEM_ID'] == '4708'
+    assert 'GRID_POINT_SAMPLE_INDEX' not in _env(clean[0])
+
+
+def test_weather_unit_located_by_location_without_index_is_clean_only() -> None:
+    """A location-keyed weather unit lacking a sample-file index (the
+    daily transform's manual `locations`) is also clean-only."""
     unit = TransformUnit('weather', '2026-04-15', '2026-04-29', location='50.49,-3.54')
 
-    clean, prepare, _ = build_transform_phases([unit], _WORKFLOW, _RUN_DATE)
+    clean, prepare, assemble = build_transform_phases([unit], _WORKFLOW, _RUN_DATE)
 
-    assert _env(clean[0])['LOCATION'] == '50.49,-3.54'
-    assert 'PV_SYSTEM_ID' not in _env(clean[0])
-    assert _env(prepare[0])['LOCATION'] == '50.49,-3.54'
+    assert [_env(t)['TRANSFORM_STEP'] for t in clean] == ['clean_weather']
+    assert prepare == []
+    assert assemble == []
 
 
 def test_each_unit_carries_its_own_window() -> None:
     """A single run may mix windows (weather-grid's diagonal march); each
     unit's clean/prepare tasks must carry that unit's own window."""
     units = [
-        TransformUnit('weather', '2026-01-01', '2026-01-15', location='a'),
-        TransformUnit('weather', '2026-02-01', '2026-02-15', location='b'),
+        TransformUnit(
+            'weather',
+            '2026-01-01',
+            '2026-01-15',
+            location='a',
+            grid_point_sample_index=1,
+        ),
+        TransformUnit(
+            'weather',
+            '2026-02-01',
+            '2026-02-15',
+            location='b',
+            grid_point_sample_index=2,
+        ),
     ]
 
     clean, prepare, _ = build_transform_phases(units, _WORKFLOW, _RUN_DATE)
@@ -114,10 +171,22 @@ def test_assemble_pv_deduped_per_system() -> None:
     assert {_env(t)['PV_SYSTEM_ID'] for t in assemble} == {'4708', '24667'}
 
 
-def test_assemble_weather_emitted_once_with_no_identifier() -> None:
+def test_assemble_weather_emitted_once_for_grid_weather() -> None:
     units = [
-        TransformUnit('weather', '2026-01-01', '2026-01-15', location='a'),
-        TransformUnit('weather', '2026-02-01', '2026-02-15', location='b'),
+        TransformUnit(
+            'weather',
+            '2026-01-01',
+            '2026-01-15',
+            location='a',
+            grid_point_sample_index=1,
+        ),
+        TransformUnit(
+            'weather',
+            '2026-02-01',
+            '2026-02-15',
+            location='b',
+            grid_point_sample_index=2,
+        ),
     ]
 
     _, _, assemble = build_transform_phases(units, _WORKFLOW, _RUN_DATE)
@@ -127,10 +196,29 @@ def test_assemble_weather_emitted_once_with_no_identifier() -> None:
     assert 'PV_SYSTEM_ID' not in _env(assemble[0])
 
 
-def test_phases_are_clean_then_prepare_then_assemble() -> None:
+def test_assemble_weather_absent_when_only_pv_site_weather() -> None:
+    """PV-site weather feeds no weather corpus, so a run carrying only it
+    emits no assemble_weather."""
     units = [
         TransformUnit('pv', '2026-03-18', '2026-04-15', pv_system_id=4708),
         TransformUnit('weather', '2026-03-18', '2026-04-15', pv_system_id=4708),
+    ]
+
+    _, _, assemble = build_transform_phases(units, _WORKFLOW, _RUN_DATE)
+
+    assert [_env(t)['TRANSFORM_STEP'] for t in assemble] == ['assemble_pv']
+
+
+def test_phases_are_clean_then_prepare_then_assemble() -> None:
+    units = [
+        TransformUnit('pv', '2026-03-18', '2026-04-15', pv_system_id=4708),
+        TransformUnit(
+            'weather',
+            '2026-03-18',
+            '2026-04-15',
+            location='a',
+            grid_point_sample_index=3,
+        ),
     ]
 
     clean, prepare, assemble = build_transform_phases(units, _WORKFLOW, _RUN_DATE)

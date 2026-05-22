@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from pv_prospect.data_sources import DataSourcesConfig
+from pv_prospect.data_sources import DataSourcesConfig, WeatherGridConfig
 from pv_prospect.etl.storage.factory import AnyStorageConfig, parse_storage_config
 
 
@@ -17,6 +17,7 @@ class DataTransformationConfig:
     staged_prepared_batches_data_storage: AnyStorageConfig
     staged_prepared_data_storage: AnyStorageConfig
     data_sources: DataSourcesConfig
+    weather_grid: WeatherGridConfig
     manifests_storage: AnyStorageConfig | None = None
     cursors_storage: AnyStorageConfig | None = None
     ledger_storage: AnyStorageConfig | None = None
@@ -39,6 +40,7 @@ class DataTransformationConfig:
                 data['staged_prepared_data_storage']
             ),
             data_sources=DataSourcesConfig.from_dict(data),
+            weather_grid=WeatherGridConfig.from_dict(data),
             manifests_storage=_optional_storage(data, 'manifests_storage'),
             cursors_storage=_optional_storage(data, 'cursors_storage'),
             ledger_storage=_optional_storage(data, 'ledger_storage'),

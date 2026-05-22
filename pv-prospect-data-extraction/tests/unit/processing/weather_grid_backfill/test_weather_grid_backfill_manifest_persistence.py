@@ -217,8 +217,9 @@ def test_task_envs_carry_data_source_and_run_date() -> None:
 
 def test_task_envs_carry_locations_resolved_from_sample_files() -> None:
     """Each batch env carries a LOCATIONS env var (JSON array) whose
-    contents are the lat,lon strings read from the batch's sample file,
-    rather than a SAMPLE_FILE_INDEX pointer."""
+    contents are the lat,lon strings read from the batch's sample file:
+    resolution is driven by the resolved locations, not by the sample-file
+    index."""
     cursors_fs = _FakeFileSystem()
     manifests_fs = _FakeFileSystem()
 
@@ -226,7 +227,6 @@ def test_task_envs_carry_locations_resolved_from_sample_files() -> None:
     data = json.loads(manifests_fs.files[_MANIFEST_PATH])
 
     for task in data['phases'][0]:
-        assert _env_value(task, 'SAMPLE_FILE_INDEX') is None
         locations_raw = _env_value(task, 'LOCATIONS')
         assert locations_raw is not None
         locations = json.loads(locations_raw)
@@ -235,6 +235,31 @@ def test_task_envs_carry_locations_resolved_from_sample_files() -> None:
         # Every entry is a "lat,lon" string.
         for loc in locations:
             assert ',' in loc
+
+
+def test_task_envs_carry_grid_point_sample_index() -> None:
+    """Each batch env carries a GRID_POINT_SAMPLE_INDEX env var matching
+    its sample file. It rides alongside LOCATIONS purely so the container
+    can record the index in each per-site ledger descriptor; LOCATIONS
+    still drives resolution."""
+    cursors_fs = _FakeFileSystem()
+    manifests_fs = _FakeFileSystem()
+    today = date(2026, 4, 9)
+
+    _plan(cursors_fs, manifests_fs, today=today)
+    data = json.loads(manifests_fs.files[_MANIFEST_PATH])
+
+    cursor = initial_weather_grid_backfill_cursor(today)
+    manifest, _ = build_weather_grid_manifest(today, _NUM_SAMPLE_FILES, cursor)
+    expected_indices = [
+        manifest.step2_batch.grid_point_sample_index,
+        *(b.grid_point_sample_index for b in manifest.step3_batches),
+    ]
+
+    actual_indices = [
+        _env_value(task, 'GRID_POINT_SAMPLE_INDEX') for task in data['phases'][0]
+    ]
+    assert actual_indices == [str(i) for i in expected_indices]
 
 
 def test_same_cursor_state_produces_envs_with_same_computed_hashes() -> None:

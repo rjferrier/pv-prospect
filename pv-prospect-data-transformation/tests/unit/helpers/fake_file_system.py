@@ -4,7 +4,16 @@ from pv_prospect.etl.storage.base import FileEntry
 
 
 class FakeFileSystem:
-    """In-memory FileSystem for unit testing."""
+    """In-memory FileSystem for unit testing.
+
+    A real backend round-trips a path written with ``write_text`` through
+    ``read_bytes`` (and vice versa) — both hit the same bytes. This fake
+    keeps the constructor's ``files`` / ``binary_files`` as separate dicts
+    for test convenience, but every read falls back to the other dict and
+    every write evicts any stale entry from it, so a written file is
+    visible to ``read_text``, ``read_bytes``, ``exists``, and
+    ``list_files`` alike.
+    """
 
     def __init__(
         self,
@@ -18,19 +27,25 @@ class FakeFileSystem:
         return path in self._files or path in self._binary_files
 
     def read_text(self, path: str) -> str:
-        if path not in self._files:
-            raise FileNotFoundError(path)
-        return self._files[path]
+        if path in self._files:
+            return self._files[path]
+        if path in self._binary_files:
+            return self._binary_files[path].decode('utf-8')
+        raise FileNotFoundError(path)
 
     def write_text(self, path: str, content: str) -> None:
+        self._binary_files.pop(path, None)
         self._files[path] = content
 
     def read_bytes(self, path: str) -> bytes:
-        if path not in self._binary_files:
-            raise FileNotFoundError(path)
-        return self._binary_files[path]
+        if path in self._binary_files:
+            return self._binary_files[path]
+        if path in self._files:
+            return self._files[path].encode('utf-8')
+        raise FileNotFoundError(path)
 
     def write_bytes(self, path: str, content: bytes) -> None:
+        self._files.pop(path, None)
         self._binary_files[path] = content
 
     def delete(self, path: str) -> None:
@@ -44,7 +59,10 @@ class FakeFileSystem:
         self, prefix: str, pattern: str = '*', recursive: bool = False
     ) -> list[FileEntry]:
         results = []
-        for path in self._files:
+        all_paths = list(self._files) + [
+            path for path in self._binary_files if path not in self._files
+        ]
+        for path in all_paths:
             if prefix and not path.startswith(prefix + '/') and path != prefix:
                 continue
             name = path.split('/')[-1]

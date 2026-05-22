@@ -70,11 +70,24 @@ before preparation can begin. Implemented in `pv-prospect-data-transformation`.
 ### P -- Data Preparation
 
 Reads cleaned CSVs, performs feature selection, downsampling, joins weather with PV
-data, and computes plane-of-array (POA) irradiance via `pvlib`. Uses a
-scatter-gather pattern: worker jobs write headerless micro-batch CSVs to
-`prepared-batches/`, then a single assembly step merges them into cumulative master
-CSVs in `prepared/` (one file per system/location rather than one per date).
-Implemented in `pv-prospect-data-transformation`.
+data, and computes plane-of-array (POA) irradiance via `pvlib`. The prepared data
+is partitioned into **content-named CSV files** under two segregated corpora in
+`prepared/`:
+
+* `weather/weather_{start}_{end}_{gv}-{NN}.csv` — grid-point weather, consumed by
+  the weather model.
+* `pv/{site}/pv_{site}_{start}_{end}.csv` — PV power joined with on-site weather,
+  consumed by the PV model.
+
+`{start}` is inclusive and `{end}` exclusive (ISO `YYYY-MM-DD`); `{gv}` is the
+grid-definition version (`0` now); `{NN}` is the zero-padded grid-point sample-file
+index. Filenames describe the data they hold — there is no temporal version in any
+path, since git tags own versioning — so each weekly versioning run *adds* `.dvc`
+files rather than overwriting one, keeping the whole corpus retrievable with a
+single `git checkout <tag> && dvc pull`. The daily transform fans `prepare_pv` out
+across dates as micro-batch CSVs in `prepared-batches/`, then an assembly step
+merges them into the partition files. Implemented in
+`pv-prospect-data-transformation`.
 
 ### A -- App Data Loading
 

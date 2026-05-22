@@ -1,3 +1,10 @@
 data_sources:
   pv: 'pvoutput'
   weather: 'openmeteo/historical'
+
+# Grid-point weather backfill. `version` is the grid-definition version
+# encoded into prepared weather partition filenames; bump it when the
+# grid-point definition changes so a regridding starts a fresh,
+# non-colliding set of files alongside the existing corpus.
+weather_grid:
+  version: 0

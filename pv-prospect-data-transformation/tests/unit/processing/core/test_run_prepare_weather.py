@@ -1,6 +1,5 @@
 """Tests for run_prepare_weather."""
 
-import io
 import json
 from datetime import date
 
@@ -23,6 +22,8 @@ from pv_prospect.etl import TIMESERIES_FOLDER
 from tests.unit.helpers.fake_file_system import FakeFileSystem
 
 _DATE_RANGE = DateRange(date(2026, 1, 15), date(2026, 1, 16))
+_GRID_POINT_SAMPLE_INDEX = 7
+_WINDOW_KEY = (_GRID_POINT_SAMPLE_INDEX, '2026-01-15', '2026-01-16')
 
 _METADATA = {
     'latitude': 50.5,
@@ -35,10 +36,7 @@ def _make_grid_point() -> ArbitrarySite:
     return ArbitrarySite.from_id('504900_-35400')
 
 
-def _write_cleaned_csv(
-    fs: FakeFileSystem,
-    grid_point: ArbitrarySite,
-) -> None:
+def _write_cleaned_csv(fs: FakeFileSystem, grid_point: ArbitrarySite) -> None:
     """Write a cleaned weather CSV and metadata JSON to the fake fs."""
     times = pd.date_range('2026-01-15 00:00:00', periods=24, freq='h')
     rng = np.random.default_rng(42)
@@ -69,127 +67,57 @@ def cleaned_fs(grid_point: ArbitrarySite) -> FakeFileSystem:
     return fs
 
 
-@pytest.fixture
-def batches_fs() -> FakeFileSystem:
-    return FakeFileSystem()
-
-
-def test_writes_batch_at_expected_path(
-    cleaned_fs: FakeFileSystem,
-    batches_fs: FakeFileSystem,
-    grid_point: ArbitrarySite,
-) -> None:
+def _run(
+    cleaned_fs: FakeFileSystem, grid_point: ArbitrarySite
+) -> PreparedBatchCollector:
+    collector = PreparedBatchCollector()
     run_prepare_weather(
         cleaned_fs,
-        batches_fs,
         DataSource.OPENMETEO_HISTORICAL,
         grid_point,
         _DATE_RANGE,
+        _GRID_POINT_SAMPLE_INDEX,
+        collector,
     )
-
-    expected_path = 'weather/504900_-35400_20260115.csv'
-    assert batches_fs.exists(expected_path)
+    return collector
 
 
-def test_batch_has_header(
-    cleaned_fs: FakeFileSystem,
-    batches_fs: FakeFileSystem,
-    grid_point: ArbitrarySite,
+def test_buffers_a_concatenated_frame_keyed_by_sample_and_window(
+    cleaned_fs: FakeFileSystem, grid_point: ArbitrarySite
 ) -> None:
-    run_prepare_weather(
-        cleaned_fs,
-        batches_fs,
-        DataSource.OPENMETEO_HISTORICAL,
-        grid_point,
-        _DATE_RANGE,
-    )
+    collector = _run(cleaned_fs, grid_point)
 
-    content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
-    header = content.strip().split('\n')[0]
-    assert (
-        header
-        == 'latitude,longitude,elevation,time,temperature,direct_normal_irradiance,diffuse_radiation'
-    )
+    groups = collector.weather_groups()
+    assert list(groups) == [_WINDOW_KEY]
+    assert len(groups[_WINDOW_KEY]) == 1
 
 
-def test_batch_includes_metadata_values(
-    cleaned_fs: FakeFileSystem,
-    batches_fs: FakeFileSystem,
-    grid_point: ArbitrarySite,
+def test_buffered_frame_has_weather_columns(
+    cleaned_fs: FakeFileSystem, grid_point: ArbitrarySite
 ) -> None:
-    run_prepare_weather(
-        cleaned_fs,
-        batches_fs,
-        DataSource.OPENMETEO_HISTORICAL,
-        grid_point,
-        _DATE_RANGE,
-    )
+    collector = _run(cleaned_fs, grid_point)
 
-    content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
-    # Row 0 is the header; row 1 is the first data row
-    fields = content.strip().split('\n')[1].split(',')
-    assert float(fields[0]) == pytest.approx(_METADATA['latitude'])
-    assert float(fields[1]) == pytest.approx(_METADATA['longitude'])
-    assert float(fields[2]) == pytest.approx(_METADATA['elevation'])
+    frame = collector.weather_groups()[_WINDOW_KEY][0]
+    assert list(frame.columns) == WEATHER_COLUMNS
 
 
-def test_batch_has_correct_number_of_fields(
-    cleaned_fs: FakeFileSystem,
-    batches_fs: FakeFileSystem,
-    grid_point: ArbitrarySite,
+def test_buffered_frame_carries_metadata_lat_lon_elevation(
+    cleaned_fs: FakeFileSystem, grid_point: ArbitrarySite
 ) -> None:
-    run_prepare_weather(
-        cleaned_fs,
-        batches_fs,
-        DataSource.OPENMETEO_HISTORICAL,
-        grid_point,
-        _DATE_RANGE,
-    )
+    collector = _run(cleaned_fs, grid_point)
 
-    content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
-    lines = content.strip().split('\n')
-    # header + data rows each have: latitude, longitude, elevation, time,
-    # temperature, direct_normal_irradiance, diffuse_radiation
-    assert all(len(line.split(',')) == 7 for line in lines)
+    frame = collector.weather_groups()[_WINDOW_KEY][0]
+    assert frame['latitude'].iloc[0] == pytest.approx(_METADATA['latitude'])
+    assert frame['longitude'].iloc[0] == pytest.approx(_METADATA['longitude'])
+    assert frame['elevation'].iloc[0] == pytest.approx(_METADATA['elevation'])
 
 
 def test_daily_row_is_labelled_with_input_date(
-    cleaned_fs: FakeFileSystem,
-    batches_fs: FakeFileSystem,
-    grid_point: ArbitrarySite,
+    cleaned_fs: FakeFileSystem, grid_point: ArbitrarySite
 ) -> None:
     """The downsampled row for 2026-01-15's hourly weather should be
     labelled 2026-01-15 — not 2026-01-16."""
-    run_prepare_weather(
-        cleaned_fs,
-        batches_fs,
-        DataSource.OPENMETEO_HISTORICAL,
-        grid_point,
-        _DATE_RANGE,
-    )
+    collector = _run(cleaned_fs, grid_point)
 
-    content = batches_fs.read_text('weather/504900_-35400_20260115.csv')
-    df = pd.read_csv(io.StringIO(content), parse_dates=['time'])
-    assert list(df['time']) == [pd.Timestamp('2026-01-15 00:00:00')]
-
-
-def test_collector_path_buffers_frame_instead_of_writing_batch(
-    cleaned_fs: FakeFileSystem,
-    batches_fs: FakeFileSystem,
-    grid_point: ArbitrarySite,
-) -> None:
-    collector = PreparedBatchCollector()
-
-    run_prepare_weather(
-        cleaned_fs,
-        batches_fs,
-        DataSource.OPENMETEO_HISTORICAL,
-        grid_point,
-        _DATE_RANGE,
-        collector=collector,
-    )
-
-    assert batches_fs._files == {}  # no batch CSV written
-    frames = collector.weather_frames()
-    assert len(frames) == 1
-    assert list(frames[0].columns) == WEATHER_COLUMNS
+    frame = collector.weather_groups()[_WINDOW_KEY][0]
+    assert list(frame['time']) == [pd.Timestamp('2026-01-15 00:00:00')]

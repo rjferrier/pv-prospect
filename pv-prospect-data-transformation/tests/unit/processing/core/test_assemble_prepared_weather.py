@@ -7,13 +7,23 @@ from pv_prospect.data_transformation.processing import (
     WEATHER_COLUMNS,
     PreparedBatchCollector,
     assemble_prepared_weather,
+    weather_partition_path,
 )
 
 from tests.unit.helpers.fake_file_system import FakeFileSystem
 
+_START = '2026-01-15'
+_END = '2026-01-22'
+_SAMPLE = 7
+_GRID_VERSION = 0
+_PARTITION_PATH = weather_partition_path(_START, _END, _SAMPLE, _GRID_VERSION)
+
 
 def _batch_csv(rows: list[list[object]]) -> str:
-    header = 'latitude,longitude,elevation,time,temperature,direct_normal_irradiance,diffuse_radiation'
+    header = (
+        'latitude,longitude,elevation,time,temperature,'
+        'direct_normal_irradiance,diffuse_radiation'
+    )
     data = '\n'.join(','.join(str(v) for v in row) for row in rows)
     return header + '\n' + data + '\n'
 
@@ -26,60 +36,62 @@ def _batch_frame(rows: list[list[object]]) -> pd.DataFrame:
     return frame
 
 
-def test_merges_multiple_batches_into_master() -> None:
-    batches_fs = FakeFileSystem(
-        files={
-            'weather/loc1_20260115.csv': _batch_csv(
-                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
-            ),
-            'weather/loc1_20260116.csv': _batch_csv(
-                [[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]]
-            ),
-        }
+def test_partition_filename_encodes_window_grid_version_and_sample_index() -> None:
+    assert (
+        weather_partition_path('2026-05-01', '2026-05-15', 7, 0)
+        == 'weather/weather_2026-05-01_2026-05-15_0-07.csv'
+    )
+
+
+def test_writes_one_partition_file_for_the_sample_window() -> None:
+    collector = PreparedBatchCollector()
+    collector.add_weather(
+        _SAMPLE,
+        _START,
+        _END,
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]),
+    )
+    collector.add_weather(
+        _SAMPLE,
+        _START,
+        _END,
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]]),
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_weather(batches_fs, prepared_fs)
+    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
 
-    assert prepared_fs.exists('weather.csv')
-    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text(_PARTITION_PATH)))
     assert len(result) == 2
     assert list(result.columns) == WEATHER_COLUMNS
 
 
-def test_appends_to_existing_master() -> None:
-    existing_master = pd.DataFrame(
-        {
-            'latitude': [50.49],
-            'longitude': [-3.54],
-            'elevation': [120.0],
-            'time': ['2026-01-14'],
-            'temperature': [7.0],
-            'direct_normal_irradiance': [180.0],
-            'diffuse_radiation': [55.0],
-        }
+def test_writes_a_separate_file_per_sample_file() -> None:
+    collector = PreparedBatchCollector()
+    collector.add_weather(
+        7,
+        _START,
+        _END,
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]),
     )
-    prepared_fs = FakeFileSystem(
-        binary_files={
-            'weather.csv': existing_master.to_csv(index=False).encode('utf-8'),
-        }
+    collector.add_weather(
+        8,
+        _START,
+        _END,
+        _batch_frame([[51.00, -4.00, 90.0, '2026-01-15', 7.0, 180.0, 55.0]]),
     )
-    batches_fs = FakeFileSystem(
-        files={
-            'weather/loc1_20260115.csv': _batch_csv(
-                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
-            ),
-        }
-    )
+    prepared_fs = FakeFileSystem()
 
-    assemble_prepared_weather(batches_fs, prepared_fs)
+    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
 
-    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
-    assert len(result) == 2
+    assert prepared_fs.exists(weather_partition_path(_START, _END, 7, _GRID_VERSION))
+    assert prepared_fs.exists(weather_partition_path(_START, _END, 8, _GRID_VERSION))
 
 
-def test_deduplicates_on_lat_lon_time() -> None:
-    existing_master = pd.DataFrame(
+def test_merges_into_an_existing_partition_file() -> None:
+    """A re-transform of the same (sample, window) merges into the
+    partition file already present, rather than orphaning it."""
+    existing = pd.DataFrame(
         {
             'latitude': [50.49],
             'longitude': [-3.54],
@@ -91,123 +103,24 @@ def test_deduplicates_on_lat_lon_time() -> None:
         }
     )
     prepared_fs = FakeFileSystem(
-        binary_files={
-            'weather.csv': existing_master.to_csv(index=False).encode('utf-8'),
-        }
-    )
-    batches_fs = FakeFileSystem(
-        files={
-            'weather/loc1_20260115.csv': _batch_csv(
-                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
-            ),
-        }
-    )
-
-    assemble_prepared_weather(batches_fs, prepared_fs)
-
-    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
-    assert len(result) == 1
-    assert result['temperature'].iloc[0] == 8.5  # batch value wins (keep='last')
-
-
-def test_deletes_batches_after_assembly() -> None:
-    batches_fs = FakeFileSystem(
-        files={
-            'weather/loc1_20260115.csv': _batch_csv(
-                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
-            ),
-        }
-    )
-    prepared_fs = FakeFileSystem()
-
-    assemble_prepared_weather(batches_fs, prepared_fs)
-
-    assert not batches_fs.exists('weather/loc1_20260115.csv')
-
-
-def test_no_batches_is_noop() -> None:
-    batches_fs = FakeFileSystem()
-    prepared_fs = FakeFileSystem()
-
-    assemble_prepared_weather(batches_fs, prepared_fs)
-
-    assert not prepared_fs.exists('weather.csv')
-
-
-def test_collector_path_merges_frames_into_master() -> None:
-    collector = PreparedBatchCollector()
-    collector.add_weather(
-        _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]])
-    )
-    collector.add_weather(
-        _batch_frame([[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]])
-    )
-    prepared_fs = FakeFileSystem()
-
-    assemble_prepared_weather(FakeFileSystem(), prepared_fs, collector)
-
-    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
-    assert len(result) == 2
-    assert list(result.columns) == WEATHER_COLUMNS
-
-
-def test_collector_path_leaves_batch_files_untouched() -> None:
-    collector = PreparedBatchCollector()
-    collector.add_weather(
-        _batch_frame([[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]])
-    )
-    batches_fs = FakeFileSystem(
-        files={
-            'weather/loc1_20260115.csv': _batch_csv(
-                [[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]
-            ),
-        }
-    )
-    prepared_fs = FakeFileSystem()
-
-    assemble_prepared_weather(batches_fs, prepared_fs, collector)
-
-    # The GCS batch file is neither merged into the master nor deleted.
-    assert batches_fs.exists('weather/loc1_20260115.csv')
-    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
-    assert result['time'].tolist() == ['2026-01-16']
-
-
-def test_collector_path_keeps_master_data_absent_from_collector() -> None:
-    """A prepare unit skipped on a re-run is absent from the in-memory
-    collector, but assemble still includes it via the cumulative master."""
-    existing_master = pd.DataFrame(
-        {
-            'latitude': [50.49],
-            'longitude': [-3.54],
-            'elevation': [120.0],
-            'time': ['2026-01-14'],
-            'temperature': [7.0],
-            'direct_normal_irradiance': [180.0],
-            'diffuse_radiation': [55.0],
-        }
-    )
-    prepared_fs = FakeFileSystem(
-        binary_files={
-            'weather.csv': existing_master.to_csv(index=False).encode('utf-8'),
-        }
+        binary_files={_PARTITION_PATH: existing.to_csv(index=False).encode('utf-8')}
     )
     collector = PreparedBatchCollector()
     collector.add_weather(
-        _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]])
+        _SAMPLE,
+        _START,
+        _END,
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]]),
     )
 
-    assemble_prepared_weather(FakeFileSystem(), prepared_fs, collector)
+    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
 
-    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
-    assert sorted(result['time'].tolist()) == ['2026-01-14', '2026-01-15']
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text(_PARTITION_PATH)))
+    assert sorted(result['time'].tolist()) == ['2026-01-15', '2026-01-16']
 
 
-def test_collector_path_deduplicates_against_string_master() -> None:
-    """A re-prepared day in the (datetime64) collector must replace the
-    matching (string) master row — drop_duplicates only works once both
-    'time' columns are normalised to the same dtype."""
-    existing_master = pd.DataFrame(
+def test_deduplicates_on_lat_lon_time_with_fresh_rows_winning() -> None:
+    existing = pd.DataFrame(
         {
             'latitude': [50.49],
             'longitude': [-3.54],
@@ -219,53 +132,58 @@ def test_collector_path_deduplicates_against_string_master() -> None:
         }
     )
     prepared_fs = FakeFileSystem(
-        binary_files={
-            'weather.csv': existing_master.to_csv(index=False).encode('utf-8'),
-        }
+        binary_files={_PARTITION_PATH: existing.to_csv(index=False).encode('utf-8')}
     )
     collector = PreparedBatchCollector()
     collector.add_weather(
-        _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]])
+        _SAMPLE,
+        _START,
+        _END,
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]),
     )
 
-    assemble_prepared_weather(FakeFileSystem(), prepared_fs, collector)
+    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
 
-    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text(_PARTITION_PATH)))
     assert len(result) == 1
     assert result['temperature'].iloc[0] == 8.5  # freshly prepared value wins
 
 
-def test_collector_path_merges_into_master_with_mixed_time_formats() -> None:
-    """Regression: a master's 'time' column can mix bare-date and
+def test_merges_partition_with_mixed_time_formats() -> None:
+    """Regression: a partition file's 'time' column can mix bare-date and
     full-datetime strings — to_csv renders a midnight Timestamp as a bare
-    date but one with a time component in full, so a master appended to
-    over several runs accumulates both. The merge must parse every row as
-    ISO 8601 rather than inferring one format from the first row."""
-    master_csv = (
+    date but one with a time component in full. The merge must parse every
+    row as ISO 8601 rather than inferring one format from the first row."""
+    partition_csv = (
         'latitude,longitude,elevation,time,temperature,'
         'direct_normal_irradiance,diffuse_radiation\n'
-        '50.49,-3.54,120.0,2026-01-14 00:00:00,7.0,180.0,55.0\n'
-        '50.49,-3.54,120.0,2026-01-15,7.5,185.0,57.0\n'
+        '50.49,-3.54,120.0,2026-01-15 00:00:00,7.0,180.0,55.0\n'
+        '50.49,-3.54,120.0,2026-01-16,7.5,185.0,57.0\n'
     )
     prepared_fs = FakeFileSystem(
-        binary_files={'weather.csv': master_csv.encode('utf-8')},
+        binary_files={_PARTITION_PATH: partition_csv.encode('utf-8')}
     )
     collector = PreparedBatchCollector()
     collector.add_weather(
-        _batch_frame([[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]])
+        _SAMPLE,
+        _START,
+        _END,
+        _batch_frame([[50.49, -3.54, 120.0, '2026-01-17', 9.0, 210.0, 65.0]]),
     )
 
-    assemble_prepared_weather(FakeFileSystem(), prepared_fs, collector)
+    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
 
-    result = pd.read_csv(io.StringIO(prepared_fs.read_text('weather.csv')))
-    assert len(result) == 3
-    # The merged master is re-healed to a single serialisation.
-    assert sorted(result['time'].tolist()) == ['2026-01-14', '2026-01-15', '2026-01-16']
+    result = pd.read_csv(io.StringIO(prepared_fs.read_text(_PARTITION_PATH)))
+    assert sorted(result['time'].tolist()) == [
+        '2026-01-15',
+        '2026-01-16',
+        '2026-01-17',
+    ]
 
 
-def test_collector_path_with_no_frames_is_noop() -> None:
+def test_no_frames_is_noop() -> None:
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_weather(FakeFileSystem(), prepared_fs, PreparedBatchCollector())
+    assemble_prepared_weather(prepared_fs, PreparedBatchCollector(), _GRID_VERSION)
 
-    assert not prepared_fs.exists('weather.csv')
+    assert prepared_fs.list_files('weather', '*.csv') == []

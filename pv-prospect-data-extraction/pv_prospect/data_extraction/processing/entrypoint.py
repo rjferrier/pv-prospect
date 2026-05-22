@@ -14,23 +14,28 @@ For **preprocess**:
     DATA_SOURCE — ``pv`` or ``weather`` (optional; defaults to weather)
 
 For **extract_and_load**:
-    DATA_SOURCE       — ``pv`` or ``weather`` (optional; defaults to weather)
-    PV_SYSTEM_ID      — integer system id (required for PV sources; for weather
-                        sources, exactly one of PV_SYSTEM_ID, LOCATION, or
-                        SAMPLE_FILE_INDEX must be set)
-    LOCATION          — comma-separated lat,lon (e.g. ``50.49,-3.54``);
-                        alternative to PV_SYSTEM_ID for weather sources
-    SAMPLE_FILE_INDEX — integer index of a ``sample_NNN.csv`` grid-point
-                        sample file on the resources filesystem. Processes
-                        every grid point in the file sequentially. Weather
-                        sources only.
-    START_DATE        — ISO date ``YYYY-MM-DD``. Alias: ``DATE`` (clearer when
-                        no end date is given).
-    END_DATE          — ISO date ``YYYY-MM-DD``, exclusive (optional; defaults
-                        to START_DATE + 1 day)
-    DRY_RUN           — ``true`` or ``false`` (default ``false``)
-    SPLIT_BY          — ``day`` or ``week`` (chunking hint; omit to use the
-                        data source default: day for PV, unsplit for weather)
+    DATA_SOURCE             — ``pv`` or ``weather`` (optional; defaults to
+                              weather)
+    PV_SYSTEM_ID            — integer system id (required for PV sources; for
+                              weather sources, exactly one of PV_SYSTEM_ID,
+                              LOCATION, or GRID_POINT_SAMPLE_INDEX must be set)
+    LOCATION                — comma-separated lat,lon (e.g. ``50.49,-3.54``);
+                              alternative to PV_SYSTEM_ID for weather sources
+    GRID_POINT_SAMPLE_INDEX — integer index of a ``sample_NNN.csv`` grid-point
+                              sample file on the resources filesystem. When it
+                              is the only target given, processes every grid
+                              point in the file sequentially (weather sources
+                              only). The weather-grid backfill also sets it
+                              alongside ``LOCATIONS`` so the index is recorded
+                              in each per-site ledger descriptor.
+    START_DATE              — ISO date ``YYYY-MM-DD``. Alias: ``DATE``
+                              (clearer when no end date is given).
+    END_DATE                — ISO date ``YYYY-MM-DD``, exclusive (optional;
+                              defaults to START_DATE + 1 day)
+    DRY_RUN                 — ``true`` or ``false`` (default ``false``)
+    SPLIT_BY                — ``day`` or ``week`` (chunking hint; omit to use
+                              the data source default: day for PV, unsplit
+                              for weather)
 """
 
 import json
@@ -130,15 +135,15 @@ def _resolve_sites(
     Accepts (in order of precedence):
       - ``LOCATIONS``: JSON array of ``lat,lon`` strings.
       - ``LOCATION``: a single ``lat,lon`` string.
-      - ``SAMPLE_FILE_INDEX``: integer; resolves to every grid point in
-        the sample file at that index. Retained for one-off local
+      - ``GRID_POINT_SAMPLE_INDEX``: integer; resolves to every grid point
+        in the sample file at that index. Retained for one-off local
         invocations; deployed pipelines use ``LOCATIONS``.
       - ``PV_SYSTEM_ID``: integer; resolves to a single PV site.
     """
     pv_system_id = _env_int('PV_SYSTEM_ID')
     location = os.environ.get('LOCATION')
     locations_json = os.environ.get('LOCATIONS')
-    sample_file_index = _env_int('SAMPLE_FILE_INDEX')
+    grid_point_sample_index = _env_int('GRID_POINT_SAMPLE_INDEX')
 
     def _resolve_sample_file(idx: int) -> list[str]:
         path = sample_file_path(idx)
@@ -155,7 +160,7 @@ def _resolve_sites(
     location_strings = resolve_location_strings(
         resolve_sample_file=_resolve_sample_file,
         location_strings=explicit_locations,
-        sample_file_index=sample_file_index,
+        grid_point_sample_index=grid_point_sample_index,
     )
 
     if location_strings:
@@ -174,7 +179,7 @@ def _resolve_sites(
     else:
         raise ValueError(
             'Could not resolve any targets '
-            '(need PV_SYSTEM_ID, LOCATION, LOCATIONS, or SAMPLE_FILE_INDEX).'
+            '(need PV_SYSTEM_ID, LOCATION, LOCATIONS, or GRID_POINT_SAMPLE_INDEX).'
         )
 
     return sites
@@ -249,6 +254,7 @@ def _run_extract_and_load(
     dry_run = _env_bool('DRY_RUN')
     split_by = os.environ.get('SPLIT_BY')
     end_date_str = os.environ.get('END_DATE') or ''
+    grid_point_sample_index = _env_int('GRID_POINT_SAMPLE_INDEX')
 
     try:
         start_date_str = os.environ.get('START_DATE') or os.environ.get('DATE')
@@ -312,6 +318,12 @@ def _run_extract_and_load(
         }
         if end_date_str:
             descriptor['end_date'] = end_date_str
+        # GRID_POINT_SAMPLE_INDEX is set only by the weather-grid backfill.
+        # It rides in the descriptor (not the task hash) so the transform
+        # can group prepared rows into per-(sample, window) files. Other
+        # workflows leave it unset and their descriptors omit the key.
+        if grid_point_sample_index is not None:
+            descriptor['grid_point_sample_index'] = str(grid_point_sample_index)
 
         if site_hash in completed:
             logger.debug('%s: skipped (ledger has completed entry)', site)

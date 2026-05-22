@@ -24,12 +24,12 @@ def resolve_pv_system_ids(
 def resolve_location_strings(
     resolve_sample_file: Callable[[int], list[str]] | None = None,
     location_strings: list[str] | str | None = None,
-    sample_file_index: int | None = None,
+    grid_point_sample_index: int | None = None,
 ) -> list[str]:
-    if sample_file_index is not None:
+    if grid_point_sample_index is not None:
         if resolve_sample_file is None:
             raise ValueError('resolve_sample_file must be provided')
-        return resolve_sample_file(sample_file_index)
+        return resolve_sample_file(grid_point_sample_index)
 
     if isinstance(location_strings, str):
         parts = [x.strip() for x in location_strings.split(',') if x.strip()]

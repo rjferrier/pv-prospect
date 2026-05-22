@@ -50,6 +50,7 @@ from pv_prospect.data_transformation.processing import (
     PREPARING_TRANSFORMATIONS,
     TRANSFORMATIONS_NEEDING_GRID_POINT,
     TRANSFORMATIONS_NEEDING_PV_SITE,
+    PreparedBatchCollector,
     Transformation,
     assemble_prepared_pv,
     assemble_prepared_weather,
@@ -131,6 +132,13 @@ def _parse_args() -> Any:
         default=4,
         help='max parallel threads (default: 4)',
     )
+    parser.add_argument(
+        '--grid-point-sample-index',
+        type=int,
+        default=0,
+        help='grid-point sample index recorded in weather partition '
+        'filenames (default: 0). Only relevant to prepare_weather.',
+    )
     return parser.parse_args()
 
 
@@ -152,6 +160,8 @@ def _make_step_fn(
     pv_data_source: DataSource,
     weather_data_source: DataSource,
     date_range: DateRange,
+    collector: PreparedBatchCollector,
+    grid_point_sample_index: int,
 ) -> Callable[[AnySite], None]:
     """Return a callable that runs *step* for a single entity."""
     if step == Transformation.CLEAN_WEATHER:
@@ -171,7 +181,12 @@ def _make_step_fn(
 
         def fn_prepare_weather(site: AnySite) -> None:
             run_prepare_weather(
-                cleaned_fs, batches_fs, weather_data_source, site, date_range
+                cleaned_fs,
+                weather_data_source,
+                site,
+                date_range,
+                grid_point_sample_index,
+                collector,
             )
 
         return fn_prepare_weather
@@ -263,6 +278,11 @@ def _main() -> None:
 
     cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
 
+    # Weather prepare/assemble hand off through an in-memory collector (the
+    # single-process handoff); the runner is one process, so this needs no
+    # batch CSVs. PV still uses batches_fs, matching the daily transform.
+    collector = PreparedBatchCollector()
+
     # --- initialise in-memory repos ---------------------------------------
     resources_fs = get_filesystem(config.resources_storage)
     resources_extractor = Extractor(resources_fs)
@@ -329,6 +349,8 @@ def _main() -> None:
                     config.data_sources.pv,
                     config.data_sources.weather,
                     date_range,
+                    collector,
+                    args.grid_point_sample_index,
                 )
                 futures[pool.submit(step_fn, site)] = (
                     step,
@@ -353,7 +375,7 @@ def _main() -> None:
 
     if Transformation.ASSEMBLE_WEATHER in all_transformations:
         print('\nAssembling prepared weather data...')
-        assemble_prepared_weather(batches_fs, prepared_fs)
+        assemble_prepared_weather(prepared_fs, collector, config.weather_grid.version)
 
     if Transformation.ASSEMBLE_PV in all_transformations:
         print('\nAssembling prepared PV data...')
