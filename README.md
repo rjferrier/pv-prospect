@@ -50,6 +50,15 @@ The pipeline is orchestrated around the following named flows:
 | V   | Data/model versioning | Weekly             |
 | M   | Model training        | When V finishes    |
 
+The pipeline spans **M data source types** and **N models**, and M need not
+equal N. Each data source — here the Open-Meteo weather API and the PVOutput
+power API — has its own extraction (E) and cleaning (C) flow. Preparation (P)
+then builds a *feature set* per model — here the weather model and the PV
+model. The source-to-model mapping is not one-to-one: a feature set may draw
+on several cleaned sources. The PV model's features join cleaned PV power with
+cleaned on-site weather, whereas the weather model's features come from the
+weather source alone — so the weather source feeds both feature sets.
+
 ### E -- Data Extraction
 
 Pulls weather data from the **Open-Meteo API** and PV power readings from the

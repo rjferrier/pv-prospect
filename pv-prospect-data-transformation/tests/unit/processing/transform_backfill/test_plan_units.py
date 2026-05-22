@@ -2,9 +2,10 @@
 
 import json
 
+from pv_prospect.data_sources import DataSourceType
 from pv_prospect.data_transformation.processing import (
     ConsumedMarker,
-    TransformUnit,
+    TransformInput,
     plan_units,
     save_marker,
     workflow_name_for,
@@ -43,7 +44,7 @@ def _plan(
     *,
     marker: str = '',
     max_extract_runs: int = 4,
-) -> tuple[list[TransformUnit], str]:
+) -> tuple[list[TransformInput], str]:
     """Run plan_units against in-memory filesystems and return its result."""
     ledger_fs = FakeFileSystem(ledger_files)
     cursors_fs = FakeFileSystem()
@@ -155,7 +156,10 @@ def test_pv_sites_pv_and_weather_descriptors_both_become_units() -> None:
 
     units, _ = _plan(BackfillScope.PV_SITES, ledgers)
 
-    assert {u.kind for u in units} == {'pv', 'weather'}
+    assert {u.data_source_type for u in units} == {
+        DataSourceType.PV,
+        DataSourceType.WEATHER,
+    }
 
 
 def test_weather_grid_ledger_spanning_windows_yields_per_task_windows() -> None:

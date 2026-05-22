@@ -62,15 +62,15 @@ from pv_prospect.common import (
     get_pv_site_by_system_id,
 )
 from pv_prospect.common.domain import DateRange
+from pv_prospect.data_sources import DataSourceType, resolve_site
 from pv_prospect.data_sources import get_config_dir as get_ds_config_dir
-from pv_prospect.data_sources import resolve_site
 from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.processing import (
     TRANSFORMATIONS_NEEDING_PV_SITE,
     ConsumedMarker,
     PreparedBatchCollector,
     Transformation,
-    TransformUnit,
+    TransformInput,
     assemble_prepared_pv,
     assemble_prepared_weather,
     build_transform_phases,
@@ -435,8 +435,10 @@ def _run_transform_backfill(
     workflow_name = workflow_name_for(scope)
     run_label = os.environ.get('RUN_LABEL', '')
 
-    units, next_marker = plan_units(scope, ledger_fs, cursors_fs, max_extract_runs)
-    if not units:
+    transform_inputs, next_marker = plan_units(
+        scope, ledger_fs, cursors_fs, max_extract_runs
+    )
+    if not transform_inputs:
         logger.info(
             'run_transform_backfill[%s]: no unconsumed extract ledgers; '
             'marker stays at %r',
@@ -445,9 +447,9 @@ def _run_transform_backfill(
         )
         return
     logger.info(
-        'run_transform_backfill[%s]: %d units planned; will advance marker to %r',
+        'run_transform_backfill[%s]: %d inputs planned; will advance marker to %r',
         scope.value,
-        len(units),
+        len(transform_inputs),
         next_marker,
     )
 
@@ -461,7 +463,7 @@ def _run_transform_backfill(
         run_label=run_label,
         ledger_collector=ledger_collector,
     )
-    phases = build_transform_phases(units, workflow_name, run_date)
+    phases = build_transform_phases(transform_inputs, workflow_name, run_date)
     remaining = [orchestrator.filter_remaining_tasks(phase) for phase in phases]
     shared = _build_runtime(
         config, workflow_name, run_date, run_label, log_collector, prepared_batches
@@ -642,19 +644,28 @@ def _run_plan_transform(
     locations = json.loads(os.environ.get('LOCATIONS', '[]'))
 
     # The daily transform plans one window for the configured systems and
-    # grid points: a PV + a weather unit per system, a weather unit per
-    # location. All units share the single [START_DATE, END_DATE) window.
-    units: list[TransformUnit] = []
+    # grid points: a PV + a weather input per system, a weather input per
+    # location. All inputs share the single [START_DATE, END_DATE) window.
+    transform_inputs: list[TransformInput] = []
     for pv_id in pv_system_ids:
-        units.append(
-            TransformUnit('pv', start_date_str, end_date_str, pv_system_id=pv_id)
+        transform_inputs.append(
+            TransformInput(
+                DataSourceType.PV, start_date_str, end_date_str, pv_system_id=pv_id
+            )
         )
-        units.append(
-            TransformUnit('weather', start_date_str, end_date_str, pv_system_id=pv_id)
+        transform_inputs.append(
+            TransformInput(
+                DataSourceType.WEATHER,
+                start_date_str,
+                end_date_str,
+                pv_system_id=pv_id,
+            )
         )
     for loc in locations:
-        units.append(
-            TransformUnit('weather', start_date_str, end_date_str, location=loc)
+        transform_inputs.append(
+            TransformInput(
+                DataSourceType.WEATHER, start_date_str, end_date_str, location=loc
+            )
         )
 
     run_label = os.environ.get('RUN_LABEL', '')
@@ -666,7 +677,7 @@ def _run_plan_transform(
         run_label=run_label,
     )
 
-    phases = build_transform_phases(units, workflow_name, run_date)
+    phases = build_transform_phases(transform_inputs, workflow_name, run_date)
     filtered = [orchestrator.filter_remaining_tasks(phase) for phase in phases]
     orchestrator.write_manifest(filtered)
     logger.info('plan_transform: wrote manifest with %d phases', len(filtered))

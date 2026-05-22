@@ -20,7 +20,7 @@ from .core import (
 )
 from .transform_backfill import (
     ConsumedMarker,
-    TransformUnit,
+    TransformInput,
     build_transform_phases,
     deserialize_marker,
     extract_workflow_name_for,
@@ -51,7 +51,7 @@ __all__ = [
     'TRANSFORMATIONS_NEEDING_GRID_POINT',
     'TRANSFORMATIONS_NEEDING_PV_SITE',
     'Transformation',
-    'TransformUnit',
+    'TransformInput',
     'WEATHER_COLUMNS',
     'WEATHER_PREPARED_PREFIX',
     'assemble_prepared_pv',

@@ -8,7 +8,7 @@ data_source, window)`` tuples have raw data; this module reads those
 
 What this module owns:
 
-  * the :class:`TransformUnit` value type and
+  * the :class:`TransformInput` value type and
     :func:`build_transform_phases` (shared with the daily transform);
   * :class:`ConsumedMarker` — a small high-water mark over extraction
     consolidated-ledger filenames that bounds each run's work and
@@ -25,7 +25,6 @@ to re-transform after a feature-spec change.
 
 import json
 from dataclasses import dataclass
-from typing import Literal
 
 from pv_prospect.data_sources import DataSourceType
 from pv_prospect.etl import (
@@ -72,28 +71,26 @@ def extract_workflow_name_for(scope: BackfillScope) -> str:
 
 
 @dataclass(frozen=True)
-class TransformUnit:
-    """One ``(entity, window)`` pair to transform.
+class TransformInput:
+    """A specification of one extracted dataset for the transform to process.
 
-    ``kind`` selects the step family: a ``'pv'`` unit becomes
-    ``clean_pv`` / ``prepare_pv`` / ``assemble_pv`` tasks. A ``'weather'``
-    unit is one of two sub-kinds, distinguished by ``grid_point_sample_index``:
-    a *grid-weather* unit (``grid_point_sample_index`` set) becomes
-    ``clean_weather`` / ``prepare_weather`` / ``assemble_weather`` and
-    feeds the ``weather/`` corpus; a *PV-site-weather* unit
-    (``grid_point_sample_index`` unset) becomes ``clean_weather`` only — it is
-    cleaned for the ``prepare_pv`` join but carried into no weather corpus.
+    It identifies a body of raw extracted data and nothing more — a
+    ``data_source_type``, an entity, and a date-range window. It is the
+    *input* to :func:`build_transform_phases`, not a node in the transform
+    DAG: which clean / prepare / assemble steps run, and how they feed one
+    another, is the planner's knowledge, not this type's.
 
-    Exactly one of ``pv_system_id`` / ``location`` identifies the entity;
-    a weather unit may be located by either (PV-site weather is keyed by
-    system id, grid weather by a ``lat,lon`` string). ``grid_point_sample_index``
-    is the grid-point sample file a grid-weather unit belongs to — its
-    weather partition file groups by it. ``start_date`` is inclusive and
-    ``end_date`` exclusive; ``end_date`` is ``None`` for the daily
-    single-day transform.
+    ``data_source_type`` is the API the raw data came from. Exactly one of
+    ``pv_system_id`` / ``location`` identifies the entity — a ``lat,lon``
+    string for grid-point weather, a system id otherwise.
+    ``grid_point_sample_index`` is set only for weather from the
+    weather-grid backfill: the grid-point sample file the data belongs to,
+    and the key its weather partition file groups by. ``start_date`` is
+    inclusive and ``end_date`` exclusive; ``end_date`` is ``None`` for the
+    daily single-day transform.
     """
 
-    kind: Literal['pv', 'weather']
+    data_source_type: DataSourceType
     start_date: str
     end_date: str | None = None
     pv_system_id: int | None = None
@@ -138,69 +135,88 @@ def _transform_task_env(
 
 
 def build_transform_phases(
-    units: list[TransformUnit],
+    transform_inputs: list[TransformInput],
     workflow_name: str,
     run_date: str,
 ) -> list[list[list[dict[str, str]]]]:
-    """Enumerate the clean / prepare / assemble phases for *units*.
+    """Plan the clean / prepare / assemble phases for *transform_inputs*.
 
-    Each unit becomes a clean task carrying that unit's own
+    This is where the transform DAG lives: :class:`TransformInput` only
+    describes raw inputs, so the planner derives every step from them.
+    Each input yields a ``clean_{source}`` task carrying its own
     ``[START_DATE, END_DATE)`` window, so one run can mix windows
-    (e.g. weather-grid extraction's diagonal march through
-    ``(sample_file, date)`` space). A ``'pv'`` unit and a grid-weather
-    unit also get a prepare task; a PV-site-weather unit
-    (``grid_point_sample_index`` unset) gets only ``clean_weather`` — its
-    cleaned weather feeds the ``prepare_pv`` join and goes no further.
-    Phase 2 emits one ``assemble_pv`` per distinct ``pv_system_id`` and a
-    single ``assemble_weather`` when any grid-weather unit is present. An
-    assemble task ignores its date window but carries the first-seen
-    relevant unit's window so its task hash is deterministic. The returned
-    phases are unfiltered — the caller applies
+    (weather-grid extraction's diagonal march through ``(sample_file,
+    date)`` space). A ``'pv'`` input and a grid-weather input also yield a
+    prepare task; a PV-site-weather input (no ``grid_point_sample_index``)
+    yields ``clean_weather`` only. Phase 2 emits one ``assemble_pv`` per
+    distinct ``pv_system_id`` and a single ``assemble_weather`` when any
+    grid-weather input is present.
+
+    The phases run in order, every task in one finishing before the next.
+    That ordering is load-bearing, and it hides a dependency: ``prepare_pv``
+    joins cleaned PV power with cleaned on-site weather, but that cleaned
+    weather is produced by a *separate* PV-site-weather input's
+    ``clean_weather`` task. That cross-input edge is modelled nowhere — it
+    holds only because every clean runs before any prepare, and because
+    ``run_prepare_pv`` reads the cleaned weather by path convention (see
+    the package README's pipeline section).
+
+    An assemble task ignores its date window but carries the first-seen
+    relevant input's window so its task hash is deterministic. The
+    returned phases are unfiltered — the caller applies
     :meth:`WorkflowOrchestrator.filter_remaining_tasks` if it wants
     self-filtering (the daily transform does; the backfill does not).
     """
 
-    def task(unit: TransformUnit, transform_step: str) -> list[dict[str, str]]:
+    def task(
+        transform_input: TransformInput, transform_step: str
+    ) -> list[dict[str, str]]:
         return _transform_task_env(
             transform_step,
-            unit.start_date,
-            unit.end_date,
+            transform_input.start_date,
+            transform_input.end_date,
             workflow_name,
             run_date,
-            pv_system_id=unit.pv_system_id,
-            location=unit.location,
-            grid_point_sample_index=unit.grid_point_sample_index,
+            pv_system_id=transform_input.pv_system_id,
+            location=transform_input.location,
+            grid_point_sample_index=transform_input.grid_point_sample_index,
         )
 
     clean: list[list[dict[str, str]]] = []
     prepare: list[list[dict[str, str]]] = []
-    assemble_pv_units: dict[int, TransformUnit] = {}
-    first_weather_unit: TransformUnit | None = None
-    for unit in units:
-        if unit.kind == 'pv':
-            clean.append(task(unit, 'clean_pv'))
-            prepare.append(task(unit, 'prepare_pv'))
-            if unit.pv_system_id is not None:
-                assemble_pv_units.setdefault(unit.pv_system_id, unit)
-        elif unit.grid_point_sample_index is not None:
-            # Grid weather: cleaned, prepared, and assembled into weather/.
-            clean.append(task(unit, 'clean_weather'))
-            prepare.append(task(unit, 'prepare_weather'))
-            if first_weather_unit is None:
-                first_weather_unit = unit
+    assemble_pv_inputs: dict[int, TransformInput] = {}
+    first_weather_input: TransformInput | None = None
+    for transform_input in transform_inputs:
+        if transform_input.data_source_type == DataSourceType.PV:
+            clean.append(task(transform_input, 'clean_pv'))
+            prepare.append(task(transform_input, 'prepare_pv'))
+            if transform_input.pv_system_id is not None:
+                assemble_pv_inputs.setdefault(
+                    transform_input.pv_system_id, transform_input
+                )
+        elif transform_input.grid_point_sample_index is not None:
+            # Grid-point weather — a sample index is present only on weather
+            # from the weather-grid backfill, which is destined for the
+            # weather model: cleaned, prepared and assembled.
+            clean.append(task(transform_input, 'clean_weather'))
+            prepare.append(task(transform_input, 'prepare_weather'))
+            if first_weather_input is None:
+                first_weather_input = transform_input
         else:
-            # PV-site weather: cleaned only, for the prepare_pv join.
-            clean.append(task(unit, 'clean_weather'))
+            # PV-site weather: cleaned only. Its cleaned output is the join
+            # input prepare_pv reads — an implicit edge (see the docstring).
+            clean.append(task(transform_input, 'clean_weather'))
 
     assemble: list[list[dict[str, str]]] = [
-        task(unit, 'assemble_pv') for unit in assemble_pv_units.values()
+        task(transform_input, 'assemble_pv')
+        for transform_input in assemble_pv_inputs.values()
     ]
-    if first_weather_unit is not None:
+    if first_weather_input is not None:
         assemble.append(
             _transform_task_env(
                 'assemble_weather',
-                first_weather_unit.start_date,
-                first_weather_unit.end_date,
+                first_weather_input.start_date,
+                first_weather_input.end_date,
                 workflow_name,
                 run_date,
             )
@@ -268,29 +284,27 @@ def save_marker(
 # ---------------------------------------------------------------------------
 
 
-def _descriptor_to_unit(descriptor: dict[str, str]) -> TransformUnit | None:
-    """Map one extraction ledger descriptor to a :class:`TransformUnit`.
+def _descriptor_to_unit(descriptor: dict[str, str]) -> TransformInput | None:
+    """Map one extraction ledger descriptor to a :class:`TransformInput`.
 
     The extraction backfill records, per completed task, a descriptor of
     ``{data_source, start_date, end_date?, pv_system_id | location,
     grid_point_sample_index?}``, where ``data_source`` carries the
     :class:`DataSourceType` value (``'pv'`` / ``'weather'``) propagated
     from the extract job's ``DATA_SOURCE`` env var — *not* the concrete
-    :class:`DataSource` (e.g. ``'pvoutput'``). ``grid_point_sample_index`` is
-    set only by the weather-grid backfill; it identifies the grid-point
-    sample file the window belongs to and so distinguishes a grid-weather
-    unit (which feeds the ``weather/`` corpus) from PV-site weather (which
-    is cleaned only, for the ``prepare_pv`` join). Returns ``None`` for a
-    descriptor missing its dates or an identifier so a malformed entry
-    becomes a skipped hole rather than a crash.
+    :class:`DataSource` (e.g. ``'pvoutput'``). ``grid_point_sample_index``
+    is set only by the weather-grid backfill. Returns ``None`` for a
+    descriptor missing its dates, its data source, or an identifier, so a
+    malformed entry becomes a skipped hole rather than a crash.
     """
     start_date = descriptor.get('start_date')
     if not start_date:
         return None
     end_date = descriptor.get('end_date')
-    kind: Literal['pv', 'weather'] = (
-        'pv' if descriptor.get('data_source') == DataSourceType.PV.value else 'weather'
-    )
+    try:
+        data_source_type = DataSourceType(descriptor.get('data_source'))
+    except ValueError:
+        return None
     grid_point_sample_index_str = descriptor.get('grid_point_sample_index')
     grid_point_sample_index = (
         int(grid_point_sample_index_str)
@@ -299,11 +313,13 @@ def _descriptor_to_unit(descriptor: dict[str, str]) -> TransformUnit | None:
     )
     pv_system_id = descriptor.get('pv_system_id')
     if pv_system_id is not None:
-        return TransformUnit(kind, start_date, end_date, pv_system_id=int(pv_system_id))
+        return TransformInput(
+            data_source_type, start_date, end_date, pv_system_id=int(pv_system_id)
+        )
     location = descriptor.get('location')
     if location is not None:
-        return TransformUnit(
-            kind,
+        return TransformInput(
+            data_source_type,
             start_date,
             end_date,
             location=location,
@@ -317,12 +333,12 @@ def plan_units(
     ledger_fs: FileSystem,
     cursors_fs: FileSystem,
     max_extract_runs: int,
-) -> tuple[list[TransformUnit], str]:
-    """Plan *scope*'s transform units from extraction's committed ledger.
+) -> tuple[list[TransformInput], str]:
+    """Plan *scope*'s transform inputs from extraction's committed ledger.
 
     Lists the extraction backfill's consolidated ledgers, keeps those
     above the live marker, takes the oldest *max_extract_runs* of them,
-    and turns every ``completed`` entry into a :class:`TransformUnit`.
+    and turns every ``completed`` entry into a :class:`TransformInput`.
     ``failed`` extraction entries are skipped — no raw data means no
     transform task, correctly leaving a hole.
 
@@ -341,12 +357,12 @@ def plan_units(
     unconsumed = [entry for entry in ledgers if entry.name > marker.consumed_through]
     chosen = unconsumed[:max_extract_runs]
 
-    units: list[TransformUnit] = []
+    transform_inputs: list[TransformInput] = []
     for entry in chosen:
         for descriptor in read_completed_descriptors(ledger_fs, entry.path):
-            unit = _descriptor_to_unit(descriptor)
-            if unit is not None:
-                units.append(unit)
+            transform_input = _descriptor_to_unit(descriptor)
+            if transform_input is not None:
+                transform_inputs.append(transform_input)
 
     next_marker = chosen[-1].name if chosen else marker.consumed_through
-    return units, next_marker
+    return transform_inputs, next_marker

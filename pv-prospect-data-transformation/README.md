@@ -85,3 +85,21 @@ units per run, for which the per-batch GCS round-trip does not scale.
   it now holds (the old name removed). The backfill writes one file per
   transform unit. The daily path also deletes consumed batches.
 - **Output**: `prepared/pv/{system_id}/pv_{system_id}_{start}_{end}.csv`.
+
+### How the stages connect
+
+Clean → prepare → assemble run as three **ordered phases**: every task in one
+finishes before the next begins. There is no finer dependency graph —
+`build_transform_phases` (in `transform_backfill.py`) enumerates each
+`TransformInput`'s tasks, and the phase barrier alone orders them.
+
+That leaves one cross-step dependency **implicit**. `prepare_pv` joins cleaned
+PV power with cleaned on-site weather, but those come from *separate* tasks —
+`clean_pv` and a `clean_weather` belonging to a different `TransformInput` —
+and `prepare_pv` simply reads the cleaned weather back by a shared path
+convention (see `run_prepare_pv` in `core.py`). Nothing declares that
+dependency: it holds only because every clean runs before any prepare, and
+because writer and reader agree on the cleaned-data path. A `clean_weather`
+that never ran (weather extraction having failed for that site) is not flagged
+here — `run_prepare_pv` finds no file and skips the day. Bear this in mind
+when changing the phase model or the cleaned-data path layout.
