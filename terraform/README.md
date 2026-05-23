@@ -5,23 +5,12 @@ Prospect data extraction pipeline on Google Cloud Platform.
 
 ## Architecture Overview
 
-The pipeline uses fully serverless, pay-per-use architecture with Cloud Workflows
-orchestrating Cloud Run Jobs:
-
-```
-PV Prospect Infrastructure
-├── Storage Module
-│   ├── GCS Bucket
-│   └── IAM Bindings
-├── Artifact Registry Module
-│   └── Docker Image Repository
-├── Cloud Run Module
-│   └── Ephemeral Batch Jobs (data extraction)
-├── Workflows Module
-│   └── Orchestration & Fan-out logic
-└── Scheduler Module
-    └── Daily trigger (Cron)
-```
+The pipeline uses a fully serverless, pay-per-use architecture: Cloud Run
+Jobs do the work, and Cloud Workflows fans them out for the daily extract,
+transform, and version flows. The transformation backfills are an exception —
+they invoke a Cloud Run Job directly (planning, execution, and commit happen
+in one container) because the per-unit work is small and there is no benefit
+to dispatch-side fan-out.
 
 ## Directory Structure
 
@@ -33,10 +22,19 @@ terraform/
 │   └── terraform.tfvars
 ├── modules/
 │   ├── artifact_registry/         # Docker image repository
-│   ├── cloud_run/                 # Cloud Run batch jobs
-│   ├── scheduler/                 # Cloud Scheduler cron jobs
-│   ├── storage/                   # GCS storage
-│   └── workflows/                 # Cloud Workflows orchestration
+│   ├── cloud_run_job/             # Reusable Cloud Run Job (extract/transform/version)
+│   ├── cloud_run_scheduler/       # Scheduler trigger that invokes a Cloud Run Job directly (transform backfills)
+│   ├── extract/
+│   │   ├── workflow                       # Daily extract workflow
+│   │   ├── pv_sites_backfill_workflow     # PV-sites extraction backfill workflow
+│   │   └── weather_grid_backfill_workflow # Weather-grid extraction backfill workflow
+│   ├── scheduler/                 # Scheduler trigger that invokes a Cloud Workflow
+│   ├── seed_resources/            # Uploads resource CSVs (pv_sites, weather-grid samples) to GCS
+│   ├── storage/                   # GCS bucket + IAM
+│   ├── transform/workflow         # Daily transform workflow (transform backfills run as direct Cloud Run Jobs — no workflow)
+│   └── version/
+│       ├── workflow               # Weekly versioning workflow
+│       └── scheduler              # Versioning scheduler trigger
 ├── main.tf                        # Root module configuration
 ├── variables.tf                   # Root module variables
 ├── terraform.tfvars               # Variable values (customize this)
@@ -201,25 +199,37 @@ Because individual Cloud Run Job tasks can now run for up to 30 minutes, the
 extraction workflows are spaced **40 minutes apart** to prevent concurrent
 executions from combining to breach PVOutput's 300 requests/hour rate limit:
 
-| Workflow | Trigger time (UTC) | API used |
+| Schedule | Trigger time (UTC) | API used |
 |---|---|---|
 | Daily extraction | 02:00 | PVOutput |
-| PV site backfill | 02:40 | PVOutput |
-| Weather grid backfill | 03:20 | OpenMeteo only |
-| Data transformation | 05:30 | -- |
+| PV site extraction backfill | 02:40 | PVOutput |
+| Weather grid extraction backfill | 03:20 | OpenMeteo only |
+| Daily transformation | 05:30 | -- |
+| PV-sites transformation backfill | 06:00 | -- |
+| Weather-grid transformation backfill | 08:00 | -- |
+| Weekly versioning (Sun) | 23:00 | -- |
 
 The weather grid backfill uses OpenMeteo exclusively, so it does not conflict
 with PVOutput. It runs in a single execution per day — the 9 batches it
 dispatches are paced internally by `sleep_seconds_between_batches` (default
 720 s), so a sliding-60-minute window contains at most ~3 batches × 1,330
 calls ≈ 3,990 calls, comfortably under OpenMeteo's 5,000/hour limit. Total
-wall time ≈ 3 h 24 min, so the transform-side schedules need to sit past
-~06:45 + consolidate-latency.
+wall time ≈ 3 h 24 min — so the extract finishes ~06:44, consolidate adds a
+few minutes, and the weather-grid transform backfill at 08:00 has ~1 h
+margin before reading the consolidated ledger.
+
+The transformation schedules don't hit any external API, so they could in
+principle run back-to-back. They are placed where they are so the planner
+sees a fully-consolidated extraction ledger when it runs: 06:00 for the
+PV-sites transform backfill (extraction finishes by 03:10), and 08:00 for
+the weather-grid transform backfill (extraction finishes by ~06:44).
 
 The default cron expressions are defined as Terraform variables
-(`extractor_scheduler_cron`, `extractor_pv_site_backfill_scheduler_cron`,
+(`extractor_scheduler_cron`, `extractor_pv_sites_backfill_scheduler_cron`,
 `extractor_weather_grid_backfill_scheduler_cron`,
-`transformer_scheduler_cron`) and can be overridden in `terraform.tfvars`
+`transformer_scheduler_cron`, `transformer_pv_sites_backfill_scheduler_cron`,
+`transformer_weather_grid_backfill_scheduler_cron`,
+`versioner_scheduler_cron`) and can be overridden in `terraform.tfvars`
 without touching module code.
 
 ### Checkpoint-based resume

@@ -82,12 +82,20 @@ docker compose run --rm runner openmeteo/hourly 89665 -d 2025-06-24 -n
 The production pipeline is deployed to Google Cloud Platform using Terraform.
 
 **Architecture:**
-1.  **Cloud Scheduler**: Triggers the workflow daily at 03:00 UTC.
-2.  **Cloud Workflows**: Manages the dependency graph (preprocess → fan-out extract).
-3.  **Cloud Run Jobs**: Executes individual extraction tasks in parallel containers.
+1.  **Cloud Scheduler**: Triggers the daily extraction workflow at 02:00 UTC,
+    the PV-sites extraction backfill at 02:40 UTC, and the weather-grid
+    extraction backfill at 03:20 UTC.
+2.  **Cloud Workflows**: Drives each run through plan → dispatch → consolidate,
+    reading the phased manifest written by the `plan_extract` step and fanning
+    out per-task Cloud Run Job dispatches in parallel.
+3.  **Cloud Run Jobs**: Executes individual extraction tasks in parallel
+    containers. Tasks record their outcome to the shared task-outcome ledger
+    so re-runs (same day or next day) skip work already marked `completed`.
 4.  **Artifact Registry**: Stores the `entrypoint` Docker image.
 
-See [terraform/README.md](../terraform/README.md) for deployment instructions.
+See [terraform/README.md](../terraform/README.md) for deployment instructions
+and [doc/orchestration.md](../doc/orchestration.md) for the manifest/ledger
+design shared across extraction and transformation.
 
 ---
 
