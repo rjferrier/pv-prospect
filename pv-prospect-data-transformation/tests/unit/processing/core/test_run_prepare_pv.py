@@ -136,7 +136,7 @@ def test_batch_has_header(
 
     content = batches_fs.read_text(f'pv/{_SYSTEM_ID}_{_DATE_STR}.csv')
     header = content.strip().split('\n')[0]
-    assert header == 'time,temperature,plane_of_array_irradiance,power'
+    assert header == 'time,temperature,plane_of_array_irradiance,power,power_max'
 
 
 def test_daily_row_is_labelled_with_input_date(

@@ -177,6 +177,122 @@ def test_does_not_mutate_inputs(pv_site, weather_df, pv_df):
     assert len(pv_df) == pvo_len
 
 
+# --- power_max ---
+
+
+def test_output_contains_power_max_by_default(
+    pv_site: PVSite, weather_df: pd.DataFrame, pv_df: pd.DataFrame
+) -> None:
+    """power_max ships in the default keep_columns set."""
+    result = prepare_pv(weather_df, pv_df, pv_site, timescale_days=None)
+
+    assert 'power_max' in result.columns
+
+
+def test_power_max_excluded_when_not_in_keep_columns(
+    pv_site: PVSite, weather_df: pd.DataFrame, pv_df: pd.DataFrame
+) -> None:
+    """Opting out of power_max via keep_columns omits the column."""
+    result = prepare_pv(
+        weather_df,
+        pv_df,
+        pv_site,
+        keep_columns=('temperature', 'power'),
+        timescale_days=None,
+    )
+
+    assert 'power_max' not in result.columns
+
+
+def test_power_max_at_no_aggregation_is_daily_max(pv_site: PVSite) -> None:
+    """With timescale_days=None each row carries the max over its calendar day."""
+    weather_df = _make_hourly_weather_df(n_hours=24)
+    times = pd.date_range('2026-06-21 00:00:00', periods=24, freq='h')
+    powers = [100.0] * 24
+    powers[12] = 5500.0  # noon spike
+    pv_df = pd.DataFrame({'time': times, 'power': powers})
+
+    result = prepare_pv(
+        weather_df,
+        pv_df,
+        pv_site,
+        keep_columns=('power', 'power_max'),
+        timescale_days=None,
+    )
+
+    assert (result['power_max'] == 5500.0).all()
+
+
+def test_power_max_at_daily_timescale_equals_native_daily_max(pv_site: PVSite) -> None:
+    """timescale_days=1 produces one row per day; power_max is that day's max
+    over the native-cadence pv_df."""
+    weather_df = _make_hourly_weather_df(n_hours=48)
+    times = pd.date_range('2026-06-21 00:00:00', periods=48, freq='h')
+    powers = [100.0] * 48
+    powers[12] = 4500.0  # day 1 peak
+    powers[36] = 5200.0  # day 2 peak
+    pv_df = pd.DataFrame({'time': times, 'power': powers})
+
+    result = prepare_pv(
+        weather_df,
+        pv_df,
+        pv_site,
+        keep_columns=('power', 'power_max'),
+        timescale_days=1,
+    )
+
+    by_day = dict(zip(result['time'].dt.normalize(), result['power_max'], strict=True))
+    assert by_day[pd.Timestamp('2026-06-21')] == 4500.0
+    assert by_day[pd.Timestamp('2026-06-22')] == 5200.0
+
+
+def test_power_max_uses_native_cadence_not_reduced(pv_site: PVSite) -> None:
+    """Regression: a sub-hour spike must survive into power_max even though
+    reduce_rows time-weighted-averages it away in the joined frame.
+
+    Without computing power_max from the pre-reduce pv_df, an inverter
+    clipping that happens for (say) 12 minutes inside an hour gets smeared
+    down toward the hour's mean, and power_max would falsely report a value
+    well below the inverter cap. The training-time censoring filter would
+    then keep censored rows.
+    """
+    weather_df = _make_hourly_weather_df(n_hours=24)
+    # Native cadence: 5-minute samples across one full day (288 samples)
+    times = pd.date_range('2026-06-21 00:00:00', periods=288, freq='5min')
+    powers = [0.0] * 288
+    # One single 5-minute spike of 6000 W at noon (the inverter cap).
+    # In the hourly time-weighted average this is 6000 * 5/60 + 0 * 55/60 = 500 W —
+    # far below the cap. power_max must still see the 6000 W.
+    noon_idx = next(
+        i for i, t in enumerate(times) if t == pd.Timestamp('2026-06-21 12:00:00')
+    )
+    powers[noon_idx] = 6000.0
+    pv_df = pd.DataFrame({'time': times, 'power': powers})
+
+    result = prepare_pv(
+        weather_df,
+        pv_df,
+        pv_site,
+        keep_columns=('power', 'power_max'),
+        timescale_days=1,
+    )
+
+    assert len(result) == 1
+    assert result['power_max'].iloc[0] == 6000.0
+    # Daily-mean power is far below the spike (sanity-check the bias the
+    # clipping flag is there to catch).
+    assert result['power'].iloc[0] < 100.0
+
+
+def test_power_max_empty_pv_df(pv_site: PVSite, weather_df: pd.DataFrame) -> None:
+    """An empty pv_df shouldn't crash; the result is empty after dropna."""
+    pv_df = pd.DataFrame({'time': pd.to_datetime([]), 'power': pd.Series(dtype=float)})
+
+    result = prepare_pv(weather_df, pv_df, pv_site, timescale_days=None)
+
+    assert result.empty
+
+
 # --- Multi-panel weighting ---
 
 

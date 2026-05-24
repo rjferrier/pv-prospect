@@ -27,7 +27,8 @@ The transformation process consists of six steps, organised into three layers:
 
 #### `prepare_pv`
 - **Input**: Cleaned weather CSV + cleaned PV output CSV (`cleaned/`).
-- **Role**: Inner-joins the two cleaned datasets on `time`, calculates Plane of Array (POA) irradiance using `pvlib` (accounting for panel tilt, azimuth, and area fraction), selects the final feature set (e.g. `temperature`, `plane_of_array_irradiance`, `power`), and downsamples time resolution.
+- **Role**: Inner-joins the two cleaned datasets on `time`, calculates Plane of Array (POA) irradiance using `pvlib` (accounting for panel tilt, azimuth, and area fraction), selects the final feature set (e.g. `temperature`, `plane_of_array_irradiance`, `power`, `power_max`), and downsamples time resolution.
+- **`power_max` derivation**: The maximum of the native-cadence `pv_df['power']` over each output row's period, looked up *before* the PV is time-weighted-averaged onto weather cadence. Computing it post-reduce would smear sub-hour clipping into the hourly average — an inverter spike lasting a few minutes can be ~5–10× the hour's mean, so the post-reduce max would systematically under-report. Downstream PV-model training uses `power_max` as a censoring flag: a row whose `power_max` reaches the inverter capacity has a biased daily-mean `power` (the inverter has truncated the panel's actual output) and must be dropped from the training set.
 - **Output**: Per-day micro-batch CSV (`prepared-batches/pv/{system_id}_{date}.csv`) in the daily transform, or in-memory frames for `assemble_pv` in the backfill.
 
 #### Downsampling
