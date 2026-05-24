@@ -63,7 +63,7 @@ WEATHER_COLUMNS = [
     'direct_normal_irradiance',
     'diffuse_radiation',
 ]
-PV_COLUMNS = ['time', 'temperature', 'plane_of_array_irradiance', 'power']
+PV_COLUMNS = ['time', 'temperature', 'plane_of_array_irradiance', 'power', 'power_max']
 
 # ---------------------------------------------------------------------------
 # I/O helpers

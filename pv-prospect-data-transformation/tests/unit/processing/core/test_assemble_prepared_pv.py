@@ -18,7 +18,7 @@ _BACKFILL_WINDOW = ('2026-01-15', '2026-02-12')
 
 
 def _batch_csv(rows: list[list[object]]) -> str:
-    header = 'time,temperature,plane_of_array_irradiance,power'
+    header = 'time,temperature,plane_of_array_irradiance,power,power_max'
     data = '\n'.join(','.join(str(v) for v in row) for row in rows)
     return header + '\n' + data + '\n'
 
@@ -41,10 +41,14 @@ def test_collector_path_writes_one_file_named_for_the_actual_data_span() -> None
     the span the data actually covers, not the nominal window."""
     collector = PreparedBatchCollector()
     collector.add_pv(
-        89665, *_BACKFILL_WINDOW, _batch_frame([['2026-01-15', 8.5, 300.0, 1500.0]])
+        89665,
+        *_BACKFILL_WINDOW,
+        _batch_frame([['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]),
     )
     collector.add_pv(
-        89665, *_BACKFILL_WINDOW, _batch_frame([['2026-01-16', 9.0, 310.0, 1600.0]])
+        89665,
+        *_BACKFILL_WINDOW,
+        _batch_frame([['2026-01-16', 9.0, 310.0, 1600.0, 4800.0]]),
     )
     prepared_fs = FakeFileSystem()
 
@@ -62,13 +66,13 @@ def test_collector_path_separate_windows_become_separate_files() -> None:
         89665,
         '2026-01-15',
         '2026-02-12',
-        _batch_frame([['2026-01-15', 8.5, 300.0, 1500.0]]),
+        _batch_frame([['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]),
     )
     collector.add_pv(
         89665,
         '2026-03-01',
         '2026-03-29',
-        _batch_frame([['2026-03-02', 9.0, 310.0, 1600.0]]),
+        _batch_frame([['2026-03-02', 9.0, 310.0, 1600.0, 4800.0]]),
     )
     prepared_fs = FakeFileSystem()
 
@@ -81,10 +85,14 @@ def test_collector_path_separate_windows_become_separate_files() -> None:
 def test_collector_path_drains_only_the_requested_system() -> None:
     collector = PreparedBatchCollector()
     collector.add_pv(
-        89665, *_BACKFILL_WINDOW, _batch_frame([['2026-01-15', 8.5, 300.0, 1500.0]])
+        89665,
+        *_BACKFILL_WINDOW,
+        _batch_frame([['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]),
     )
     collector.add_pv(
-        12345, *_BACKFILL_WINDOW, _batch_frame([['2026-01-15', 9.0, 310.0, 1600.0]])
+        12345,
+        *_BACKFILL_WINDOW,
+        _batch_frame([['2026-01-15', 9.0, 310.0, 1600.0, 4800.0]]),
     )
     prepared_fs = FakeFileSystem()
 
@@ -105,11 +113,15 @@ def test_collector_path_with_no_frames_is_noop() -> None:
 def test_collector_path_leaves_batch_files_untouched() -> None:
     collector = PreparedBatchCollector()
     collector.add_pv(
-        89665, *_BACKFILL_WINDOW, _batch_frame([['2026-01-16', 9.0, 310.0, 1600.0]])
+        89665,
+        *_BACKFILL_WINDOW,
+        _batch_frame([['2026-01-16', 9.0, 310.0, 1600.0, 4800.0]]),
     )
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]])
+            'pv/89665_20260115.csv': _batch_csv(
+                [['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]
+            )
         }
     )
     prepared_fs = FakeFileSystem()
@@ -127,8 +139,12 @@ def test_collector_path_leaves_batch_files_untouched() -> None:
 def test_daily_path_merges_batches_into_one_iso_week_file() -> None:
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]]),
-            'pv/89665_20260116.csv': _batch_csv([['2026-01-16', 9.0, 310.0, 1600.0]]),
+            'pv/89665_20260115.csv': _batch_csv(
+                [['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]
+            ),
+            'pv/89665_20260116.csv': _batch_csv(
+                [['2026-01-16', 9.0, 310.0, 1600.0, 4800.0]]
+            ),
         }
     )
     prepared_fs = FakeFileSystem()
@@ -158,7 +174,9 @@ def test_daily_path_grows_and_renames_the_open_week_file() -> None:
     )
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]])
+            'pv/89665_20260115.csv': _batch_csv(
+                [['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]
+            )
         }
     )
 
@@ -174,8 +192,12 @@ def test_daily_path_grows_and_renames_the_open_week_file() -> None:
 def test_daily_path_splits_batches_across_iso_weeks() -> None:
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]]),
-            'pv/89665_20260120.csv': _batch_csv([['2026-01-20', 9.0, 310.0, 1600.0]]),
+            'pv/89665_20260115.csv': _batch_csv(
+                [['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]
+            ),
+            'pv/89665_20260120.csv': _batch_csv(
+                [['2026-01-20', 9.0, 310.0, 1600.0, 4800.0]]
+            ),
         }
     )
     prepared_fs = FakeFileSystem()
@@ -201,7 +223,9 @@ def test_daily_path_deduplicates_on_time_with_fresh_rows_winning() -> None:
     )
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]])
+            'pv/89665_20260115.csv': _batch_csv(
+                [['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]
+            )
         }
     )
 
@@ -216,8 +240,12 @@ def test_daily_path_deduplicates_on_time_with_fresh_rows_winning() -> None:
 def test_daily_path_deletes_only_the_systems_consumed_batches() -> None:
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]]),
-            'pv/12345_20260115.csv': _batch_csv([['2026-01-15', 9.0, 310.0, 1600.0]]),
+            'pv/89665_20260115.csv': _batch_csv(
+                [['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]
+            ),
+            'pv/12345_20260115.csv': _batch_csv(
+                [['2026-01-15', 9.0, 310.0, 1600.0, 4800.0]]
+            ),
         }
     )
     prepared_fs = FakeFileSystem()
@@ -242,7 +270,9 @@ def test_daily_path_ignores_a_stray_non_partition_file() -> None:
     prepared_fs = FakeFileSystem(files={'pv/89665/readme.csv': 'not a partition\n'})
     batches_fs = FakeFileSystem(
         files={
-            'pv/89665_20260115.csv': _batch_csv([['2026-01-15', 8.5, 300.0, 1500.0]])
+            'pv/89665_20260115.csv': _batch_csv(
+                [['2026-01-15', 8.5, 300.0, 1500.0, 4500.0]]
+            )
         }
     )
 
