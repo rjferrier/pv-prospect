@@ -623,10 +623,16 @@ def _run_transform_step(
         )
 
     elif transformation is Transformation.ASSEMBLE_PV:
+        # Per-(system, window) so distinct slices don't share a task hash
+        # — symmetric to assemble_weather above. The daily-transform path
+        # (collector unset) reads its dates from the batch files and
+        # ignores start/end; only the collector path keys on them.
         assemble_prepared_pv(
             batches_fs,
             prepared_fs,
             pv_system_id,  # type: ignore[arg-type]
+            date_range.start.isoformat(),
+            date_range.end.isoformat(),
             prepared_batches,
         )
 

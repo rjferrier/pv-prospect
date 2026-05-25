@@ -178,8 +178,10 @@ def test_end_date_omitted_when_input_has_none() -> None:
         assert 'END_DATE' not in _env(task)
 
 
-def test_assemble_pv_deduped_per_system() -> None:
-    """Two windows for the same PV system yield one assemble_pv."""
+def test_assemble_pv_emitted_per_system_window() -> None:
+    """One assemble_pv per distinct (system, start, end) — distinct
+    slices must have distinct task hashes so a completion for one doesn't
+    mask another in a later run's filter."""
     transform_inputs = [
         TransformInput(
             DataSourceType.PV, '2026-01-01', '2026-01-29', pv_system_id=4708
@@ -197,8 +199,40 @@ def test_assemble_pv_deduped_per_system() -> None:
     assert [_env(t)['TRANSFORM_STEP'] for t in assemble] == [
         'assemble_pv',
         'assemble_pv',
+        'assemble_pv',
     ]
-    assert {_env(t)['PV_SYSTEM_ID'] for t in assemble} == {'4708', '24667'}
+    assert {
+        (
+            _env(t)['PV_SYSTEM_ID'],
+            _env(t)['START_DATE'],
+            _env(t)['END_DATE'],
+        )
+        for t in assemble
+    } == {
+        ('4708', '2026-01-01', '2026-01-29'),
+        ('4708', '2026-02-01', '2026-02-29'),
+        ('24667', '2026-01-01', '2026-01-29'),
+    }
+
+
+def test_assemble_pv_deduped_per_system_window() -> None:
+    """Two PV inputs sharing the same (system, start, end) collapse to one
+    assemble_pv task — one partition file is written for that slice."""
+    transform_inputs = [
+        TransformInput(
+            DataSourceType.PV, '2026-01-01', '2026-01-29', pv_system_id=4708
+        ),
+        TransformInput(
+            DataSourceType.PV, '2026-01-01', '2026-01-29', pv_system_id=4708
+        ),
+    ]
+
+    _, _, assemble = build_transform_phases(transform_inputs, _WORKFLOW, _RUN_DATE)
+
+    assert [_env(t)['TRANSFORM_STEP'] for t in assemble] == ['assemble_pv']
+    assert _env(assemble[0])['PV_SYSTEM_ID'] == '4708'
+    assert _env(assemble[0])['START_DATE'] == '2026-01-01'
+    assert _env(assemble[0])['END_DATE'] == '2026-01-29'
 
 
 def test_assemble_weather_emitted_per_sample_window() -> None:

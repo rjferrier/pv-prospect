@@ -75,13 +75,13 @@ class TransformInput:
     """A specification of one extracted dataset for the transform to process.
 
     It identifies a body of raw extracted data and nothing more — a
-    ``data_source_type``, an entity, and a date-range window. It is the
+    ``data_source_type``, a site, and a date-range window. It is the
     *input* to :func:`build_transform_phases`, not a node in the transform
     DAG: which clean / prepare / assemble steps run, and how they feed one
     another, is the planner's knowledge, not this type's.
 
     ``data_source_type`` is the API the raw data came from. Exactly one of
-    ``pv_system_id`` / ``location`` identifies the entity — a ``lat,lon``
+    ``pv_system_id`` / ``location`` identifies the site — a ``lat,lon``
     string for grid-point weather, a system id otherwise.
     ``grid_point_sample_index`` is set only for weather from the
     weather-grid backfill: the grid-point sample file the data belongs to,
@@ -149,12 +149,13 @@ def build_transform_phases(
     date)`` space). A ``'pv'`` input and a grid-weather input also yield a
     prepare task; a PV-site-weather input (no ``grid_point_sample_index``)
     yields ``clean_weather`` only. Phase 2 emits one ``assemble_pv`` per
-    distinct ``pv_system_id`` and one ``assemble_weather`` per distinct
-    ``(grid_point_sample_index, start_date, end_date)`` over grid-weather
-    inputs. Per-sample assemble is load-bearing for resume: the task hash
-    must be disjoint between sample-window pairs so a previously-completed
-    assemble for one (sample, window) doesn't filter out an unrelated one
-    in a later run.
+    distinct ``(pv_system_id, start_date, end_date)`` and one
+    ``assemble_weather`` per distinct
+    ``(grid_point_sample_index, start_date, end_date)``. Per-slice assemble
+    is load-bearing for resume: the task hash must be disjoint between
+    output files so a previously-completed assemble for one slice doesn't
+    filter out an unrelated one in a later run via the orchestrator's
+    cross-run task-hash scan.
 
     The phases run in order, every task in one finishing before the next.
     That ordering is load-bearing, and it hides a dependency: ``prepare_pv``
@@ -165,13 +166,11 @@ def build_transform_phases(
     ``run_prepare_pv`` reads the cleaned weather by path convention (see
     the package README's pipeline section).
 
-    An ``assemble_pv`` task carries one of its system's input windows
-    arbitrarily — assemble_pv ignores the window and processes the
-    system's full prepared corpus. An ``assemble_weather`` task carries
-    its specific ``(sample, start, end)``: the assembled partition file
-    is named after that window, and the task hash includes the sample
-    index, so distinct slices don't collide. The returned phases are
-    unfiltered — the caller applies
+    Both ``assemble_pv`` and ``assemble_weather`` tasks carry their
+    slice's full identifying tuple — ``(pv_system_id, start, end)`` for
+    PV, ``(grid_point_sample_index, start, end)`` for weather — and the
+    task hash includes every dimension, so distinct slices don't collide.
+    The returned phases are unfiltered — the caller applies
     :meth:`WorkflowOrchestrator.filter_remaining_tasks` if it wants
     self-filtering (the daily transform does; the backfill does not).
     """
@@ -192,7 +191,13 @@ def build_transform_phases(
 
     clean: list[list[dict[str, str]]] = []
     prepare: list[list[dict[str, str]]] = []
-    assemble_pv_inputs: dict[int, TransformInput] = {}
+    # Assembly dedup. Each key must include every dimension that
+    # distinguishes one output file from another — ``(pv_system_id,
+    # start_date, end_date)`` for PV and ``(grid_point_sample_index,
+    # start_date, end_date)`` for weather — so a previously-completed
+    # assemble for one slice doesn't filter out an unrelated slice on a
+    # later run via the orchestrator's cross-run task-hash scan.
+    assemble_pv_inputs: dict[tuple[int, str, str | None], TransformInput] = {}
     assemble_weather_inputs: dict[tuple[int, str, str | None], TransformInput] = {}
     for transform_input in transform_inputs:
         if transform_input.data_source_type == DataSourceType.PV:
@@ -200,7 +205,12 @@ def build_transform_phases(
             prepare.append(task(transform_input, 'prepare_pv'))
             if transform_input.pv_system_id is not None:
                 assemble_pv_inputs.setdefault(
-                    transform_input.pv_system_id, transform_input
+                    (
+                        transform_input.pv_system_id,
+                        transform_input.start_date,
+                        transform_input.end_date,
+                    ),
+                    transform_input,
                 )
         elif transform_input.grid_point_sample_index is not None:
             # Grid-point weather — a sample index is present only on weather

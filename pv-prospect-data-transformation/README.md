@@ -83,13 +83,19 @@ units per run, for which the per-batch GCS round-trip does not scale.
 - **Output**: `prepared/weather/weather_{start}_{end}_{gv}-{NN}.csv`.
 
 #### `assemble_pv`
-- **Input**: Batch CSVs for a single PV system (`prepared-batches/pv/{system_id}_*.csv`), or the collector's frames for that system.
+- **Input**: Batch CSVs for one PV system on one date
+  (`prepared-batches/pv/{system_id}_{date}.csv`) in the daily transform, or
+  the collector's slice for one `(system_id, start, end)` in the backfill.
 - **Role**: Merges, deduplicates on `time` keeping the latest value, and sorts.
   A PV file is named for the range it *actually* covers. The daily transform
   buckets each day into its ISO week (Mon–Sun): the day is merged into that
   week's open file, which grows day by day and is renamed to match the span
   it now holds (the old name removed). The backfill writes one file per
-  transform unit. The daily path also deletes consumed batches.
+  `(system, window)`. One `assemble_pv` task runs per distinct
+  `(system, start, end)` — symmetric to `assemble_weather` above and
+  load-bearing for the same reason: a single bulk-drain task hashed only on
+  `system_id` would let one slice's completion mask every other slice for
+  that system on a later run. The daily path also deletes consumed batches.
 - **Output**: `prepared/pv/{system_id}/pv_{system_id}_{start}_{end}.csv`.
 
 ### How the stages connect

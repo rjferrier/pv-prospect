@@ -545,19 +545,32 @@ def assemble_prepared_pv(
     batches_fs: FileSystem,
     prepared_fs: FileSystem,
     system_id: int,
+    start: str,
+    end: str,
     collector: PreparedBatchCollector | None = None,
 ) -> None:
     """Merge prepared PV frames for one system into its partition files.
 
-    With a *collector* (the single-process backfill) each ``(system,
-    window)`` group becomes one content-named file. Otherwise the daily
-    transform's per-day batch CSVs are read, bucketed into ISO weeks, and
-    each week merged into its open file — which grows day by day and is
-    renamed to match the range it covers (see :func:`_write_pv_partition`).
+    With a *collector* (the single-process backfill) reads the collector's
+    slice for ``(system_id, start, end)`` and writes it as one content-named
+    partition file — one task per ``(system, window)`` so distinct slices'
+    task hashes don't collide and resume-filter each other out (see
+    :func:`build_transform_phases`). Otherwise the daily transform's per-day
+    batch CSVs are read, bucketed into ISO weeks, and each week merged into
+    its open file — which grows day by day and is renamed to match the
+    range it covers (see :func:`_write_pv_partition`). *start* / *end*
+    identify the slice only in the collector path; the daily path discovers
+    its dates from the batch files.
     """
     if collector is not None:
-        for batch_frames in collector.pv_groups(system_id).values():
-            _write_pv_partition(prepared_fs, system_id, batch_frames, None)
+        batch_frames = collector.pv_groups(system_id).get((start, end))
+        if not batch_frames:
+            logger.warning(
+                '[assemble_pv] No prepared PV to assemble for %s.',
+                (system_id, start, end),
+            )
+            return
+        _write_pv_partition(prepared_fs, system_id, batch_frames, None)
         return
 
     all_pv_batches = batches_fs.list_files(PV_BATCH_PREFIX, '*.csv')

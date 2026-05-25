@@ -163,7 +163,7 @@ def _make_step_fn(
     collector: PreparedBatchCollector,
     grid_point_sample_index: int,
 ) -> Callable[[AnySite], None]:
-    """Return a callable that runs *step* for a single entity."""
+    """Return a callable that runs *step* for a single site."""
     if step == Transformation.CLEAN_WEATHER:
 
         def fn_clean_weather(site: AnySite) -> None:
@@ -385,10 +385,29 @@ def _main() -> None:
                 config.weather_grid.version,
             )
 
+    def assemble_pv_for_system(pv_id: int) -> None:
+        groups = collector.pv_groups(pv_id)
+        if groups:
+            for start, end in groups:
+                assemble_prepared_pv(
+                    batches_fs, prepared_fs, pv_id, start, end, collector
+                )
+            return
+        # No collector frames — daily-style drain of batches_fs.
+        # date_range.end is used purely as a passthrough; the daily
+        # branch ignores it and reads dates from the batch files.
+        assemble_prepared_pv(
+            batches_fs,
+            prepared_fs,
+            pv_id,
+            date_range.start.isoformat(),
+            date_range.end.isoformat(),
+        )
+
     if Transformation.ASSEMBLE_PV in all_transformations:
         print('\nAssembling prepared PV data...')
         for pv_id in pv_system_ids:
-            assemble_prepared_pv(batches_fs, prepared_fs, pv_id)
+            assemble_pv_for_system(pv_id)
 
     print('\nDone.')
 

@@ -52,7 +52,9 @@ def test_collector_path_writes_one_file_named_for_the_actual_data_span() -> None
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_pv(FakeFileSystem(), prepared_fs, 89665, collector)
+    assemble_prepared_pv(
+        FakeFileSystem(), prepared_fs, 89665, *_BACKFILL_WINDOW, collector
+    )
 
     path = pv_partition_path(89665, '2026-01-15', '2026-01-17')
     result = pd.read_csv(io.StringIO(prepared_fs.read_text(path)))
@@ -60,7 +62,9 @@ def test_collector_path_writes_one_file_named_for_the_actual_data_span() -> None
     assert list(result.columns) == PV_COLUMNS
 
 
-def test_collector_path_separate_windows_become_separate_files() -> None:
+def test_collector_path_only_writes_the_requested_slice() -> None:
+    """A second window's frames sit untouched in the collector — assemble
+    writes only the one requested (system, window)."""
     collector = PreparedBatchCollector()
     collector.add_pv(
         89665,
@@ -76,10 +80,17 @@ def test_collector_path_separate_windows_become_separate_files() -> None:
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_pv(FakeFileSystem(), prepared_fs, 89665, collector)
+    assemble_prepared_pv(
+        FakeFileSystem(),
+        prepared_fs,
+        89665,
+        '2026-01-15',
+        '2026-02-12',
+        collector,
+    )
 
     assert prepared_fs.exists(pv_partition_path(89665, '2026-01-15', '2026-01-16'))
-    assert prepared_fs.exists(pv_partition_path(89665, '2026-03-02', '2026-03-03'))
+    assert not prepared_fs.exists(pv_partition_path(89665, '2026-03-02', '2026-03-03'))
 
 
 def test_collector_path_drains_only_the_requested_system() -> None:
@@ -96,16 +107,26 @@ def test_collector_path_drains_only_the_requested_system() -> None:
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_pv(FakeFileSystem(), prepared_fs, 89665, collector)
+    assemble_prepared_pv(
+        FakeFileSystem(), prepared_fs, 89665, *_BACKFILL_WINDOW, collector
+    )
 
     assert prepared_fs.exists(pv_partition_path(89665, '2026-01-15', '2026-01-16'))
     assert prepared_fs.list_files('pv/12345', '*.csv') == []
 
 
-def test_collector_path_with_no_frames_is_noop() -> None:
+def test_collector_path_with_no_frames_for_slice_is_noop() -> None:
+    """When the collector has no rows for the requested (system, window)
+    the assemble call leaves the corpus untouched."""
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_pv(FakeFileSystem(), prepared_fs, 89665, PreparedBatchCollector())
+    assemble_prepared_pv(
+        FakeFileSystem(),
+        prepared_fs,
+        89665,
+        *_BACKFILL_WINDOW,
+        PreparedBatchCollector(),
+    )
 
     assert prepared_fs.list_files('pv/89665', '*.csv') == []
 
@@ -126,7 +147,7 @@ def test_collector_path_leaves_batch_files_untouched() -> None:
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_pv(batches_fs, prepared_fs, 89665, collector)
+    assemble_prepared_pv(batches_fs, prepared_fs, 89665, *_BACKFILL_WINDOW, collector)
 
     assert batches_fs.exists('pv/89665_20260115.csv')
 
@@ -149,7 +170,7 @@ def test_daily_path_merges_batches_into_one_iso_week_file() -> None:
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_pv(batches_fs, prepared_fs, 89665)
+    assemble_prepared_pv(batches_fs, prepared_fs, 89665, '2026-01-15', '2026-01-16')
 
     path = pv_partition_path(89665, '2026-01-15', '2026-01-17')
     result = pd.read_csv(io.StringIO(prepared_fs.read_text(path)))
@@ -180,7 +201,7 @@ def test_daily_path_grows_and_renames_the_open_week_file() -> None:
         }
     )
 
-    assemble_prepared_pv(batches_fs, prepared_fs, 89665)
+    assemble_prepared_pv(batches_fs, prepared_fs, 89665, '2026-01-15', '2026-01-16')
 
     new_path = pv_partition_path(89665, '2026-01-12', '2026-01-16')
     assert prepared_fs.exists(new_path)
@@ -202,7 +223,7 @@ def test_daily_path_splits_batches_across_iso_weeks() -> None:
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_pv(batches_fs, prepared_fs, 89665)
+    assemble_prepared_pv(batches_fs, prepared_fs, 89665, '2026-01-15', '2026-01-16')
 
     assert prepared_fs.exists(pv_partition_path(89665, '2026-01-15', '2026-01-16'))
     assert prepared_fs.exists(pv_partition_path(89665, '2026-01-20', '2026-01-21'))
@@ -229,7 +250,7 @@ def test_daily_path_deduplicates_on_time_with_fresh_rows_winning() -> None:
         }
     )
 
-    assemble_prepared_pv(batches_fs, prepared_fs, 89665)
+    assemble_prepared_pv(batches_fs, prepared_fs, 89665, '2026-01-15', '2026-01-16')
 
     new_path = pv_partition_path(89665, '2026-01-15', '2026-01-16')
     result = pd.read_csv(io.StringIO(prepared_fs.read_text(new_path)))
@@ -250,7 +271,7 @@ def test_daily_path_deletes_only_the_systems_consumed_batches() -> None:
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_pv(batches_fs, prepared_fs, 89665)
+    assemble_prepared_pv(batches_fs, prepared_fs, 89665, '2026-01-15', '2026-01-16')
 
     assert not batches_fs.exists('pv/89665_20260115.csv')
     assert batches_fs.exists('pv/12345_20260115.csv')
@@ -259,7 +280,9 @@ def test_daily_path_deletes_only_the_systems_consumed_batches() -> None:
 def test_daily_path_no_batches_is_noop() -> None:
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_pv(FakeFileSystem(), prepared_fs, 89665)
+    assemble_prepared_pv(
+        FakeFileSystem(), prepared_fs, 89665, '2026-01-15', '2026-01-16'
+    )
 
     assert prepared_fs.list_files('pv/89665', '*.csv') == []
 
@@ -276,6 +299,6 @@ def test_daily_path_ignores_a_stray_non_partition_file() -> None:
         }
     )
 
-    assemble_prepared_pv(batches_fs, prepared_fs, 89665)
+    assemble_prepared_pv(batches_fs, prepared_fs, 89665, '2026-01-15', '2026-01-16')
 
     assert prepared_fs.exists(pv_partition_path(89665, '2026-01-15', '2026-01-16'))
