@@ -375,7 +375,15 @@ def _main() -> None:
 
     if Transformation.ASSEMBLE_WEATHER in all_transformations:
         print('\nAssembling prepared weather data...')
-        assemble_prepared_weather(prepared_fs, collector, config.weather_grid.version)
+        for sample_index, start, end in collector.weather_groups():
+            assemble_prepared_weather(
+                prepared_fs,
+                collector,
+                sample_index,
+                start,
+                end,
+                config.weather_grid.version,
+            )
 
     if Transformation.ASSEMBLE_PV in all_transformations:
         print('\nAssembling prepared PV data...')

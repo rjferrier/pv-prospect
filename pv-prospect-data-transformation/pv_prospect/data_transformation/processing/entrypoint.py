@@ -604,15 +604,22 @@ def _run_transform_step(
         )
 
     elif transformation is Transformation.ASSEMBLE_WEATHER:
-        # assemble_weather drains the in-container collector — also
-        # weather-grid backfill only (see prepare_weather above).
-        if prepared_batches is None:
+        # assemble_weather reads its (sample, window) slice from the
+        # in-container collector — weather-grid backfill only (see
+        # prepare_weather above). Per-sample so distinct sample windows
+        # don't share a task hash.
+        if prepared_batches is None or grid_point_sample_index is None:
             raise WorkflowTerminatingError(
-                'assemble_weather requires the in-container collector '
-                '(weather-grid backfill only)'
+                'assemble_weather requires GRID_POINT_SAMPLE_INDEX and the '
+                'in-container collector (weather-grid backfill only)'
             )
         assemble_prepared_weather(
-            prepared_fs, prepared_batches, config.weather_grid.version
+            prepared_fs,
+            prepared_batches,
+            grid_point_sample_index,
+            date_range.start.isoformat(),
+            date_range.end.isoformat(),
+            config.weather_grid.version,
         )
 
     elif transformation is Transformation.ASSEMBLE_PV:

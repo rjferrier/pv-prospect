@@ -59,14 +59,18 @@ def test_writes_one_partition_file_for_the_sample_window() -> None:
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
+    assemble_prepared_weather(
+        prepared_fs, collector, _SAMPLE, _START, _END, _GRID_VERSION
+    )
 
     result = pd.read_csv(io.StringIO(prepared_fs.read_text(_PARTITION_PATH)))
     assert len(result) == 2
     assert list(result.columns) == WEATHER_COLUMNS
 
 
-def test_writes_a_separate_file_per_sample_file() -> None:
+def test_only_writes_the_requested_sample_slice() -> None:
+    """A second sample's frames sit untouched in the collector — assemble
+    writes only the one requested ``(sample, window)``."""
     collector = PreparedBatchCollector()
     collector.add_weather(
         7,
@@ -82,10 +86,12 @@ def test_writes_a_separate_file_per_sample_file() -> None:
     )
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
+    assemble_prepared_weather(prepared_fs, collector, 7, _START, _END, _GRID_VERSION)
 
     assert prepared_fs.exists(weather_partition_path(_START, _END, 7, _GRID_VERSION))
-    assert prepared_fs.exists(weather_partition_path(_START, _END, 8, _GRID_VERSION))
+    assert not prepared_fs.exists(
+        weather_partition_path(_START, _END, 8, _GRID_VERSION)
+    )
 
 
 def test_merges_into_an_existing_partition_file() -> None:
@@ -113,7 +119,9 @@ def test_merges_into_an_existing_partition_file() -> None:
         _batch_frame([[50.49, -3.54, 120.0, '2026-01-16', 9.0, 210.0, 65.0]]),
     )
 
-    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
+    assemble_prepared_weather(
+        prepared_fs, collector, _SAMPLE, _START, _END, _GRID_VERSION
+    )
 
     result = pd.read_csv(io.StringIO(prepared_fs.read_text(_PARTITION_PATH)))
     assert sorted(result['time'].tolist()) == ['2026-01-15', '2026-01-16']
@@ -142,7 +150,9 @@ def test_deduplicates_on_lat_lon_time_with_fresh_rows_winning() -> None:
         _batch_frame([[50.49, -3.54, 120.0, '2026-01-15', 8.5, 200.0, 60.0]]),
     )
 
-    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
+    assemble_prepared_weather(
+        prepared_fs, collector, _SAMPLE, _START, _END, _GRID_VERSION
+    )
 
     result = pd.read_csv(io.StringIO(prepared_fs.read_text(_PARTITION_PATH)))
     assert len(result) == 1
@@ -171,7 +181,9 @@ def test_merges_partition_with_mixed_time_formats() -> None:
         _batch_frame([[50.49, -3.54, 120.0, '2026-01-17', 9.0, 210.0, 65.0]]),
     )
 
-    assemble_prepared_weather(prepared_fs, collector, _GRID_VERSION)
+    assemble_prepared_weather(
+        prepared_fs, collector, _SAMPLE, _START, _END, _GRID_VERSION
+    )
 
     result = pd.read_csv(io.StringIO(prepared_fs.read_text(_PARTITION_PATH)))
     assert sorted(result['time'].tolist()) == [
@@ -181,9 +193,18 @@ def test_merges_partition_with_mixed_time_formats() -> None:
     ]
 
 
-def test_no_frames_is_noop() -> None:
+def test_no_frames_for_requested_slice_is_noop() -> None:
+    """When the collector has no rows for the requested (sample, window)
+    the assemble call leaves the corpus untouched."""
     prepared_fs = FakeFileSystem()
 
-    assemble_prepared_weather(prepared_fs, PreparedBatchCollector(), _GRID_VERSION)
+    assemble_prepared_weather(
+        prepared_fs,
+        PreparedBatchCollector(),
+        _SAMPLE,
+        _START,
+        _END,
+        _GRID_VERSION,
+    )
 
     assert prepared_fs.list_files('weather', '*.csv') == []

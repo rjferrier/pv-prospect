@@ -458,34 +458,43 @@ def _merge_prepared_frames(frames: list[pd.DataFrame], keys: list[str]) -> pd.Da
 def assemble_prepared_weather(
     prepared_fs: FileSystem,
     collector: PreparedBatchCollector,
+    grid_point_sample_index: int,
+    start: str,
+    end: str,
     grid_definition_version: int,
 ) -> None:
-    """Write one weather partition file per (sample file, window).
+    """Write the weather partition file for one ``(sample, window)``.
 
-    Drains the in-memory *collector* — weather is grid-point data
-    produced only by the single-process weather-grid backfill — groups
-    the prepared frames by ``(grid_point_sample_index, window)``, and writes
-    each group as ``weather/weather_{start}_{end}_{gv}-{NN}.csv`` (``gv``
-    being *grid_definition_version*). An existing file of the same name is
-    merged in first, so a re-run is idempotent.
+    Reads the *collector*'s slice for ``(grid_point_sample_index, start,
+    end)`` and writes it as ``weather/weather_{start}_{end}_{gv}-{NN}.csv``
+    (``gv`` being *grid_definition_version*). An existing file of the same
+    name is merged in first, so a re-run is idempotent.
+
+    One task per ``(sample, window)`` — not a single bulk drain — because
+    the orchestrator hashes tasks by env vars, and a single bulk task
+    would share its hash with every other bulk-drain task that happened to
+    pick the same ``(start, end)`` as ``first_weather_input``, masking
+    distinct sample windows under the same completion record.
     """
-    groups = collector.weather_groups()
-    if not groups:
-        logger.warning('[assemble_weather] No prepared weather to assemble.')
+    key = (grid_point_sample_index, start, end)
+    batch_frames = collector.weather_groups().get(key)
+    if not batch_frames:
+        logger.warning(
+            '[assemble_weather] No prepared weather to assemble for %s.', key
+        )
         return
 
-    for (grid_point_sample_index, start, end), batch_frames in groups.items():
-        path = weather_partition_path(
-            start, end, grid_point_sample_index, grid_definition_version
-        )
-        frames: list[pd.DataFrame] = []
-        try:
-            frames.append(read_csv(prepared_fs, path))
-        except FileNotFoundError:
-            pass
-        frames.extend(batch_frames)
-        combined = _merge_prepared_frames(frames, ['latitude', 'longitude', 'time'])
-        write_csv(prepared_fs, combined, path)
+    path = weather_partition_path(
+        start, end, grid_point_sample_index, grid_definition_version
+    )
+    frames: list[pd.DataFrame] = []
+    try:
+        frames.append(read_csv(prepared_fs, path))
+    except FileNotFoundError:
+        pass
+    frames.extend(batch_frames)
+    combined = _merge_prepared_frames(frames, ['latitude', 'longitude', 'time'])
+    write_csv(prepared_fs, combined, path)
 
 
 def _find_pv_partition_for_week(

@@ -68,13 +68,18 @@ listed, read, or deleted. The backfill processes hundreds of thousands of
 units per run, for which the per-batch GCS round-trip does not scale.
 
 #### `assemble_weather`
-- **Input**: The collector's weather frames (weather-grid backfill only).
-- **Role**: Groups the frames by `(grid_point_sample_index, window)` and writes
-  one partition file per group, merging into any file already at that path,
-  deduplicating on `(latitude, longitude, time)` keeping the latest value,
-  and sorting. A weather window is produced complete by a single run, so the
-  file is named for its nominal extraction window — a stable identity that
-  keeps a re-transform updating one file rather than orphaning others.
+- **Input**: The collector's slice for one `(grid_point_sample_index, start,
+  end)` (weather-grid backfill only).
+- **Role**: Writes that slice as the partition file
+  `prepared/weather/weather_{start}_{end}_{gv}-{NN}.csv`, merging into any
+  file already at that path, deduplicating on `(latitude, longitude, time)`
+  keeping the latest value, and sorting. One `assemble_weather` task runs
+  per distinct `(sample, window)` — the planner emits one task each. This
+  is load-bearing: the resume filter pools `completed` task hashes across
+  every ledger ever written for the workflow, so a single bulk-drain task
+  hashed only on `(start, end)` would let one slice's completion mask every
+  other slice that shared those dates. Per-task slicing makes the hashes
+  disjoint, so each slice's completion is recorded independently.
 - **Output**: `prepared/weather/weather_{start}_{end}_{gv}-{NN}.csv`.
 
 #### `assemble_pv`

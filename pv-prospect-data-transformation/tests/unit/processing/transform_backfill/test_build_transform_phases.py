@@ -60,10 +60,11 @@ def test_grid_weather_input_emits_clean_prepare_assemble_weather() -> None:
     assert _env(prepare[0])['LOCATION'] == '50.49,-3.54'
 
 
-def test_grid_weather_clean_and_prepare_carry_the_grid_point_sample_index() -> None:
-    """GRID_POINT_SAMPLE_INDEX rides in the clean/prepare task env so
-    prepare_weather can group its prepared rows into one partition file;
-    assemble_weather drains the whole collector and carries no index."""
+def test_grid_weather_clean_prepare_and_assemble_carry_the_sample_index() -> None:
+    """GRID_POINT_SAMPLE_INDEX rides in every step's task env, including
+    assemble_weather: it identifies the (sample, window) slice each task
+    operates on, and is load-bearing for the assemble task hash so distinct
+    slices don't collide on a single completion record."""
     transform_input = TransformInput(
         DataSourceType.WEATHER,
         '2026-04-15',
@@ -78,7 +79,7 @@ def test_grid_weather_clean_and_prepare_carry_the_grid_point_sample_index() -> N
 
     assert _env(clean[0])['GRID_POINT_SAMPLE_INDEX'] == '7'
     assert _env(prepare[0])['GRID_POINT_SAMPLE_INDEX'] == '7'
-    assert 'GRID_POINT_SAMPLE_INDEX' not in _env(assemble[0])
+    assert _env(assemble[0])['GRID_POINT_SAMPLE_INDEX'] == '7'
 
 
 def test_pv_site_weather_input_emits_clean_weather_only() -> None:
@@ -200,7 +201,10 @@ def test_assemble_pv_deduped_per_system() -> None:
     assert {_env(t)['PV_SYSTEM_ID'] for t in assemble} == {'4708', '24667'}
 
 
-def test_assemble_weather_emitted_once_for_grid_weather() -> None:
+def test_assemble_weather_emitted_per_sample_window() -> None:
+    """One assemble_weather per distinct (sample, start, end) — distinct
+    pairs must have distinct task hashes so a completion for one doesn't
+    mask another in a later run's filter."""
     transform_inputs = [
         TransformInput(
             DataSourceType.WEATHER,
@@ -220,9 +224,47 @@ def test_assemble_weather_emitted_once_for_grid_weather() -> None:
 
     _, _, assemble = build_transform_phases(transform_inputs, _WORKFLOW, _RUN_DATE)
 
+    assert [_env(t)['TRANSFORM_STEP'] for t in assemble] == [
+        'assemble_weather',
+        'assemble_weather',
+    ]
+    assert {
+        (
+            _env(t)['GRID_POINT_SAMPLE_INDEX'],
+            _env(t)['START_DATE'],
+            _env(t)['END_DATE'],
+        )
+        for t in assemble
+    } == {('1', '2026-01-01', '2026-01-15'), ('2', '2026-02-01', '2026-02-15')}
+    assert all('LOCATION' not in _env(t) for t in assemble)
+    assert all('PV_SYSTEM_ID' not in _env(t) for t in assemble)
+
+
+def test_assemble_weather_deduped_per_sample_window() -> None:
+    """Two grid points sharing the same (sample, window) — different
+    locations of one sample file's same date window — collapse to one
+    assemble_weather task (one partition file is written for that slice)."""
+    transform_inputs = [
+        TransformInput(
+            DataSourceType.WEATHER,
+            '2026-01-01',
+            '2026-01-15',
+            location='50.10,-5.20',
+            grid_point_sample_index=3,
+        ),
+        TransformInput(
+            DataSourceType.WEATHER,
+            '2026-01-01',
+            '2026-01-15',
+            location='50.30,-5.00',
+            grid_point_sample_index=3,
+        ),
+    ]
+
+    _, _, assemble = build_transform_phases(transform_inputs, _WORKFLOW, _RUN_DATE)
+
     assert [_env(t)['TRANSFORM_STEP'] for t in assemble] == ['assemble_weather']
-    assert 'LOCATION' not in _env(assemble[0])
-    assert 'PV_SYSTEM_ID' not in _env(assemble[0])
+    assert _env(assemble[0])['GRID_POINT_SAMPLE_INDEX'] == '3'
 
 
 def test_assemble_weather_absent_when_only_pv_site_weather() -> None:

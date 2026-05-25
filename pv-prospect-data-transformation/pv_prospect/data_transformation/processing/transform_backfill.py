@@ -149,8 +149,12 @@ def build_transform_phases(
     date)`` space). A ``'pv'`` input and a grid-weather input also yield a
     prepare task; a PV-site-weather input (no ``grid_point_sample_index``)
     yields ``clean_weather`` only. Phase 2 emits one ``assemble_pv`` per
-    distinct ``pv_system_id`` and a single ``assemble_weather`` when any
-    grid-weather input is present.
+    distinct ``pv_system_id`` and one ``assemble_weather`` per distinct
+    ``(grid_point_sample_index, start_date, end_date)`` over grid-weather
+    inputs. Per-sample assemble is load-bearing for resume: the task hash
+    must be disjoint between sample-window pairs so a previously-completed
+    assemble for one (sample, window) doesn't filter out an unrelated one
+    in a later run.
 
     The phases run in order, every task in one finishing before the next.
     That ordering is load-bearing, and it hides a dependency: ``prepare_pv``
@@ -161,9 +165,13 @@ def build_transform_phases(
     ``run_prepare_pv`` reads the cleaned weather by path convention (see
     the package README's pipeline section).
 
-    An assemble task ignores its date window but carries the first-seen
-    relevant input's window so its task hash is deterministic. The
-    returned phases are unfiltered — the caller applies
+    An ``assemble_pv`` task carries one of its system's input windows
+    arbitrarily — assemble_pv ignores the window and processes the
+    system's full prepared corpus. An ``assemble_weather`` task carries
+    its specific ``(sample, start, end)``: the assembled partition file
+    is named after that window, and the task hash includes the sample
+    index, so distinct slices don't collide. The returned phases are
+    unfiltered — the caller applies
     :meth:`WorkflowOrchestrator.filter_remaining_tasks` if it wants
     self-filtering (the daily transform does; the backfill does not).
     """
@@ -185,7 +193,7 @@ def build_transform_phases(
     clean: list[list[dict[str, str]]] = []
     prepare: list[list[dict[str, str]]] = []
     assemble_pv_inputs: dict[int, TransformInput] = {}
-    first_weather_input: TransformInput | None = None
+    assemble_weather_inputs: dict[tuple[int, str, str | None], TransformInput] = {}
     for transform_input in transform_inputs:
         if transform_input.data_source_type == DataSourceType.PV:
             clean.append(task(transform_input, 'clean_pv'))
@@ -200,8 +208,14 @@ def build_transform_phases(
             # weather model: cleaned, prepared and assembled.
             clean.append(task(transform_input, 'clean_weather'))
             prepare.append(task(transform_input, 'prepare_weather'))
-            if first_weather_input is None:
-                first_weather_input = transform_input
+            assemble_weather_inputs.setdefault(
+                (
+                    transform_input.grid_point_sample_index,
+                    transform_input.start_date,
+                    transform_input.end_date,
+                ),
+                transform_input,
+            )
         else:
             # PV-site weather: cleaned only. Its cleaned output is the join
             # input prepare_pv reads — an implicit edge (see the docstring).
@@ -211,14 +225,15 @@ def build_transform_phases(
         task(transform_input, 'assemble_pv')
         for transform_input in assemble_pv_inputs.values()
     ]
-    if first_weather_input is not None:
+    for transform_input in assemble_weather_inputs.values():
         assemble.append(
             _transform_task_env(
                 'assemble_weather',
-                first_weather_input.start_date,
-                first_weather_input.end_date,
+                transform_input.start_date,
+                transform_input.end_date,
                 workflow_name,
                 run_date,
+                grid_point_sample_index=transform_input.grid_point_sample_index,
             )
         )
 
