@@ -116,6 +116,41 @@ def test_flush_path_includes_run_label() -> None:
     assert '2025-06-24/2025-06-24-110000-run1-wf.jsonl' in ledger_fs._files
 
 
+def test_flush_per_task_writes_to_scratch_path() -> None:
+    """The per-task flush mode writes one file containing every buffered
+    entry to the scratch directory, named for the *task*'s hash. The
+    workflow-end ``consolidate_ledger`` step then merges this file with
+    peer tasks' into one daily consolidated file."""
+    collector = LedgerCollector('wf', '2025-06-24')
+    collector.record(_entry('2025-06-24T10:30:15+00:00', 'site-a', 'completed'))
+    collector.record(_entry('2025-06-24T10:30:16+00:00', 'site-b', 'failed', 'boom'))
+
+    ledger_fs = FakeFileSystem()
+    collector.flush_per_task(ledger_fs, task_hash='batch-1')
+
+    entries = _read_entries(ledger_fs, '2025-06-24/wf/batch-1.jsonl')
+    assert [e['task_hash'] for e in entries] == ['site-a', 'site-b']
+
+
+def test_flush_per_task_path_includes_run_label() -> None:
+    collector = LedgerCollector('wf', '2025-06-24', run_label='run1')
+    collector.record(_entry('2025-06-24T10:30:15+00:00', 'site-a', 'completed'))
+
+    ledger_fs = FakeFileSystem()
+    collector.flush_per_task(ledger_fs, task_hash='batch-1')
+
+    assert '2025-06-24/wf/run1/batch-1.jsonl' in ledger_fs._files
+
+
+def test_flush_per_task_is_noop_when_nothing_recorded() -> None:
+    collector = LedgerCollector('wf', '2025-06-24')
+
+    ledger_fs = FakeFileSystem()
+    collector.flush_per_task(ledger_fs, task_hash='batch-1')
+
+    assert ledger_fs._files == {}
+
+
 def test_concurrent_record_buffers_every_entry() -> None:
     collector = LedgerCollector('wf', '2025-06-24')
 

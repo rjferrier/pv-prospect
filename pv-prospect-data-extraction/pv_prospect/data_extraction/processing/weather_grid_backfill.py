@@ -34,6 +34,7 @@ from pv_prospect.etl import (
     BackfillScope,
     build_env_list,
     default_window_days,
+    inject_task_hash,
 )
 from pv_prospect.etl.storage import FileSystem
 
@@ -210,19 +211,24 @@ def batch_to_task_env(
     ``GRID_POINT_SAMPLE_INDEX`` so the container can record it in each
     per-site ledger descriptor; it does not drive resolution
     (``LOCATIONS`` does) and is excluded from the per-site task hash.
-    Per-site ``TASK_HASH`` values are computed inside the container;
-    nothing is injected here.
+
+    The injected ``TASK_HASH`` here identifies the *whole batch* — the
+    container uses it as the filename for the one per-task scratch
+    ledger/log file it flushes at end of run. Per-*site* hashes recorded
+    in each ledger entry are still computed inside the container.
     """
-    return build_env_list(
-        JOB_TYPE='extract_and_load',
-        DATA_SOURCE=data_source,
-        START_DATE=batch.start_date.isoformat(),
-        END_DATE=batch.end_date.isoformat(),
-        LOCATIONS=json.dumps(locations),
-        GRID_POINT_SAMPLE_INDEX=str(batch.grid_point_sample_index),
-        DRY_RUN=dry_run,
-        WORKFLOW_NAME=WORKFLOW_NAME,
-        RUN_DATE=run_date,
+    return inject_task_hash(
+        build_env_list(
+            JOB_TYPE='extract_and_load',
+            DATA_SOURCE=data_source,
+            START_DATE=batch.start_date.isoformat(),
+            END_DATE=batch.end_date.isoformat(),
+            LOCATIONS=json.dumps(locations),
+            GRID_POINT_SAMPLE_INDEX=str(batch.grid_point_sample_index),
+            DRY_RUN=dry_run,
+            WORKFLOW_NAME=WORKFLOW_NAME,
+            RUN_DATE=run_date,
+        )
     )
 
 

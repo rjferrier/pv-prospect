@@ -209,6 +209,9 @@ class LogCollector:
         to the path :func:`consolidated_log_path` returns — the same path
         :func:`consolidate_logs` produces. A no-op when nothing was
         recorded.
+
+        Use this mode when the workflow runs as a single Cloud Run task
+        for the whole day (e.g. the transform backfill).
         """
         with self._lock:
             lines = sorted(self._lines)
@@ -224,3 +227,35 @@ class LogCollector:
         )
         log_fs.write_text(path, '\n'.join(lines) + '\n')
         logger.info('Consolidated %d log entries into %s', len(lines), path)
+
+    def flush_per_task(self, log_fs: FileSystem, task_hash: str) -> None:
+        """Write the buffered lines as one per-task scratch log file.
+
+        Lines are sorted (each begins with an ISO timestamp) and written
+        to ``<run_date>/<workflow_name>[/<run_label>]/<task_hash>.txt`` —
+        the same scratch directory :func:`consolidate_logs` reads — so
+        the end-of-workflow consolidation step merges this task's file
+        with peer tasks' into one daily consolidated file. A no-op when
+        nothing was recorded.
+
+        Use this mode when the workflow dispatches multiple Cloud Run
+        tasks per day (e.g. the extraction backfills' batched
+        dispatches): each task buffers its writes in memory and writes
+        one file instead of one per write.
+        """
+        with self._lock:
+            lines = sorted(self._lines)
+        if not lines:
+            logger.info(
+                'No log entries to flush for %s/%s',
+                self._run_date,
+                self._workflow_name,
+            )
+            return
+        path = (
+            f'{self._run_date}/'
+            f'{log_scratch_subprefix(self._workflow_name, self._run_label)}/'
+            f'{task_hash}.txt'
+        )
+        log_fs.write_text(path, '\n'.join(lines) + '\n')
+        logger.info('Wrote %d log entries to per-task file %s', len(lines), path)

@@ -61,6 +61,44 @@ def test_flush_path_includes_run_label() -> None:
     assert '2025-06-24/2025-06-24-110000-run1-wf.txt' in log_fs._files
 
 
+def test_flush_per_task_writes_to_scratch_path() -> None:
+    """The per-task flush mode writes one file containing every buffered
+    line to the scratch directory, named for the *task*'s hash. The
+    workflow-end ``consolidate_logs`` step then merges this file with
+    peer tasks' into one daily consolidated file."""
+    collector = LogCollector('wf', '2025-06-24')
+    collector.record('2025-06-24T10:30:15+00:00 CREATED cleaned/a.csv')
+    collector.record('2025-06-24T10:30:16+00:00 CREATED cleaned/b.csv')
+
+    log_fs = FakeFileSystem()
+    collector.flush_per_task(log_fs, task_hash='batch-1')
+
+    content = log_fs.read_text('2025-06-24/wf/batch-1.txt')
+    assert content.splitlines() == [
+        '2025-06-24T10:30:15+00:00 CREATED cleaned/a.csv',
+        '2025-06-24T10:30:16+00:00 CREATED cleaned/b.csv',
+    ]
+
+
+def test_flush_per_task_path_includes_run_label() -> None:
+    collector = LogCollector('wf', '2025-06-24', run_label='run1')
+    collector.record('2025-06-24T10:30:15+00:00 CREATED cleaned/a.csv')
+
+    log_fs = FakeFileSystem()
+    collector.flush_per_task(log_fs, task_hash='batch-1')
+
+    assert '2025-06-24/wf/run1/batch-1.txt' in log_fs._files
+
+
+def test_flush_per_task_is_noop_when_nothing_recorded() -> None:
+    collector = LogCollector('wf', '2025-06-24')
+
+    log_fs = FakeFileSystem()
+    collector.flush_per_task(log_fs, task_hash='batch-1')
+
+    assert log_fs._files == {}
+
+
 def test_concurrent_record_buffers_every_line() -> None:
     collector = LogCollector('wf', '2025-06-24')
 

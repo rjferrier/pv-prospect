@@ -13,10 +13,11 @@ and is shared with the transformation pipeline. This module is the
 extraction-side wrapper that pins the workflow name and the
 :class:`BackfillScope`, and additionally enumerates the per-site PV and
 weather tasks into the orchestrator ``phases`` shape so the Cloud
-Workflow dispatcher gets an env list for every task. Per-site task
-identity is computed inside the container by
-:func:`pv_prospect.etl.compute_task_hash` against each task's env, so
-no ``TASK_HASH`` is pre-injected here.
+Workflow dispatcher gets an env list for every task. A per-task
+``TASK_HASH`` is pre-injected so each container has a stable identity
+for naming its per-task scratch ledger/log file at flush time; the
+per-*site* hashes recorded in each ledger entry are still computed
+inside the container.
 
 The 28-day window is the largest round-week multiple compatible with the
 PVOutput rate limit. PVOutput's ``getstatus.jsp`` endpoint is single-date
@@ -35,6 +36,7 @@ from pv_prospect.etl import (
     build_env_list,
     commit_backfill,
     default_window_days,
+    inject_task_hash,
     plan_backfill,
 )
 from pv_prospect.etl.storage import FileSystem
@@ -98,23 +100,27 @@ def build_phases(
     OpenMeteo's limits are generous enough.
     """
     pv_phase = [
-        _pv_task_env(
-            sid,
-            pv_data_source,
-            plan.start_date,
-            plan.end_date,
-            dry_run,
-            run_date,
+        inject_task_hash(
+            _pv_task_env(
+                sid,
+                pv_data_source,
+                plan.start_date,
+                plan.end_date,
+                dry_run,
+                run_date,
+            )
         )
         for sid in pv_system_ids
     ]
     weather_phase = [
-        _weather_task_env(
-            sid,
-            weather_data_source,
-            plan.start_date,
-            plan.end_date,
-            run_date,
+        inject_task_hash(
+            _weather_task_env(
+                sid,
+                weather_data_source,
+                plan.start_date,
+                plan.end_date,
+                run_date,
+            )
         )
         for sid in pv_system_ids
     ]

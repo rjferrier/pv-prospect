@@ -92,17 +92,16 @@ from pv_prospect.etl import (
     WorkflowOrchestrator,
     WorkflowTerminatingError,
     build_date_range,
+    get_logging_filesystem,
+    resolve_run_date,
+    run_consolidate_logs,
     run_entrypoint,
 )
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
-    AnyStorageConfig,
     FileSystem,
     LedgerCollector,
     LogCollector,
-    LoggingFileSystem,
-    consolidate_ledger,
-    consolidate_logs,
     get_filesystem,
 )
 
@@ -126,58 +125,6 @@ def _load_resources(resources_fs: FileSystem) -> None:
         build_pv_site_repo(extractor.read_file('pv_sites.csv'))
 
 
-def _get_logging_filesystem(
-    storage_config: 'AnyStorageConfig',
-    log_storage: 'AnyStorageConfig | None',
-    workflow_name: str,
-    run_date: str,
-    label: str,
-    run_label: str,
-    log_collector: LogCollector | None = None,
-) -> FileSystem:
-    fs: FileSystem = get_filesystem(storage_config)
-    if workflow_name and log_storage:
-        log_fs = get_filesystem(log_storage)
-        return LoggingFileSystem(
-            fs,
-            log_fs,
-            workflow_name,
-            run_date,
-            label,
-            run_label=run_label,
-            log_collector=log_collector,
-        )
-    logger.warning(
-        'Write-logging disabled for %s (no WORKFLOW_NAME or log_storage)', label
-    )
-    return fs
-
-
-def _run_consolidate_logs(config: DataTransformationConfig, run_date: str) -> None:
-    workflow_name = os.environ.get('WORKFLOW_NAME', '')
-    if not workflow_name:
-        logger.warning('consolidate_logs: WORKFLOW_NAME not configured')
-        return
-    run_label = os.environ.get('RUN_LABEL', '')
-    run_date_obj = date.fromisoformat(run_date)
-    if config.log_storage:
-        log_fs = get_filesystem(config.log_storage)
-        consolidate_logs(log_fs, workflow_name, run_date_obj, run_label=run_label)
-    if config.ledger_storage:
-        ledger_fs = get_filesystem(config.ledger_storage)
-        consolidate_ledger(ledger_fs, workflow_name, run_date_obj, run_label=run_label)
-
-
-def _resolve_run_date() -> str:
-    """Return the workflow's UTC trigger date.
-
-    Read from ``RUN_DATE`` (set once by the Cloud Workflow ``init`` step
-    and propagated to every task); fall back to ``date.today()`` for
-    local one-off invocations.
-    """
-    return os.environ.get('RUN_DATE') or date.today().isoformat()
-
-
 def _required(fs: FileSystem | None, name: str) -> FileSystem:
     if fs is None:
         raise WorkflowTerminatingError(
@@ -188,7 +135,7 @@ def _required(fs: FileSystem | None, name: str) -> FileSystem:
 
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
-    run_date = _resolve_run_date()
+    run_date = resolve_run_date()
 
     config = get_config(
         DataTransformationConfig,
@@ -221,7 +168,13 @@ def main() -> None:
         )
         return
     elif job_type == 'consolidate_logs':
-        _run_consolidate_logs(config, run_date)
+        run_consolidate_logs(
+            config.log_storage,
+            config.ledger_storage,
+            os.environ.get('WORKFLOW_NAME', ''),
+            run_date,
+            os.environ.get('RUN_LABEL', ''),
+        )
         return
 
     # Per-task path: one Cloud Run task per transform unit. This shape is
@@ -283,7 +236,7 @@ def _build_runtime(
 ) -> _Runtime:
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
-    cleaned_fs = _get_logging_filesystem(
+    cleaned_fs = get_logging_filesystem(
         config.staged_cleaned_data_storage,
         config.log_storage,
         workflow_name,
@@ -292,7 +245,7 @@ def _build_runtime(
         run_label,
         log_collector,
     )
-    batches_fs = _get_logging_filesystem(
+    batches_fs = get_logging_filesystem(
         config.staged_prepared_batches_data_storage,
         config.log_storage,
         workflow_name,
@@ -301,7 +254,7 @@ def _build_runtime(
         run_label,
         log_collector,
     )
-    prepared_fs = _get_logging_filesystem(
+    prepared_fs = get_logging_filesystem(
         config.staged_prepared_data_storage,
         config.log_storage,
         workflow_name,

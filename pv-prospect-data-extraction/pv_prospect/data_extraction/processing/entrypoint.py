@@ -94,15 +94,17 @@ from pv_prospect.etl import (
     build_date_range,
     build_env_list,
     compute_task_hash,
+    get_logging_filesystem,
+    inject_task_hash,
+    resolve_run_date,
+    run_consolidate_logs,
     run_entrypoint,
 )
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
-    AnyStorageConfig,
     FileSystem,
-    LoggingFileSystem,
-    consolidate_ledger,
-    consolidate_logs,
+    LedgerCollector,
+    LogCollector,
     get_filesystem,
 )
 
@@ -234,11 +236,10 @@ def _extract_one_site(
 
 
 def _run_extract_and_load(
-    staging_fs: FileSystem,
-    resources_fs: FileSystem,
+    config: DataExtractionConfig,
+    data_source: DataSource,
     ledger_fs: FileSystem | None,
     run_date: str,
-    data_source: DataSource,
 ) -> None:
     """Run ``extract_and_load`` for every site this task is responsible for.
 
@@ -250,6 +251,74 @@ def _run_extract_and_load(
     still exits 0 — the workflow advances its checkpoint regardless of
     per-site outcomes. ``WorkflowTerminatingError`` still propagates to
     abort the workflow before the cursor commit.
+
+    Per-site outcomes and write-audit log entries are buffered in memory
+    via :class:`LedgerCollector` / :class:`LogCollector` and flushed as
+    one consolidated per-task file each at end of run (or in ``finally``
+    on any exception that wasn't site-local). This sidesteps the
+    per-site GCS file fan-out that previously caused the
+    end-of-workflow ``consolidate_logs`` step to time out at backfill
+    scale. The handful of per-task files left behind is what the
+    workflow's terminal consolidation step then merges into the daily
+    consolidated file.
+    """
+    workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
+    run_label = os.environ.get('RUN_LABEL', '')
+    task_hash = os.environ.get('TASK_HASH', '')
+    if not task_hash:
+        raise WorkflowTerminatingError(
+            'TASK_HASH env var is required for extract_and_load '
+            '(should be injected by the planner)'
+        )
+
+    ledger_collector = LedgerCollector(workflow_name, run_date, run_label)
+    log_collector = LogCollector(workflow_name, run_date, run_label)
+    orchestrator = WorkflowOrchestrator(
+        workflow_name,
+        run_date,
+        ledger_fs=ledger_fs,
+        run_label=run_label,
+        ledger_collector=ledger_collector,
+    )
+    staging_fs = get_logging_filesystem(
+        config.staged_raw_data_storage,
+        config.log_storage,
+        workflow_name,
+        run_date,
+        'raw',
+        run_label,
+        log_collector,
+    )
+
+    try:
+        _extract_into_collectors(
+            config, data_source, orchestrator, staging_fs, workflow_name, run_date
+        )
+    finally:
+        # Flush whatever was buffered, even on early exit. A
+        # ``WorkflowTerminatingError`` skips the cursor commit upstream,
+        # so the marker stays put; the partial outcomes we preserve here
+        # still let tomorrow's run skip the sites we already completed.
+        if ledger_fs is not None:
+            ledger_collector.flush_per_task(ledger_fs, task_hash)
+        if config.log_storage is not None:
+            log_collector.flush_per_task(get_filesystem(config.log_storage), task_hash)
+
+
+def _extract_into_collectors(
+    config: DataExtractionConfig,
+    data_source: DataSource,
+    orchestrator: WorkflowOrchestrator,
+    staging_fs: FileSystem,
+    workflow_name: str,
+    run_date: str,
+) -> None:
+    """Per-site fetch loop for one ``extract_and_load`` Cloud Run task.
+
+    Records each site's outcome through *orchestrator* (which routes to
+    the in-memory ledger collector). Exists as a separate function so
+    the caller's ``finally`` can flush the collectors without the work
+    body's setup and per-site loop sitting inside a long ``try`` block.
     """
     dry_run = _env_bool('DRY_RUN')
     split_by = os.environ.get('SPLIT_BY')
@@ -264,12 +333,7 @@ def _run_extract_and_load(
     except DegenerateDateRange as e:
         raise WorkflowTerminatingError(str(e)) from e
 
-    workflow_name = os.environ.get('WORKFLOW_NAME', 'pv-prospect-extract')
-    run_label = os.environ.get('RUN_LABEL', '')
-    orchestrator = WorkflowOrchestrator(
-        workflow_name, run_date, ledger_fs=ledger_fs, run_label=run_label
-    )
-
+    resources_fs = get_filesystem(config.resources_storage)
     resources_extractor = Extractor(resources_fs)
     build_pv_site_repo(resources_extractor.read_file(core.PV_SITES_CSV_FILE))
     sites = _resolve_sites(data_source, resources_fs)
@@ -318,10 +382,11 @@ def _run_extract_and_load(
         }
         if end_date_str:
             descriptor['end_date'] = end_date_str
-        # GRID_POINT_SAMPLE_INDEX is set only by the weather-grid backfill.
-        # It rides in the descriptor (not the task hash) so the transform
-        # can group prepared rows into per-(sample, window) files. Other
-        # workflows leave it unset and their descriptors omit the key.
+        # GRID_POINT_SAMPLE_INDEX is set only by the weather-grid
+        # backfill. It rides in the descriptor (not the task hash) so
+        # the transform can group prepared rows into per-(sample,
+        # window) files. Other workflows leave it unset and their
+        # descriptors omit the key.
         if grid_point_sample_index is not None:
             descriptor['grid_point_sample_index'] = str(grid_point_sample_index)
 
@@ -382,32 +447,36 @@ def _run_plan_extract(
     for pv_id in pv_system_ids:
         for ds in pv_sources:
             all_tasks.append(
-                build_env_list(
-                    JOB_TYPE='extract_and_load',
-                    DATA_SOURCE=ds,
-                    PV_SYSTEM_ID=str(pv_id),
-                    DATE=start_date_str,
-                    START_DATE=start_date_str,
-                    DRY_RUN=dry_run,
-                    SPLIT_BY=split_by,
-                    WORKFLOW_NAME=workflow_name,
-                    RUN_DATE=run_date,
+                inject_task_hash(
+                    build_env_list(
+                        JOB_TYPE='extract_and_load',
+                        DATA_SOURCE=ds,
+                        PV_SYSTEM_ID=str(pv_id),
+                        DATE=start_date_str,
+                        START_DATE=start_date_str,
+                        DRY_RUN=dry_run,
+                        SPLIT_BY=split_by,
+                        WORKFLOW_NAME=workflow_name,
+                        RUN_DATE=run_date,
+                    )
                 )
             )
 
     for loc in locations:
         for ds in weather_sources:
             all_tasks.append(
-                build_env_list(
-                    JOB_TYPE='extract_and_load',
-                    DATA_SOURCE=ds,
-                    LOCATION=loc,
-                    DATE=start_date_str,
-                    START_DATE=start_date_str,
-                    DRY_RUN=dry_run,
-                    SPLIT_BY=split_by,
-                    WORKFLOW_NAME=workflow_name,
-                    RUN_DATE=run_date,
+                inject_task_hash(
+                    build_env_list(
+                        JOB_TYPE='extract_and_load',
+                        DATA_SOURCE=ds,
+                        LOCATION=loc,
+                        DATE=start_date_str,
+                        START_DATE=start_date_str,
+                        DRY_RUN=dry_run,
+                        SPLIT_BY=split_by,
+                        WORKFLOW_NAME=workflow_name,
+                        RUN_DATE=run_date,
+                    )
                 )
             )
 
@@ -495,53 +564,11 @@ def _run_commit_pv_site_backfill(
     logger.info('commit_pv_site_backfill: advanced cursor to %s', cursor)
 
 
-def _get_logging_filesystem(
-    storage_config: AnyStorageConfig,
-    log_storage: AnyStorageConfig | None,
-    workflow_name: str,
-    run_date: str,
-    label: str,
-    run_label: str,
-) -> FileSystem:
-    fs: FileSystem = get_filesystem(storage_config)
-    if workflow_name and log_storage:
-        log_fs = get_filesystem(log_storage)
-        return LoggingFileSystem(
-            fs, log_fs, workflow_name, run_date, label, run_label=run_label
-        )
-    return fs
-
-
-def _run_consolidate_logs(config: DataExtractionConfig, run_date: str) -> None:
-    workflow_name = os.environ.get('WORKFLOW_NAME', '')
-    if not workflow_name:
-        logger.warning('consolidate_logs: WORKFLOW_NAME not configured')
-        return
-    run_label = os.environ.get('RUN_LABEL', '')
-    run_date_obj = date.fromisoformat(run_date)
-    if config.log_storage:
-        log_fs = get_filesystem(config.log_storage)
-        consolidate_logs(log_fs, workflow_name, run_date_obj, run_label=run_label)
-    if config.ledger_storage:
-        ledger_fs = get_filesystem(config.ledger_storage)
-        consolidate_ledger(ledger_fs, workflow_name, run_date_obj, run_label=run_label)
-
-
-def _resolve_run_date() -> str:
-    """Return the workflow's UTC trigger date.
-
-    Read from ``RUN_DATE`` (set once by the Cloud Workflow ``init`` step
-    and propagated to every task); fall back to ``date.today()`` for
-    local one-off invocations.
-    """
-    return os.environ.get('RUN_DATE') or date.today().isoformat()
-
-
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
     workflow_name = os.environ.get('WORKFLOW_NAME', '')
     run_label = os.environ.get('RUN_LABEL', '')
-    run_date = _resolve_run_date()
+    run_date = resolve_run_date()
     config = get_config(
         DataExtractionConfig,
         base_config_dirs=[
@@ -557,15 +584,6 @@ def main() -> None:
     )
     data_source = config.data_sources.get_data_source(data_source_type)
 
-    # Cloud Run always uses GCS — resolve storage backends once.
-    staging_fs = _get_logging_filesystem(
-        config.staged_raw_data_storage,
-        config.log_storage,
-        workflow_name,
-        run_date,
-        'raw',
-        run_label,
-    )
     resources_fs = get_filesystem(config.resources_storage)
     manifests_fs = (
         get_filesystem(config.manifests_storage) if config.manifests_storage else None
@@ -576,15 +594,23 @@ def main() -> None:
     ledger_fs = get_filesystem(config.ledger_storage) if config.ledger_storage else None
 
     if job_type == 'preprocess':
+        # Preprocess is a one-off prep step with negligible write volume;
+        # no collector needed, just a plain write-logging filesystem.
+        staging_fs = get_logging_filesystem(
+            config.staged_raw_data_storage,
+            config.log_storage,
+            workflow_name,
+            run_date,
+            'raw',
+            run_label,
+        )
         _run_preprocess(staging_fs, data_source)
     elif job_type == 'plan_extract':
         _run_plan_extract(
             run_date, _required(manifests_fs, 'manifests_storage'), ledger_fs
         )
     elif job_type == 'extract_and_load':
-        _run_extract_and_load(
-            staging_fs, resources_fs, ledger_fs, run_date, data_source
-        )
+        _run_extract_and_load(config, data_source, ledger_fs, run_date)
     elif job_type == 'plan_weather_grid_backfill':
         _run_plan_weather_grid_backfill(
             run_date,
@@ -611,7 +637,13 @@ def main() -> None:
             _required(manifests_fs, 'manifests_storage'),
         )
     elif job_type == 'consolidate_logs':
-        _run_consolidate_logs(config, run_date)
+        run_consolidate_logs(
+            config.log_storage,
+            config.ledger_storage,
+            workflow_name,
+            run_date,
+            run_label,
+        )
     else:
         raise WorkflowTerminatingError(f'unknown JOB_TYPE={job_type!r}')
 

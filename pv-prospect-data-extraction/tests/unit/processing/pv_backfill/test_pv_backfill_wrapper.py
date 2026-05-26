@@ -142,10 +142,11 @@ def _env_value(task_env: list[dict[str, str]], name: str) -> str | None:
     return next((e['value'] for e in task_env if e['name'] == name), None)
 
 
-def test_no_task_carries_a_pre_injected_task_hash() -> None:
-    """Per-site task identity is computed inside the container via
-    ``compute_task_hash`` against the env, not injected at plan time.
-    Regression guard for the predictable-cadence design."""
+def test_every_task_carries_a_pre_injected_task_hash() -> None:
+    """Each task env carries a ``TASK_HASH`` so the container has a
+    stable identity for naming its per-task scratch ledger/log file at
+    flush time. Per-*site* hashes recorded in each ledger entry are
+    still computed inside the container."""
     cursors_fs = _FakeFileSystem()
     manifests_fs = _FakeFileSystem()
 
@@ -154,7 +155,8 @@ def test_no_task_carries_a_pre_injected_task_hash() -> None:
 
     for phase in data['phases']:
         for task in phase:
-            assert _env_value(task, 'TASK_HASH') is None
+            task_hash = _env_value(task, 'TASK_HASH')
+            assert task_hash is not None and len(task_hash) == 64
 
 
 def test_pv_task_carries_pv_data_source() -> None:

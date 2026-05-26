@@ -34,6 +34,11 @@ from .orchestration import (
     inject_task_hash,
 )
 from .resources import get_config_dir
+from .runtime import (
+    get_logging_filesystem,
+    resolve_run_date,
+    run_consolidate_logs,
+)
 
 __all__ = [
     'BackfillCursor',
@@ -58,12 +63,15 @@ __all__ = [
     'deserialize_cursor',
     'deserialize_plan',
     'get_config_dir',
+    'get_logging_filesystem',
     'initial_backfill_cursor',
     'inject_task_hash',
     'load_cursor',
     'manifest_filename',
     'parse_date',
     'plan_backfill',
+    'resolve_run_date',
+    'run_consolidate_logs',
     'run_entrypoint',
     'save_cursor',
     'serialize_cursor',

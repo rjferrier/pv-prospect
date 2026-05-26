@@ -133,33 +133,41 @@ for transformation). This keeps the ledger queryable by domain identifiers
 without relying on parsing back the task hash.
 
 During a run, entries live at
-`<ledger_storage>/<run_date>/<workflow>/<task_hash>.jsonl` — one file per task,
-partitioned by hash so concurrent tasks never write to the same file. A task
-that fails and is retried within the same run accumulates multiple entries in
-its file. The end-of-workflow `consolidate_logs` job calls
-`consolidate_ledger`, which merges per-task files into a single
-`<ledger_storage>/<run_date>/<run_date>-<HHMMSS>-<workflow>.jsonl` sorted by
-`recorded_at` and deletes the originals.
+`<ledger_storage>/<run_date>/<workflow>/<task_hash>.jsonl` — one file per
+Cloud Run *task*, named for the per-task `TASK_HASH` the planner injects.
+A task whose handler iterates many sub-items (e.g. the weather-grid
+backfill batch container, processing ~1,330 grid points in a single
+process) buffers every sub-item outcome in an in-memory `LedgerCollector`
+and writes the file as a single end-of-task flush — one file per task,
+not one per sub-item. The end-of-workflow `consolidate_logs` job calls
+`consolidate_ledger`, which merges these per-task files into a single
+`<ledger_storage>/<run_date>/<run_date>-<HHMMSS>-<workflow>.jsonl` sorted
+by `recorded_at` and deletes the originals.
 
-This per-task fan-out exists because a *distributed* workflow's tasks are
-separate processes that can only safely record an outcome to a file of their
-own. A *single-process* workflow — the transformation backfill — instead passes
-a `LedgerCollector` (`pv_prospect.etl.storage.ledger`) to the orchestrator:
-`record_outcome` buffers each entry in a thread-safe in-memory list, and a
-single end-of-run `flush` writes the consolidated
-`<run_date>-<HHMMSS>-<workflow>.jsonl` directly. No per-task files are created,
-so there is nothing for `consolidate_ledger` to merge — which avoids re-reading
-tens of thousands of tiny objects one GCS round-trip at a time, an O(N) step
-that does not fit a Cloud Run timeout at backfill scale.
+A *single-process* workflow that runs the whole day's work as one Cloud
+Run task — the transformation backfill — skips the scratch step
+entirely: it passes a `LedgerCollector` to the orchestrator and calls
+`flush(ledger_fs)`, which writes the consolidated
+`<run_date>-<HHMMSS>-<workflow>.jsonl` directly. Either way, the
+in-memory collector is what prevents the O(N) GCS round-trip cost that
+unbounded per-sub-item fan-out would force. Two flush modes on the same
+collector accommodate the two workflow shapes:
+
+| Mode | Caller | Output path |
+|---|---|---|
+| `flush(ledger_fs)` | one Cloud Run task per day (transform backfill) | consolidated `<date>-<HHMMSS>-<workflow>.jsonl` |
+| `flush_per_task(ledger_fs, task_hash)` | many Cloud Run tasks per day (daily extract, extract backfills) | scratch `<date>/<workflow>/<task_hash>.jsonl` (merged by `consolidate_ledger`) |
 
 `filter_remaining_tasks()` consults the ledger and skips any task whose hash
 appears with `status='completed'`. Task identity is computed by
-`compute_task_hash(env)` over each task's env at filter time, so neither the
-planner nor the container needs to pre-inject a `TASK_HASH` env entry.
-`filter_remaining_tasks` scans:
+`compute_task_hash(env)` over each task's env at filter time; the planner
+also pre-injects the result as `TASK_HASH` in each env so the container
+can name its per-task scratch file at flush time. `filter_remaining_tasks`
+scans:
 
 1. The current run's per-task files under `<run_date>/<workflow>/` — skipped
-   when the orchestrator uses a `LedgerCollector`, which writes none.
+   when the orchestrator uses a `LedgerCollector`, which writes none until
+   the end-of-task flush.
 2. Every consolidated ledger file ever produced for this workflow
    (`<*>/<*>-*-<workflow>.jsonl`), to preserve cross-day resume.
 
@@ -199,17 +207,17 @@ transform cases the goal is the same: skip units already recorded as
 ### Write-Audit Logs
 
 `LoggingFileSystem` decorates the staged data filesystems and records a
-one-line breadcrumb at
-`tracking/logs/<run_date>/<workflow>/<HHMMSSffffff>.txt` for every write
-(content: ISO timestamp + `CREATED <label>/<path>`). `consolidate_logs`
-merges these into a single `<run_date>-<HHMMSS>-<workflow>.txt` at end of run.
+one-line breadcrumb for every write (content: ISO timestamp +
+`CREATED <label>/<path>`). Where breadcrumbs land mirrors the ledger
+arrangement above:
 
-As with the ledger, this per-write fan-out is the *distributed*-workflow path.
-A single-process workflow gives each `LoggingFileSystem` a shared in-memory
-`LogCollector` (`pv_prospect.etl.storage.logging_fs`); breadcrumbs are buffered
-and a single end-of-run `flush` writes the consolidated
-`<run_date>-<HHMMSS>-<workflow>.txt` — no per-write files, no consolidation
-scan.
+- Each Cloud Run task gives its `LoggingFileSystem` a shared in-memory
+  `LogCollector`; breadcrumbs are buffered and the task flushes one file
+  at end of run (`flush_per_task` for many-tasks-per-day workflows or
+  `flush` for the single-task-per-day transform backfill).
+- The end-of-workflow `consolidate_logs` job merges the resulting
+  per-task files at `<run_date>/<workflow>/<task_hash>.txt` into a
+  single `<run_date>-<HHMMSS>-<workflow>.txt`.
 
 This is independent from the JSONL outcome ledger above: write-audit logs
 record *file writes*, the ledger records *task outcomes*.
@@ -251,12 +259,13 @@ use yet another pattern — see [Transformation Backfills](#transformation-backf
    `tracking/manifests/<run_date>/<workflow>.json` containing the date
    window, the **next cursor** value, and a `phases` list in the same shape
    the daily-extract orchestrator manifest uses — one `extract_and_load`
-   task env per dispatched batch. Task
-   identity is computed inside each container via `compute_task_hash`, so
-   no `TASK_HASH` is pre-injected. For the weather-grid backfill, each
-   batch env carries a `LOCATIONS` JSON array of grid-point lat,lon
-   strings; the container's per-site loop records one ledger entry per
-   `(site, window)` pair.
+   task env per dispatched batch, each carrying a pre-injected `TASK_HASH`
+   so the container has a stable identity for its end-of-task scratch
+   file. For the weather-grid backfill, each batch env carries a
+   `LOCATIONS` JSON array of grid-point lat,lon strings; the container's
+   per-site loop records one ledger entry per `(site, window)` pair into
+   an in-memory `LedgerCollector` and writes all of them as one
+   per-task scratch file at end of batch.
 2. **Dispatch** — Cloud Workflow iterates `phases` and dispatches each task
    with `env: $${task_env}`. The extract-side backfills additionally maintain
    a workflow-level **position checkpoint** at

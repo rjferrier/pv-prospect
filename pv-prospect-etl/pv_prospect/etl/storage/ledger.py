@@ -179,6 +179,11 @@ class LedgerCollector:
         :func:`consolidate_ledger` produces — so
         :func:`list_consolidated_ledgers` discovers it identically. A
         no-op when nothing was recorded.
+
+        Use this mode when the workflow runs as a single Cloud Run task
+        for the whole day (e.g. the transform backfill) — the flush is
+        the final consolidated file, no end-of-workflow consolidation
+        step needed.
         """
         with self._lock:
             entries = sorted(self._entries, key=lambda e: str(e.get('recorded_at', '')))
@@ -194,6 +199,38 @@ class LedgerCollector:
         )
         ledger_fs.write_text(path, '\n'.join(json.dumps(e) for e in entries) + '\n')
         logger.info('Consolidated %d ledger entries into %s', len(entries), path)
+
+    def flush_per_task(self, ledger_fs: FileSystem, task_hash: str) -> None:
+        """Write the buffered entries as one per-task scratch ledger file.
+
+        Entries are sorted by ``recorded_at`` and written to
+        :func:`ledger_entry_path` — the same scratch path
+        :func:`consolidate_ledger` reads — so the end-of-workflow
+        consolidation step merges this task's file with peer tasks' into
+        one daily consolidated file. A no-op when nothing was recorded.
+
+        Use this mode when the workflow dispatches multiple Cloud Run
+        tasks per day (e.g. the extraction backfills' batched
+        dispatches): each task buffers its sub-task outcomes in memory
+        and writes one file containing them all, instead of one per
+        sub-task. The handful of per-task files the workflow ends up
+        with is what the existing :func:`consolidate_ledger` step then
+        merges into the daily consolidated file.
+        """
+        with self._lock:
+            entries = sorted(self._entries, key=lambda e: str(e.get('recorded_at', '')))
+        if not entries:
+            logger.info(
+                'No ledger entries to flush for %s/%s',
+                self._run_date,
+                self._workflow_name,
+            )
+            return
+        path = ledger_entry_path(
+            self._run_date, self._workflow_name, task_hash, self._run_label
+        )
+        ledger_fs.write_text(path, '\n'.join(json.dumps(e) for e in entries) + '\n')
+        logger.info('Wrote %d ledger entries to per-task file %s', len(entries), path)
 
 
 def list_consolidated_ledgers(
