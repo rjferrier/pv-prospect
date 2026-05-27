@@ -16,6 +16,14 @@ BACKFILL_SCOPE
     Required for ``run_transform_backfill``. ``pv_sites`` or
     ``weather_grid`` — selects which backfill (and its consumed-through
     marker) to run.
+BACKFILL_MODE
+    (Optional, ``run_transform_backfill`` only) ``pull`` (default) runs
+    the per-slice in-memory handler that produces one prepared
+    partition file per slice without writing to ``cleaned/``. ``push``
+    runs the legacy per-TransformInput handler that writes per-day
+    cleaned CSVs and fans tasks out across the clean → prepare →
+    assemble phases. ``push`` is retained for one release cycle as a
+    rollback path.
 MAX_EXTRACT_RUNS
     (Optional, ``run_transform_backfill`` only) how many unconsumed
     extraction consolidated ledgers one run may consume. Defaults to 4.
@@ -218,16 +226,16 @@ def main() -> None:
         )
         return
     elif job_type == 'run_transform_backfill':
-        backfill_mode = os.environ.get('BACKFILL_MODE', 'push')
-        if backfill_mode == 'pull':
-            _run_transform_backfill_pull(
+        backfill_mode = os.environ.get('BACKFILL_MODE', 'pull')
+        if backfill_mode == 'push':
+            _run_transform_backfill(
                 run_date,
                 config,
                 _required(ledger_fs, 'ledger_storage'),
                 _required(cursors_fs, 'cursors_storage'),
             )
         else:
-            _run_transform_backfill(
+            _run_transform_backfill_pull(
                 run_date,
                 config,
                 _required(ledger_fs, 'ledger_storage'),
