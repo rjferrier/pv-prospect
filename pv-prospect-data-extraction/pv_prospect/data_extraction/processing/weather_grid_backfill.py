@@ -25,16 +25,14 @@ records one entry per ``(site, window)`` pair rather than per slice.
 import json
 from datetime import date
 
-from pv_prospect.data_extraction.processing.sample_file import (
-    read_sample_file,
-    sample_file_path,
-)
 from pv_prospect.etl import (
     WeatherGridBackfillCursor,
     WeatherSlice,
     build_env_list,
     initial_weather_grid_backfill_cursor,
     inject_task_hash,
+    read_sample_file,
+    sample_file_path,
     weather_grid_schedule,
 )
 from pv_prospect.etl.storage import FileSystem

@@ -1,6 +1,6 @@
 """Tests for sample_file_path."""
 
-from pv_prospect.data_extraction.processing.sample_file import sample_file_path
+from pv_prospect.etl import sample_file_path
 
 
 def test_zero_padded_to_three_digits() -> None:

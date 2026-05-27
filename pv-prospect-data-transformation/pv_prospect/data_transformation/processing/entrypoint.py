@@ -69,12 +69,16 @@ from pv_prospect.data_transformation.processing import (
     TRANSFORMATIONS_NEEDING_PV_SITE,
     ConsumedMarker,
     PreparedBatchCollector,
+    SliceOutcome,
     Transformation,
     TransformInput,
     assemble_prepared_pv,
     assemble_prepared_weather,
     build_transform_phases,
+    plan_slices,
     plan_units,
+    produce_pv_slice,
+    produce_weather_slice,
     run_clean_pv,
     run_clean_weather,
     run_prepare_pv,
@@ -89,13 +93,19 @@ from pv_prospect.etl import (
     BackfillScope,
     DegenerateDateRange,
     Extractor,
+    PVSlice,
+    WeatherSlice,
     WorkflowOrchestrator,
     WorkflowTerminatingError,
     build_date_range,
+    build_env_list,
+    compute_task_hash,
     get_logging_filesystem,
+    read_sample_file,
     resolve_run_date,
     run_consolidate_logs,
     run_entrypoint,
+    sample_file_path,
 )
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
@@ -160,12 +170,21 @@ def main() -> None:
         )
         return
     elif job_type == 'run_transform_backfill':
-        _run_transform_backfill(
-            run_date,
-            config,
-            _required(ledger_fs, 'ledger_storage'),
-            _required(cursors_fs, 'cursors_storage'),
-        )
+        backfill_mode = os.environ.get('BACKFILL_MODE', 'push')
+        if backfill_mode == 'pull':
+            _run_transform_backfill_pull(
+                run_date,
+                config,
+                _required(ledger_fs, 'ledger_storage'),
+                _required(cursors_fs, 'cursors_storage'),
+            )
+        else:
+            _run_transform_backfill(
+                run_date,
+                config,
+                _required(ledger_fs, 'ledger_storage'),
+                _required(cursors_fs, 'cursors_storage'),
+            )
         return
     elif job_type == 'consolidate_logs':
         run_consolidate_logs(
@@ -658,6 +677,242 @@ def parse_backfill_scope(raw: str) -> BackfillScope:
             f'BACKFILL_SCOPE must be one of '
             f'{[s.value for s in BackfillScope]!r}; got {raw!r}'
         ) from e
+
+
+# ---------------------------------------------------------------------------
+# Pull-based transform backfill (BACKFILL_MODE=pull)
+# ---------------------------------------------------------------------------
+
+
+def _pv_slice_task_env(pv_slice: PVSlice, workflow_name: str) -> list[dict[str, str]]:
+    """Build the env-list used to hash one PV slice's task identity.
+
+    Note: this is not dispatched to a Cloud Run task — the env-list is
+    synthesised purely so :func:`compute_task_hash` produces a stable
+    per-slice identity that the cross-run ledger filter can key on.
+    """
+    return build_env_list(
+        SLICE_KIND='pv',
+        PV_SYSTEM_ID=str(pv_slice.pv_system_id),
+        START_DATE=pv_slice.start_date.isoformat(),
+        END_DATE=pv_slice.end_date.isoformat(),
+        WORKFLOW_NAME=workflow_name,
+    )
+
+
+def _weather_slice_task_env(
+    weather_slice: WeatherSlice, workflow_name: str
+) -> list[dict[str, str]]:
+    """Build the env-list used to hash one weather slice's task identity."""
+    return build_env_list(
+        SLICE_KIND='weather',
+        GRID_POINT_SAMPLE_INDEX=str(weather_slice.grid_point_sample_index),
+        START_DATE=weather_slice.start_date.isoformat(),
+        END_DATE=weather_slice.end_date.isoformat(),
+        WORKFLOW_NAME=workflow_name,
+    )
+
+
+def _pv_slice_descriptor(pv_slice: PVSlice) -> dict[str, str]:
+    return {
+        'slice_kind': 'pv',
+        'pv_system_id': str(pv_slice.pv_system_id),
+        'start_date': pv_slice.start_date.isoformat(),
+        'end_date': pv_slice.end_date.isoformat(),
+    }
+
+
+def _weather_slice_descriptor(weather_slice: WeatherSlice) -> dict[str, str]:
+    return {
+        'slice_kind': 'weather',
+        'grid_point_sample_index': str(weather_slice.grid_point_sample_index),
+        'start_date': weather_slice.start_date.isoformat(),
+        'end_date': weather_slice.end_date.isoformat(),
+    }
+
+
+def _run_one_slice(
+    slice_: PVSlice | WeatherSlice,
+    raw_fs: FileSystem,
+    prepared_fs: FileSystem,
+    resources_fs: FileSystem,
+    config: DataTransformationConfig,
+    workflow_name: str,
+    orchestrator: WorkflowOrchestrator,
+) -> None:
+    """Produce one slice's prepared partition file and record the outcome.
+
+    Routes to :func:`produce_pv_slice` or :func:`produce_weather_slice`
+    by slice type. On success records a ledger entry with the
+    producer's reported status (``completed`` or ``partial``). On any
+    exception records ``failed`` and re-raises.
+    """
+    if isinstance(slice_, PVSlice):
+        task_env = _pv_slice_task_env(slice_, workflow_name)
+        descriptor = _pv_slice_descriptor(slice_)
+        producer = lambda: produce_pv_slice(  # noqa: E731
+            slice_,
+            raw_fs,
+            prepared_fs,
+            config.data_sources.pv,
+            config.data_sources.weather,
+            get_pv_site_by_system_id,
+        )
+    else:
+        task_env = _weather_slice_task_env(slice_, workflow_name)
+        descriptor = _weather_slice_descriptor(slice_)
+        locations = read_sample_file(
+            resources_fs, sample_file_path(slice_.grid_point_sample_index)
+        )
+        producer = lambda: produce_weather_slice(  # noqa: E731
+            slice_,
+            raw_fs,
+            prepared_fs,
+            config.data_sources.weather,
+            locations,
+            config.weather_grid.version,
+        )
+
+    task_hash = compute_task_hash(task_env)
+    try:
+        outcome: SliceOutcome = producer()
+    except Exception as e:
+        orchestrator.record_outcome(task_hash, descriptor, 'failed', error=repr(e))
+        raise
+
+    if outcome.missing_inputs_count:
+        descriptor = {
+            **descriptor,
+            'missing_inputs_count': str(outcome.missing_inputs_count),
+        }
+    orchestrator.record_outcome(task_hash, descriptor, outcome.status)
+
+
+def _run_transform_backfill_pull(
+    run_date: str,
+    config: DataTransformationConfig,
+    ledger_fs: FileSystem,
+    cursors_fs: FileSystem,
+) -> None:
+    """Pull-based transform backfill: one prepared partition file per slice.
+
+    Plans slices from the extraction backfill's consolidated ledger
+    via :func:`plan_slices`, filters out slices already recorded as
+    ``completed`` in the cross-run ledger pool, and runs each
+    remaining slice through :func:`produce_pv_slice` /
+    :func:`produce_weather_slice` in a thread pool.
+
+    No ``cleaned/`` files are written: each slice's
+    clean → prepare → assemble chain runs entirely in memory. The
+    ledger records one entry per slice with status ``completed``,
+    ``partial`` (some raw inputs missing — output still written), or
+    ``failed`` (exception during processing).
+
+    Marker semantics are unchanged from the push handler: the marker
+    advances unconditionally once every slice has been *attempted*
+    (success, partial, or swallowed-Exception failure).
+    """
+    scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
+    max_extract_runs = int(
+        os.environ.get('MAX_EXTRACT_RUNS') or _DEFAULT_MAX_EXTRACT_RUNS
+    )
+    max_workers = int(os.environ.get('MAX_WORKERS') or _DEFAULT_MAX_WORKERS)
+    workflow_name = workflow_name_for(scope)
+    run_label = os.environ.get('RUN_LABEL', '')
+
+    slices, next_marker = plan_slices(scope, ledger_fs, cursors_fs, max_extract_runs)
+    if not slices:
+        logger.info(
+            'run_transform_backfill[pull/%s]: no unconsumed extract ledgers; '
+            'marker stays at %r',
+            scope.value,
+            next_marker,
+        )
+        return
+    logger.info(
+        'run_transform_backfill[pull/%s]: %d slices planned; will advance marker to %r',
+        scope.value,
+        len(slices),
+        next_marker,
+    )
+
+    ledger_collector = LedgerCollector(workflow_name, run_date, run_label)
+    log_collector = LogCollector(workflow_name, run_date, run_label)
+    orchestrator = WorkflowOrchestrator(
+        workflow_name,
+        run_date,
+        ledger_fs=ledger_fs,
+        run_label=run_label,
+        ledger_collector=ledger_collector,
+    )
+
+    completed = orchestrator.completed_task_hashes()
+    remaining: list[PVSlice | WeatherSlice] = []
+    for slice_ in slices:
+        if isinstance(slice_, PVSlice):
+            task_env = _pv_slice_task_env(slice_, workflow_name)
+        else:
+            task_env = _weather_slice_task_env(slice_, workflow_name)
+        if compute_task_hash(task_env) not in completed:
+            remaining.append(slice_)
+
+    logger.info(
+        'run_transform_backfill[pull/%s]: %d slices remaining after filter '
+        '(workers=%d)',
+        scope.value,
+        len(remaining),
+        max_workers,
+    )
+
+    resources_fs = get_filesystem(config.resources_storage)
+    raw_fs = get_filesystem(config.staged_raw_data_storage)
+    prepared_fs = get_logging_filesystem(
+        config.staged_prepared_data_storage,
+        config.log_storage,
+        workflow_name,
+        run_date,
+        'prepared',
+        run_label,
+        log_collector,
+    )
+    _load_resources(resources_fs)
+
+    def run_slice(slice_: PVSlice | WeatherSlice) -> None:
+        _run_one_slice(
+            slice_,
+            raw_fs,
+            prepared_fs,
+            resources_fs,
+            config,
+            workflow_name,
+            orchestrator,
+        )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(run_slice, s) for s in remaining]
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except WorkflowTerminatingError:
+                for pending in futures:
+                    pending.cancel()
+                raise
+            except Exception:
+                logger.exception('Slice failed; continuing with the rest of the run')
+
+    # Single process: flush the in-memory ledger and write-audit log as
+    # one consolidated file each. No per-task fan-out, so no O(N)
+    # consolidation step.
+    ledger_collector.flush(ledger_fs)
+    if config.log_storage:
+        log_collector.flush(get_filesystem(config.log_storage))
+
+    save_marker(cursors_fs, workflow_name, ConsumedMarker(consumed_through=next_marker))
+    logger.info(
+        'run_transform_backfill[pull/%s]: marker advanced to %r',
+        scope.value,
+        next_marker,
+    )
 
 
 if __name__ == '__main__':

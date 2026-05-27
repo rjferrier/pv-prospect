@@ -7,6 +7,7 @@ from .core import (
     PreparedBatchCollector,
     assemble_prepared_pv,
     assemble_prepared_weather,
+    merge_prepared_frames,
     pv_partition_path,
     read_csv,
     read_metadata,
@@ -18,6 +19,11 @@ from .core import (
     write_csv,
     write_metadata,
 )
+from .slice_producer import (
+    SliceOutcome,
+    produce_pv_slice,
+    produce_weather_slice,
+)
 from .transform_backfill import (
     ConsumedMarker,
     TransformInput,
@@ -25,6 +31,7 @@ from .transform_backfill import (
     deserialize_marker,
     extract_workflow_name_for,
     load_marker,
+    plan_slices,
     plan_units,
     save_marker,
     serialize_marker,
@@ -48,6 +55,7 @@ __all__ = [
     'PV_BATCH_PREFIX',
     'PV_COLUMNS',
     'PV_PREPARED_PREFIX',
+    'SliceOutcome',
     'TRANSFORMATIONS_NEEDING_GRID_POINT',
     'TRANSFORMATIONS_NEEDING_PV_SITE',
     'Transformation',
@@ -60,7 +68,11 @@ __all__ = [
     'deserialize_marker',
     'extract_workflow_name_for',
     'load_marker',
+    'merge_prepared_frames',
+    'plan_slices',
     'plan_units',
+    'produce_pv_slice',
+    'produce_weather_slice',
     'pv_partition_path',
     'save_marker',
     'serialize_marker',

@@ -39,6 +39,12 @@ from .runtime import (
     resolve_run_date,
     run_consolidate_logs,
 )
+from .sample_file import (
+    SAMPLE_FILES_DIR,
+    count_sample_files,
+    read_sample_file,
+    sample_file_path,
+)
 from .slice_schedule import (
     PVSlice,
     WeatherGridBackfillCursor,
@@ -60,6 +66,7 @@ __all__ = [
     'Extractor',
     'Loader',
     'PVSlice',
+    'SAMPLE_FILES_DIR',
     'TIMESERIES_FOLDER',
     'WeatherGridBackfillCursor',
     'WeatherSlice',
@@ -70,6 +77,7 @@ __all__ = [
     'build_env_list',
     'commit_backfill',
     'compute_task_hash',
+    'count_sample_files',
     'cursor_filename',
     'default_window_days',
     'deserialize_cursor',
@@ -85,9 +93,11 @@ __all__ = [
     'plan_backfill',
     'pv_sites_plan',
     'pv_sites_schedule',
+    'read_sample_file',
     'resolve_run_date',
     'run_consolidate_logs',
     'run_entrypoint',
+    'sample_file_path',
     'save_cursor',
     'serialize_cursor',
     'serialize_plan',

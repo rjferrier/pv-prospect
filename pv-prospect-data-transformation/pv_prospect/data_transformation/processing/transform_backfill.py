@@ -25,10 +25,13 @@ to re-transform after a feature-spec change.
 
 import json
 from dataclasses import dataclass
+from datetime import date
 
 from pv_prospect.data_sources import DataSourceType
 from pv_prospect.etl import (
     BackfillScope,
+    PVSlice,
+    WeatherSlice,
     build_env_list,
     inject_task_hash,
 )
@@ -353,6 +356,41 @@ def _descriptor_to_unit(descriptor: dict[str, str]) -> TransformInput | None:
     return None
 
 
+def _consume_extract_descriptors(
+    scope: BackfillScope,
+    ledger_fs: FileSystem,
+    cursors_fs: FileSystem,
+    max_extract_runs: int,
+) -> tuple[list[dict[str, str]], str]:
+    """Return the next ``max_extract_runs`` worth of completed descriptors.
+
+    Lists the extraction backfill's consolidated ledgers, keeps those
+    whose filename sorts above the live marker, takes the oldest
+    *max_extract_runs* of them, and concatenates their ``completed``
+    descriptors. Returns ``(descriptors, next_marker)``; the caller
+    decides what to do with each descriptor.
+
+    ``next_marker`` is the filename of the last consolidated ledger
+    consumed — what callers should later promote via
+    :func:`save_marker` once their run succeeds. When no unconsumed
+    ledgers exist, returns an empty descriptor list and the unchanged
+    marker, so callers can no-op cleanly.
+    """
+    workflow_name = workflow_name_for(scope)
+    marker = load_marker(cursors_fs, workflow_name)
+
+    ledgers = list_consolidated_ledgers(ledger_fs, extract_workflow_name_for(scope))
+    unconsumed = [entry for entry in ledgers if entry.name > marker.consumed_through]
+    chosen = unconsumed[:max_extract_runs]
+
+    descriptors: list[dict[str, str]] = []
+    for entry in chosen:
+        descriptors.extend(read_completed_descriptors(ledger_fs, entry.path))
+
+    next_marker = chosen[-1].name if chosen else marker.consumed_through
+    return descriptors, next_marker
+
+
 def plan_units(
     scope: BackfillScope,
     ledger_fs: FileSystem,
@@ -375,19 +413,110 @@ def plan_units(
 
     Pure planning — no manifests are written and no marker is advanced.
     """
-    workflow_name = workflow_name_for(scope)
-    marker = load_marker(cursors_fs, workflow_name)
-
-    ledgers = list_consolidated_ledgers(ledger_fs, extract_workflow_name_for(scope))
-    unconsumed = [entry for entry in ledgers if entry.name > marker.consumed_through]
-    chosen = unconsumed[:max_extract_runs]
-
+    descriptors, next_marker = _consume_extract_descriptors(
+        scope, ledger_fs, cursors_fs, max_extract_runs
+    )
     transform_inputs: list[TransformInput] = []
-    for entry in chosen:
-        for descriptor in read_completed_descriptors(ledger_fs, entry.path):
-            transform_input = _descriptor_to_unit(descriptor)
-            if transform_input is not None:
-                transform_inputs.append(transform_input)
-
-    next_marker = chosen[-1].name if chosen else marker.consumed_through
+    for descriptor in descriptors:
+        transform_input = _descriptor_to_unit(descriptor)
+        if transform_input is not None:
+            transform_inputs.append(transform_input)
     return transform_inputs, next_marker
+
+
+def _descriptor_to_pv_slice_key(
+    descriptor: dict[str, str],
+) -> tuple[int, str, str] | None:
+    """Reduce one PV-sites extraction descriptor to a PV-slice key.
+
+    A PV slice is keyed by ``(pv_system_id, start_date, end_date)``.
+    The PV-sites extraction backfill emits two descriptors per slice
+    (one for the PV-data task, one for the weather-data task); both
+    map to the same key so the caller can dedup. Returns ``None`` if
+    the descriptor is missing any keying field.
+    """
+    pv_system_id = descriptor.get('pv_system_id')
+    start_date = descriptor.get('start_date')
+    end_date = descriptor.get('end_date')
+    if pv_system_id is None or not start_date or not end_date:
+        return None
+    return int(pv_system_id), start_date, end_date
+
+
+def _descriptor_to_weather_slice_key(
+    descriptor: dict[str, str],
+) -> tuple[int, str, str] | None:
+    """Reduce one weather-grid extraction descriptor to a weather-slice key.
+
+    A weather slice is keyed by ``(grid_point_sample_index, start_date,
+    end_date)``. Each grid point in the sample produces its own
+    descriptor; all share the slice key so the caller can dedup.
+    Returns ``None`` if the descriptor is missing any keying field.
+    """
+    sample_index = descriptor.get('grid_point_sample_index')
+    start_date = descriptor.get('start_date')
+    end_date = descriptor.get('end_date')
+    if sample_index is None or not start_date or not end_date:
+        return None
+    return int(sample_index), start_date, end_date
+
+
+def plan_slices(
+    scope: BackfillScope,
+    ledger_fs: FileSystem,
+    cursors_fs: FileSystem,
+    max_extract_runs: int,
+) -> tuple[list[PVSlice] | list[WeatherSlice], str]:
+    """Plan *scope*'s slices from extraction's committed ledger.
+
+    Reads the next ``max_extract_runs`` worth of completed extraction
+    descriptors and groups them into :class:`PVSlice` or
+    :class:`WeatherSlice` values — one per distinct
+    ``(identifier, start, end)`` key. The slice list is deduplicated
+    and ordered as the keys are first encountered in the descriptor
+    stream. The slice task body checks raw-file existence per input
+    and routes to a ``partial`` ledger outcome if anything's missing,
+    so a slice is planned as long as *any* of its descriptors was
+    recorded completed.
+
+    Returns ``(slices, next_marker)``. The caller runs the slices and
+    only then advances the live marker via :func:`save_marker`. When
+    no unconsumed ledgers exist, returns an empty list and the
+    unchanged marker.
+
+    Pure planning — no manifests are written and no marker is advanced.
+    """
+    descriptors, next_marker = _consume_extract_descriptors(
+        scope, ledger_fs, cursors_fs, max_extract_runs
+    )
+    if scope is BackfillScope.PV_SITES:
+        pv_keys: dict[tuple[int, str, str], None] = {}
+        for descriptor in descriptors:
+            key = _descriptor_to_pv_slice_key(descriptor)
+            if key is not None:
+                pv_keys.setdefault(key, None)
+        pv_slices = [
+            PVSlice(
+                pv_system_id=sid,
+                start_date=date.fromisoformat(start),
+                end_date=date.fromisoformat(end),
+            )
+            for sid, start, end in pv_keys
+        ]
+        return pv_slices, next_marker
+    if scope is BackfillScope.WEATHER_GRID:
+        weather_keys: dict[tuple[int, str, str], None] = {}
+        for descriptor in descriptors:
+            key = _descriptor_to_weather_slice_key(descriptor)
+            if key is not None:
+                weather_keys.setdefault(key, None)
+        weather_slices = [
+            WeatherSlice(
+                grid_point_sample_index=sample_idx,
+                start_date=date.fromisoformat(start),
+                end_date=date.fromisoformat(end),
+            )
+            for sample_idx, start, end in weather_keys
+        ]
+        return weather_slices, next_marker
+    raise ValueError(f'Unknown backfill scope: {scope}')

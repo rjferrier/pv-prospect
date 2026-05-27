@@ -427,7 +427,7 @@ def run_prepare_pv(
 # ---------------------------------------------------------------------------
 
 
-def _merge_prepared_frames(frames: list[pd.DataFrame], keys: list[str]) -> pd.DataFrame:
+def merge_prepared_frames(frames: list[pd.DataFrame], keys: list[str]) -> pd.DataFrame:
     """Concatenate prepared *frames*, then de-duplicate and sort on *keys*.
 
     Normalises ``time`` to ``datetime64`` first. A partition file is read
@@ -493,7 +493,7 @@ def assemble_prepared_weather(
     except FileNotFoundError:
         pass
     frames.extend(batch_frames)
-    combined = _merge_prepared_frames(frames, ['latitude', 'longitude', 'time'])
+    combined = merge_prepared_frames(frames, ['latitude', 'longitude', 'time'])
     write_csv(prepared_fs, combined, path)
 
 
@@ -532,7 +532,7 @@ def _write_pv_partition(
     frames = list(new_frames)
     if existing_path is not None:
         frames.insert(0, read_csv(prepared_fs, existing_path))
-    combined = _merge_prepared_frames(frames, ['time'])
+    combined = merge_prepared_frames(frames, ['time'])
     start = combined['time'].min().date().isoformat()
     end = (combined['time'].max().normalize() + timedelta(days=1)).date().isoformat()
     new_path = pv_partition_path(system_id, start, end)

@@ -1,5 +1,5 @@
 import pytest
-from pv_prospect.data_extraction.processing.sample_file import read_sample_file
+from pv_prospect.etl import read_sample_file
 
 
 class FakeFileSystem:

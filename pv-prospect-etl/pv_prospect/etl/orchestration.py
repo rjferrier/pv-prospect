@@ -12,7 +12,7 @@ from pv_prospect.etl.storage.ledger import (
 )
 
 NowFn = Callable[[], datetime]
-TaskStatus = Literal['completed', 'failed']
+TaskStatus = Literal['completed', 'failed', 'partial']
 
 
 def _utc_now() -> datetime:
@@ -130,9 +130,20 @@ class WorkflowOrchestrator:
                 "workflow": "<workflow_name>",
                 "task_hash": "<sha256>",
                 "descriptor": { ... opaque per-workflow keys ... },
-                "status": "completed" | "failed",
+                "status": "completed" | "failed" | "partial",
                 "error": "<repr of exception, only for failed>"
             }
+
+        ``status`` distinguishes:
+            * ``completed`` — work succeeded with all inputs present; the
+              output is the final word for this task.
+            * ``partial`` — work succeeded and an output was written, but
+              some inputs were missing. A re-run is expected to re-attempt
+              the task (so the missing inputs, when filled in, are merged
+              into the output) — the resume filter treats ``partial`` as
+              no-skip, exactly as it treats ``failed``.
+            * ``failed`` — work itself failed; nothing reliable was
+              written.
 
         No-op if *task_hash* is empty or neither ``ledger_fs`` nor
         ``ledger_collector`` was configured. With a ``ledger_collector``
@@ -141,8 +152,9 @@ class WorkflowOrchestrator:
 
         Idempotent on completed entries: a second 'completed' record for
         the same task hash within the same run is not appended. Failures
-        are always appended (a task may be retried in-run and end up with
-        multiple 'failed' entries plus a final 'completed').
+        and partial entries are always appended (a task may be retried
+        in-run and end up with multiple non-completed entries plus a
+        final 'completed').
         """
         ledger_fs = self.ledger_fs
         collector = self.ledger_collector

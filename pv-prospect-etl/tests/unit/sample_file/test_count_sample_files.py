@@ -1,6 +1,6 @@
 """Tests for count_sample_files."""
 
-from pv_prospect.data_extraction.processing.sample_file import (
+from pv_prospect.etl import (
     SAMPLE_FILES_DIR,
     count_sample_files,
 )

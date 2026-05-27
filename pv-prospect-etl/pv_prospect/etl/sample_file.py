@@ -1,8 +1,16 @@
 """Point-sample file loader for grid-point weather backfill.
 
-Sample files are header-less CSVs containing ``latitude,longitude`` rows,
-one per grid point. They live on the resources filesystem under
-:data:`SAMPLE_FILES_DIR` as ``sample_NNN.csv`` (zero-padded to three digits).
+Sample files are header-less CSVs containing ``latitude,longitude``
+rows, one per grid point. They live on the resources filesystem
+under :data:`SAMPLE_FILES_DIR` as ``sample_NNN.csv`` (zero-padded to
+three digits).
+
+Both the extraction backfill (which resolves a
+:class:`~pv_prospect.etl.WeatherSlice`'s sample index to the list of
+``lat,lon`` strings to fetch raw weather for) and the
+transformation backfill (which resolves the same sample index to
+the same grid points, so its slice task body can iterate them in
+memory) consume this module.
 """
 
 import csv
@@ -21,8 +29,8 @@ def sample_file_path(index: int) -> str:
 def read_sample_file(fs: FileSystem, path: str) -> list[str]:
     """Read a sample CSV and return its location strings list.
 
-    Blank lines are skipped. Any leading/trailing whitespace on coordinates
-    is tolerated.
+    Blank lines are skipped. Any leading/trailing whitespace on
+    coordinates is tolerated.
     """
     text = fs.read_text(path)
     reader = csv.reader(io.StringIO(text))
@@ -35,5 +43,5 @@ def read_sample_file(fs: FileSystem, path: str) -> list[str]:
 
 
 def count_sample_files(fs: FileSystem) -> int:
-    """Count the number of ``sample_*.csv`` files in :data:`SAMPLE_FILES_DIR`."""
+    """Count the ``sample_*.csv`` files in :data:`SAMPLE_FILES_DIR`."""
     return len(fs.list_files(SAMPLE_FILES_DIR, 'sample_*.csv'))
