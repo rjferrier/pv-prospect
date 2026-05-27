@@ -1,20 +1,18 @@
 """Local runner — replaces the Cloud Run Job entrypoint for local development.
 
 Orchestrates transformation steps using :class:`concurrent.futures.ThreadPoolExecutor`
-instead of Cloud Run Jobs.
+instead of Cloud Run Jobs. Mirrors the daily-transform shape (per-task clean
+→ prepare_pv → assemble_pv, with PV-site weather cleaned for the prepare_pv
+join). Grid-weather backfill is end-to-end in :func:`produce_weather_slice`;
+to exercise it locally, call that function directly.
 
 Usage::
 
     python -m pv_prospect.data_transformation.processing.runner \
-        clean_weather,prepare_weather \
-        --locations 50.49,-3.54 \
+        clean_weather,clean_pv,prepare_pv,assemble_pv \
+        --pv-system-ids 89665,12345 \
         --start-date 2025-06-01 --end-date 2025-06-30 \
         --local-dir ./out --workers 4
-
-    python -m pv_prospect.data_transformation.processing.runner \
-        clean_pv,prepare_pv \
-        89665,12345 \
-        --start-date 2025-06-01 --end-date 2025-06-30
 """
 
 import sys
@@ -48,16 +46,12 @@ from pv_prospect.data_transformation.processing import (
     ALL_TRANSFORMATIONS,
     CLEANING_TRANSFORMATIONS,
     PREPARING_TRANSFORMATIONS,
-    TRANSFORMATIONS_NEEDING_GRID_POINT,
     TRANSFORMATIONS_NEEDING_PV_SITE,
-    PreparedBatchCollector,
     Transformation,
     assemble_prepared_pv,
-    assemble_prepared_weather,
     run_clean_pv,
     run_clean_weather,
     run_prepare_pv,
-    run_prepare_weather,
 )
 from pv_prospect.data_transformation.resources import (
     get_config_dir as get_dt_config_dir,
@@ -101,7 +95,7 @@ def _parse_args() -> Any:
         type=str,
         default=None,
         help='comma-separated lat,lon pairs (e.g. 50.49,-3.54 or 50.49,-3.54,51.50,-0.12). '
-        'Required for weather steps when no pv-system-ids are given.',
+        'Required for clean_weather of ad-hoc locations.',
     )
     parser.add_argument(
         '-d',
@@ -132,13 +126,6 @@ def _parse_args() -> Any:
         default=4,
         help='max parallel threads (default: 4)',
     )
-    parser.add_argument(
-        '--grid-point-sample-index',
-        type=int,
-        default=0,
-        help='grid-point sample index recorded in weather partition '
-        'filenames (default: 0). Only relevant to prepare_weather.',
-    )
     return parser.parse_args()
 
 
@@ -160,8 +147,6 @@ def _make_step_fn(
     pv_data_source: DataSource,
     weather_data_source: DataSource,
     date_range: DateRange,
-    collector: PreparedBatchCollector,
-    grid_point_sample_index: int,
 ) -> Callable[[AnySite], None]:
     """Return a callable that runs *step* for a single site."""
     if step == Transformation.CLEAN_WEATHER:
@@ -176,20 +161,6 @@ def _make_step_fn(
             )
 
         return fn_clean_weather
-
-    if step == Transformation.PREPARE_WEATHER:
-
-        def fn_prepare_weather(site: AnySite) -> None:
-            run_prepare_weather(
-                cleaned_fs,
-                weather_data_source,
-                site,
-                date_range,
-                grid_point_sample_index,
-                collector,
-            )
-
-        return fn_prepare_weather
 
     if step == Transformation.CLEAN_PV:
 
@@ -236,7 +207,7 @@ def _build_work_items(
             for site in pv_sites:
                 if isinstance(site, PVSite):
                     work_items.append((step, site))
-        elif step in TRANSFORMATIONS_NEEDING_GRID_POINT:
+        elif step is Transformation.CLEAN_WEATHER:
             for site in pv_sites + arbitrary_sites:
                 work_items.append((step, site))
     return work_items
@@ -278,11 +249,6 @@ def _main() -> None:
 
     cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
 
-    # Weather prepare/assemble hand off through an in-memory collector (the
-    # single-process handoff); the runner is one process, so this needs no
-    # batch CSVs. PV still uses batches_fs, matching the daily transform.
-    collector = PreparedBatchCollector()
-
     # --- initialise in-memory repos ---------------------------------------
     resources_fs = get_filesystem(config.resources_storage)
     resources_extractor = Extractor(resources_fs)
@@ -295,11 +261,9 @@ def _main() -> None:
         print(str(e))
         sys.exit(1)
 
-    # --- resolve PV system IDs and weather grid points --------------------
+    # --- resolve PV system IDs and ad-hoc locations -----------------------
     needs_pv_id = any(s in TRANSFORMATIONS_NEEDING_PV_SITE for s in all_transformations)
-    needs_grid_point = any(
-        s in TRANSFORMATIONS_NEEDING_GRID_POINT for s in all_transformations
-    )
+    needs_locations = Transformation.CLEAN_WEATHER in all_transformations
 
     pv_system_ids = resolve_pv_system_ids(get_all_pv_system_ids, args.pv_system_ids)
 
@@ -320,8 +284,8 @@ def _main() -> None:
 
     if needs_pv_id:
         print(f'Processing {len(pv_sites)} PV site(s).')
-    if needs_grid_point:
-        print(f'Processing {len(arbitrary_sites)} arbitrary site(s).')
+    if needs_locations and arbitrary_sites:
+        print(f'Processing {len(arbitrary_sites)} ad-hoc location(s).')
     print()
 
     def run(transformations_filter: frozenset[Transformation]) -> None:
@@ -349,8 +313,6 @@ def _main() -> None:
                     config.data_sources.pv,
                     config.data_sources.weather,
                     date_range,
-                    collector,
-                    args.grid_point_sample_index,
                 )
                 futures[pool.submit(step_fn, site)] = (
                     step,
@@ -373,41 +335,10 @@ def _main() -> None:
     run(CLEANING_TRANSFORMATIONS)
     run(PREPARING_TRANSFORMATIONS)
 
-    if Transformation.ASSEMBLE_WEATHER in all_transformations:
-        print('\nAssembling prepared weather data...')
-        for sample_index, start, end in collector.weather_groups():
-            assemble_prepared_weather(
-                prepared_fs,
-                collector,
-                sample_index,
-                start,
-                end,
-                config.weather_grid.version,
-            )
-
-    def assemble_pv_for_system(pv_id: int) -> None:
-        groups = collector.pv_groups(pv_id)
-        if groups:
-            for start, end in groups:
-                assemble_prepared_pv(
-                    batches_fs, prepared_fs, pv_id, start, end, collector
-                )
-            return
-        # No collector frames — daily-style drain of batches_fs.
-        # date_range.end is used purely as a passthrough; the daily
-        # branch ignores it and reads dates from the batch files.
-        assemble_prepared_pv(
-            batches_fs,
-            prepared_fs,
-            pv_id,
-            date_range.start.isoformat(),
-            date_range.end.isoformat(),
-        )
-
     if Transformation.ASSEMBLE_PV in all_transformations:
         print('\nAssembling prepared PV data...')
         for pv_id in pv_system_ids:
-            assemble_pv_for_system(pv_id)
+            assemble_prepared_pv(batches_fs, prepared_fs, pv_id)
 
     print('\nDone.')
 

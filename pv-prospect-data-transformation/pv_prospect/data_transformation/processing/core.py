@@ -12,7 +12,6 @@ by the pv model).
 import io
 import json
 import logging
-import threading
 from datetime import date, timedelta
 from typing import Any, Callable
 
@@ -33,9 +32,6 @@ from pv_prospect.data_transformation.transformations import (
 from pv_prospect.data_transformation.transformations import (
     prepare_pv as _prepare_pv_transform,
 )
-from pv_prospect.data_transformation.transformations import (
-    prepare_weather as _prepare_weather_transform,
-)
 from pv_prospect.etl import TIMESERIES_FOLDER
 from pv_prospect.etl.storage import FileSystem
 
@@ -51,7 +47,7 @@ PV_PREPARED_PREFIX = 'pv'
 
 # The daily transform hands prepare -> assemble through per-day batch CSVs
 # on the batches filesystem, since its steps run as separate Cloud Run
-# tasks. The single-process backfill uses PreparedBatchCollector instead.
+# tasks.
 PV_BATCH_PREFIX = 'pv'
 
 WEATHER_COLUMNS = [
@@ -169,63 +165,6 @@ def _parse_pv_partition_dates(name: str) -> tuple[date, date] | None:
 
 
 # ---------------------------------------------------------------------------
-# Prepared-batch collector
-# ---------------------------------------------------------------------------
-
-
-class PreparedBatchCollector:
-    """In-memory accumulator of prepared DataFrames for a single-process run.
-
-    Replaces the prepared-batch CSV files as the ``prepare`` → ``assemble``
-    handoff when the whole transform runs in one process (the backfill).
-    ``prepare_*`` adds a frame under its partition key; ``assemble_*``
-    drains the matching groups and writes them — so there is no per-batch
-    GCS write, list, read, or delete. The distributed daily transform
-    leaves the collector unset and keeps the PV batch CSVs, which are its
-    only cross-process handoff.
-
-    Weather frames are grouped by ``(grid_point_sample_index, start, end)`` —
-    one group per weather partition file — and PV frames by
-    ``(system_id, start, end)``; ``start`` / ``end`` are the transform
-    unit's ISO window strings.
-
-    Thread-safe: ``prepare`` fans its units across a thread pool.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._weather: dict[tuple[int, str, str], list[pd.DataFrame]] = {}
-        self._pv: dict[tuple[int, str, str], list[pd.DataFrame]] = {}
-
-    def add_weather(
-        self, grid_point_sample_index: int, start: str, end: str, df: pd.DataFrame
-    ) -> None:
-        """Buffer one prepared weather frame for a (sample, window). Thread-safe."""
-        key = (grid_point_sample_index, start, end)
-        with self._lock:
-            self._weather.setdefault(key, []).append(df)
-
-    def add_pv(self, system_id: int, start: str, end: str, df: pd.DataFrame) -> None:
-        """Buffer one prepared PV frame for a (system, window). Thread-safe."""
-        with self._lock:
-            self._pv.setdefault((system_id, start, end), []).append(df)
-
-    def weather_groups(self) -> dict[tuple[int, str, str], list[pd.DataFrame]]:
-        """Return weather frames grouped by (grid_point_sample_index, start, end)."""
-        with self._lock:
-            return {key: list(frames) for key, frames in self._weather.items()}
-
-    def pv_groups(self, system_id: int) -> dict[tuple[str, str], list[pd.DataFrame]]:
-        """Return *system_id*'s buffered PV frames grouped by (start, end)."""
-        with self._lock:
-            return {
-                (start, end): list(frames)
-                for (sid, start, end), frames in self._pv.items()
-                if sid == system_id
-            }
-
-
-# ---------------------------------------------------------------------------
 # Step implementations
 # ---------------------------------------------------------------------------
 
@@ -311,49 +250,6 @@ def run_clean_pv(
         )
 
 
-def run_prepare_weather(
-    cleaned_fs: FileSystem,
-    weather_data_source: DataSource,
-    site: AnySite,
-    date_range: DateRange,
-    grid_point_sample_index: int,
-    collector: PreparedBatchCollector,
-) -> None:
-    """Prepare cleaned grid-point weather for one (grid point, window).
-
-    Each day's prepared frame carries the grid point's lat/lon/elevation.
-    The window's days are concatenated and buffered in the *collector*
-    under the ``(grid_point_sample_index, window)`` key, so
-    :func:`assemble_prepared_weather` can write the whole sample file's
-    window as one partition file. Weather is grid-point data produced
-    only by the single-process weather-grid backfill, so the collector is
-    always present.
-    """
-    day_frames: list[pd.DataFrame] = []
-    for day_range in date_range.split_by(Period.DAY):
-        path = build_time_series_csv_file_path(
-            TIMESERIES_FOLDER,
-            weather_data_source,
-            site,
-            day_range,
-        )
-        logger.debug('[prepare_weather] Processing %s', path)
-        metadata = read_metadata(cleaned_fs, path)
-        cleaned_df = read_csv(cleaned_fs, path)
-        prepared_df = _prepare_weather_transform(cleaned_df)
-        prepared_df.insert(0, 'latitude', metadata['latitude'])
-        prepared_df.insert(1, 'longitude', metadata['longitude'])
-        prepared_df.insert(2, 'elevation', metadata['elevation'])
-        day_frames.append(prepared_df)
-    if day_frames:
-        collector.add_weather(
-            grid_point_sample_index,
-            date_range.start.isoformat(),
-            date_range.end.isoformat(),
-            pd.concat(day_frames, ignore_index=True),
-        )
-
-
 def run_prepare_pv(
     cleaned_fs: FileSystem,
     batches_fs: FileSystem,
@@ -362,17 +258,14 @@ def run_prepare_pv(
     pv_site: PVSite,
     date_range: DateRange,
     get_pv_site: Callable[[int], PVSite],
-    collector: PreparedBatchCollector | None = None,
 ) -> None:
     """Join cleaned PV and weather data for a date range.
 
-    Each day's joined frame is written as a batch CSV to *batches_fs*.
-    When a *collector* is supplied (the single-process backfill) the
-    window's days are buffered in memory under the ``(system, window)``
-    key instead, for :func:`assemble_prepared_pv` to merge.
+    Each day's joined frame is written as a batch CSV to *batches_fs*
+    — the daily transform's cross-process hand-off to
+    :func:`assemble_prepared_pv`.
     """
     pv_site_full = get_pv_site(pv_site.pvo_sys_id)
-    day_frames: list[pd.DataFrame] = []
 
     for day_range in date_range.split_by(Period.DAY):
         date_str = day_range.start.strftime('%Y%m%d')
@@ -405,20 +298,10 @@ def run_prepare_pv(
             pv_df=pv_df,
             pv_site=pv_site_full,
         )
-        if collector is not None:
-            day_frames.append(prepared_df)
-        else:
-            write_csv(
-                batches_fs,
-                prepared_df,
-                _pv_batch_path(pv_site.pvo_sys_id, date_str),
-            )
-    if collector is not None and day_frames:
-        collector.add_pv(
-            pv_site.pvo_sys_id,
-            date_range.start.isoformat(),
-            date_range.end.isoformat(),
-            pd.concat(day_frames, ignore_index=True),
+        write_csv(
+            batches_fs,
+            prepared_df,
+            _pv_batch_path(pv_site.pvo_sys_id, date_str),
         )
 
 
@@ -453,48 +336,6 @@ def merge_prepared_frames(frames: list[pd.DataFrame], keys: list[str]) -> pd.Dat
     combined['time'] = pd.to_datetime(combined['time'], format='ISO8601')
     combined = combined.drop_duplicates(subset=keys, keep='last')
     return combined.sort_values(keys).reset_index(drop=True)
-
-
-def assemble_prepared_weather(
-    prepared_fs: FileSystem,
-    collector: PreparedBatchCollector,
-    grid_point_sample_index: int,
-    start: str,
-    end: str,
-    grid_definition_version: int,
-) -> None:
-    """Write the weather partition file for one ``(sample, window)``.
-
-    Reads the *collector*'s slice for ``(grid_point_sample_index, start,
-    end)`` and writes it as ``weather/weather_{start}_{end}_{gv}-{NN}.csv``
-    (``gv`` being *grid_definition_version*). An existing file of the same
-    name is merged in first, so a re-run is idempotent.
-
-    One task per ``(sample, window)`` — not a single bulk drain — because
-    the orchestrator hashes tasks by env vars, and a single bulk task
-    would share its hash with every other bulk-drain task that happened to
-    pick the same ``(start, end)`` as ``first_weather_input``, masking
-    distinct sample windows under the same completion record.
-    """
-    key = (grid_point_sample_index, start, end)
-    batch_frames = collector.weather_groups().get(key)
-    if not batch_frames:
-        logger.warning(
-            '[assemble_weather] No prepared weather to assemble for %s.', key
-        )
-        return
-
-    path = weather_partition_path(
-        start, end, grid_point_sample_index, grid_definition_version
-    )
-    frames: list[pd.DataFrame] = []
-    try:
-        frames.append(read_csv(prepared_fs, path))
-    except FileNotFoundError:
-        pass
-    frames.extend(batch_frames)
-    combined = merge_prepared_frames(frames, ['latitude', 'longitude', 'time'])
-    write_csv(prepared_fs, combined, path)
 
 
 def _find_pv_partition_for_week(
@@ -545,34 +386,15 @@ def assemble_prepared_pv(
     batches_fs: FileSystem,
     prepared_fs: FileSystem,
     system_id: int,
-    start: str,
-    end: str,
-    collector: PreparedBatchCollector | None = None,
 ) -> None:
-    """Merge prepared PV frames for one system into its partition files.
+    """Merge the daily transform's per-day PV batches into partition files.
 
-    With a *collector* (the single-process backfill) reads the collector's
-    slice for ``(system_id, start, end)`` and writes it as one content-named
-    partition file — one task per ``(system, window)`` so distinct slices'
-    task hashes don't collide and resume-filter each other out (see
-    :func:`build_transform_phases`). Otherwise the daily transform's per-day
-    batch CSVs are read, bucketed into ISO weeks, and each week merged into
-    its open file — which grows day by day and is renamed to match the
-    range it covers (see :func:`_write_pv_partition`). *start* / *end*
-    identify the slice only in the collector path; the daily path discovers
-    its dates from the batch files.
+    Reads *system_id*'s batch CSVs from *batches_fs*, buckets them into
+    ISO weeks, and merges each week into its open partition file —
+    which grows day by day and is renamed to match the range it
+    actually covers (see :func:`_write_pv_partition`). Consumed
+    batch files are deleted at the end.
     """
-    if collector is not None:
-        batch_frames = collector.pv_groups(system_id).get((start, end))
-        if not batch_frames:
-            logger.warning(
-                '[assemble_pv] No prepared PV to assemble for %s.',
-                (system_id, start, end),
-            )
-            return
-        _write_pv_partition(prepared_fs, system_id, batch_frames, None)
-        return
-
     all_pv_batches = batches_fs.list_files(PV_BATCH_PREFIX, '*.csv')
     batch_files = [e for e in all_pv_batches if e.name.startswith(f'{system_id}_')]
     if not batch_files:
