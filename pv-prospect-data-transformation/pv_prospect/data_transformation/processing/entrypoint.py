@@ -16,14 +16,6 @@ BACKFILL_SCOPE
     Required for ``run_transform_backfill``. ``pv_sites`` or
     ``weather_grid`` — selects which backfill (and its consumed-through
     marker) to run.
-BACKFILL_MODE
-    (Optional, ``run_transform_backfill`` only) ``pull`` (default) runs
-    the per-slice in-memory handler that produces one prepared
-    partition file per slice without writing to ``cleaned/``. ``push``
-    runs the legacy per-TransformInput handler that writes per-day
-    cleaned CSVs and fans tasks out across the clean → prepare →
-    assemble phases. ``push`` is retained for one release cycle as a
-    rollback path.
 MAX_EXTRACT_RUNS
     (Optional, ``run_transform_backfill`` only) how many unconsumed
     extraction consolidated ledgers one run may consume. Defaults to 4.
@@ -33,8 +25,9 @@ MAX_WORKERS
     work is GCS-bound, so threading (not multiprocessing) is the right
     primitive.
 TRANSFORM_STEP
-    ``clean_weather``, ``clean_pv``, ``prepare_weather``, ``prepare_pv``,
-    ``assemble_weather``, or ``assemble_pv``
+    ``clean_weather``, ``clean_pv``, ``prepare_pv``, or ``assemble_pv``.
+    (Daily transform per-task dispatch only — the backfill paths use
+    the slice abstraction and never set this.)
 START_DATE
     ISO date ``YYYY-MM-DD`` (start of the date range to process).
     Alias: ``DATE`` (clearer when no end date is given).
@@ -49,11 +42,6 @@ LOCATION
     (Optional) comma-separated lat,lon (e.g. ``50.49,-3.54``); required for
     weather steps unless ``PV_SYSTEM_ID`` is provided instead. Exactly one
     of the two must be set.
-GRID_POINT_SAMPLE_INDEX
-    (Optional) integer index of the grid-point sample file a grid-weather
-    unit belongs to. Set only for the weather-grid backfill's
-    ``prepare_weather`` tasks; it groups the prepared rows into one
-    ``weather/`` partition file per (sample file, window).
 PREPARED_PREFIX_OVERRIDE
     (Optional) replaces ``staged_prepared_data_storage.prefix`` after
     config load. Used to redirect a shadow run's prepared output to a
@@ -92,21 +80,17 @@ from pv_prospect.data_transformation.config import DataTransformationConfig
 from pv_prospect.data_transformation.processing import (
     TRANSFORMATIONS_NEEDING_PV_SITE,
     ConsumedMarker,
-    PreparedBatchCollector,
     SliceOutcome,
     Transformation,
     TransformInput,
     assemble_prepared_pv,
-    assemble_prepared_weather,
     build_transform_phases,
     plan_slices,
-    plan_units,
     produce_pv_slice,
     produce_weather_slice,
     run_clean_pv,
     run_clean_weather,
     run_prepare_pv,
-    run_prepare_weather,
     save_marker,
     workflow_name_for,
 )
@@ -226,21 +210,12 @@ def main() -> None:
         )
         return
     elif job_type == 'run_transform_backfill':
-        backfill_mode = os.environ.get('BACKFILL_MODE', 'pull')
-        if backfill_mode == 'push':
-            _run_transform_backfill(
-                run_date,
-                config,
-                _required(ledger_fs, 'ledger_storage'),
-                _required(cursors_fs, 'cursors_storage'),
-            )
-        else:
-            _run_transform_backfill_pull(
-                run_date,
-                config,
-                _required(ledger_fs, 'ledger_storage'),
-                _required(cursors_fs, 'cursors_storage'),
-            )
+        _run_transform_backfill(
+            run_date,
+            config,
+            _required(ledger_fs, 'ledger_storage'),
+            _required(cursors_fs, 'cursors_storage'),
+        )
         return
     elif job_type == 'consolidate_logs':
         run_consolidate_logs(
@@ -273,7 +248,6 @@ def _task_env_from_environ() -> dict[str, str]:
         'TRANSFORM_STEP',
         'PV_SYSTEM_ID',
         'LOCATION',
-        'GRID_POINT_SAMPLE_INDEX',
         'START_DATE',
         'DATE',
         'END_DATE',
@@ -284,21 +258,15 @@ def _task_env_from_environ() -> dict[str, str]:
 
 @dataclass(frozen=True)
 class _Runtime:
-    """Shared per-execution resources. Built once, reused for every unit
-    handled in the same Cloud Run Job execution to amortise config
-    loading, GCS handle setup, and the PV-site / location-mapping repo
-    load.
-
-    ``prepared_batches`` is set only for the in-container backfill: it
-    carries prepared frames from the ``prepare`` phase to the ``assemble``
-    phase in memory, so no batch CSVs are written to ``batches_fs``. The
-    daily transform leaves it ``None`` and uses ``batches_fs``."""
+    """Shared per-execution resources for the daily transform's per-task
+    dispatch. Built once, reused for every unit handled in the same Cloud
+    Run Job execution to amortise config loading, GCS handle setup, and
+    the PV-site / location-mapping repo load."""
 
     raw_fs: FileSystem
     cleaned_fs: FileSystem
     batches_fs: FileSystem
     prepared_fs: FileSystem
-    prepared_batches: PreparedBatchCollector | None = None
 
 
 def _build_runtime(
@@ -307,7 +275,6 @@ def _build_runtime(
     run_date: str,
     run_label: str,
     log_collector: LogCollector | None = None,
-    prepared_batches: PreparedBatchCollector | None = None,
 ) -> _Runtime:
     resources_fs = get_filesystem(config.resources_storage)
     raw_fs = get_filesystem(config.staged_raw_data_storage)
@@ -339,7 +306,7 @@ def _build_runtime(
         log_collector,
     )
     _load_resources(resources_fs)
-    return _Runtime(raw_fs, cleaned_fs, batches_fs, prepared_fs, prepared_batches)
+    return _Runtime(raw_fs, cleaned_fs, batches_fs, prepared_fs)
 
 
 def _run_one_transform_unit(
@@ -364,11 +331,6 @@ def _run_one_transform_unit(
         int(task_env['PV_SYSTEM_ID']) if task_env.get('PV_SYSTEM_ID') else None
     )
     location_str = task_env.get('LOCATION')
-    grid_point_sample_index = (
-        int(task_env['GRID_POINT_SAMPLE_INDEX'])
-        if task_env.get('GRID_POINT_SAMPLE_INDEX')
-        else None
-    )
 
     start_date_str = task_env.get('START_DATE') or task_env.get('DATE')
     if not start_date_str:
@@ -391,8 +353,6 @@ def _run_one_transform_unit(
         descriptor['pv_system_id'] = str(pv_system_id)
     if location_str:
         descriptor['location'] = location_str
-    if grid_point_sample_index is not None:
-        descriptor['grid_point_sample_index'] = str(grid_point_sample_index)
     if task_env.get('END_DATE'):
         descriptor['end_date'] = task_env['END_DATE']
 
@@ -408,9 +368,7 @@ def _run_one_transform_unit(
             config,
             pv_system_id,
             location_str,
-            grid_point_sample_index,
             date_range,
-            shared.prepared_batches,
         )
     except Exception as e:
         orchestrator.record_outcome(task_hash, descriptor, 'failed', error=repr(e))
@@ -423,139 +381,6 @@ _DEFAULT_MAX_EXTRACT_RUNS = 4
 _DEFAULT_MAX_WORKERS = 32
 
 
-def _run_transform_backfill(
-    run_date: str,
-    config: DataTransformationConfig,
-    ledger_fs: FileSystem,
-    cursors_fs: FileSystem,
-) -> None:
-    """Plan, run, and commit a transform-backfill scope end-to-end.
-
-    Reads the consumed-through marker, picks the next ``MAX_EXTRACT_RUNS``
-    unconsumed extraction ledgers, turns their completed descriptors
-    into transform units, runs the clean → prepare → assemble phases
-    (each phase fanned out across a thread pool), writes the run's ledger
-    and write-audit log as one consolidated file each, then advances the
-    marker. The consolidated ledger records outcomes for cross-run
-    resume; the marker only advances when every phase completes without a
-    terminating error and both files are flushed.
-
-    Because the run is a single process, task outcomes, log lines, and
-    prepared batch frames are kept in memory (a :class:`LedgerCollector`,
-    :class:`LogCollector`, and :class:`PreparedBatchCollector`) instead of
-    fanned out to per-task / per-batch GCS files — eliminating both the
-    end-of-run ledger consolidation and the ``prepare`` → ``assemble``
-    batch round-trip, each of which otherwise re-reads tens of thousands
-    of tiny objects one at a time.
-
-    Replaces the workflow-orchestrated plan / dispatch / commit /
-    consolidate split. Transform work is GCS-bound, so a thread pool
-    inside one Cloud Run Job execution is the right primitive — and
-    one execution per backfill run avoids the Workflows ceilings
-    (2 MiB HTTP, 100 K steps, 256 MiB memory) that a multi-step
-    dispatch had to tip-toe around.
-    """
-    scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
-    max_extract_runs = int(
-        os.environ.get('MAX_EXTRACT_RUNS') or _DEFAULT_MAX_EXTRACT_RUNS
-    )
-    max_workers = int(os.environ.get('MAX_WORKERS') or _DEFAULT_MAX_WORKERS)
-    workflow_name = workflow_name_for(scope)
-    run_label = os.environ.get('RUN_LABEL', '')
-
-    transform_inputs, next_marker = plan_units(
-        scope, ledger_fs, cursors_fs, max_extract_runs
-    )
-    if not transform_inputs:
-        logger.info(
-            'run_transform_backfill[%s]: no unconsumed extract ledgers; '
-            'marker stays at %r',
-            scope.value,
-            next_marker,
-        )
-        return
-    logger.info(
-        'run_transform_backfill[%s]: %d inputs planned; will advance marker to %r',
-        scope.value,
-        len(transform_inputs),
-        next_marker,
-    )
-
-    ledger_collector = LedgerCollector(workflow_name, run_date, run_label)
-    log_collector = LogCollector(workflow_name, run_date, run_label)
-    prepared_batches = PreparedBatchCollector()
-    orchestrator = WorkflowOrchestrator(
-        workflow_name,
-        run_date,
-        ledger_fs=ledger_fs,
-        run_label=run_label,
-        ledger_collector=ledger_collector,
-    )
-    phases = build_transform_phases(transform_inputs, workflow_name, run_date)
-    remaining = [orchestrator.filter_remaining_tasks(phase) for phase in phases]
-    shared = _build_runtime(
-        config, workflow_name, run_date, run_label, log_collector, prepared_batches
-    )
-
-    for index, phase in enumerate(remaining):
-        logger.info(
-            'run_transform_backfill[%s]: phase %d running (%d units, workers=%d)',
-            scope.value,
-            index,
-            len(phase),
-            max_workers,
-        )
-        _run_phase_parallel(phase, shared, config, orchestrator, max_workers)
-
-    # Single process: flush the in-memory ledger and write-audit log as
-    # one consolidated file each. No per-task fan-out, so no O(N)
-    # consolidation step that fails to fit its timeout at scale.
-    ledger_collector.flush(ledger_fs)
-    if config.log_storage:
-        log_collector.flush(get_filesystem(config.log_storage))
-
-    save_marker(cursors_fs, workflow_name, ConsumedMarker(consumed_through=next_marker))
-    logger.info(
-        'run_transform_backfill[%s]: marker advanced to %r', scope.value, next_marker
-    )
-
-
-def _run_phase_parallel(
-    phase: list[list[dict[str, str]]],
-    shared: _Runtime,
-    config: DataTransformationConfig,
-    orchestrator: WorkflowOrchestrator,
-    max_workers: int,
-) -> None:
-    """Run *phase*'s tasks concurrently via a thread pool.
-
-    Per-unit ``Exception`` is logged-and-swallowed — the per-task ledger
-    entry already records 'failed'; the rest of the phase continues so a
-    transient hole doesn't block the whole run. A
-    :class:`WorkflowTerminatingError` propagates: pending tasks are
-    cancelled, in-flight tasks finish, and this re-raises out of the
-    handler so the marker stays put for re-planning next run.
-    """
-    if not phase:
-        return
-
-    def run_unit(env_list: list[dict[str, str]]) -> None:
-        task_env = {e['name']: e['value'] for e in env_list}
-        _run_one_transform_unit(task_env, shared, config, orchestrator)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [pool.submit(run_unit, env) for env in phase]
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except WorkflowTerminatingError:
-                for pending in futures:
-                    pending.cancel()
-                raise
-            except Exception:
-                logger.exception('Unit failed; continuing with next unit in phase')
-
-
 def _run_transform_step(
     transformation: 'Transformation',
     raw_fs: FileSystem,
@@ -565,9 +390,7 @@ def _run_transform_step(
     config: DataTransformationConfig,
     pv_system_id: int | None,
     location_str: str | None,
-    grid_point_sample_index: int | None,
     date_range: DateRange,
-    prepared_batches: PreparedBatchCollector | None = None,
 ) -> None:
     if transformation is Transformation.CLEAN_WEATHER:
         site = resolve_site(
@@ -594,30 +417,6 @@ def _run_transform_step(
             date_range,
         )
 
-    elif transformation is Transformation.PREPARE_WEATHER:
-        # prepare_weather is grid-weather only — it is dispatched solely by
-        # the weather-grid backfill's in-container handler, which always
-        # supplies both the collector and the sample-file index.
-        if prepared_batches is None or grid_point_sample_index is None:
-            raise WorkflowTerminatingError(
-                'prepare_weather requires GRID_POINT_SAMPLE_INDEX and the '
-                'in-container collector (weather-grid backfill only)'
-            )
-        site = resolve_site(
-            config.data_sources.weather.type,
-            get_pv_site_by_system_id,
-            pv_system_id=pv_system_id,
-            location_str=location_str,
-        )
-        run_prepare_weather(
-            cleaned_fs,
-            config.data_sources.weather,
-            site,
-            date_range,
-            grid_point_sample_index,
-            prepared_batches,
-        )
-
     elif transformation is Transformation.PREPARE_PV:
         pv_site = get_pv_site_by_system_id(pv_system_id)  # type: ignore[arg-type]
         run_prepare_pv(
@@ -628,40 +427,13 @@ def _run_transform_step(
             pv_site,
             date_range,
             get_pv_site_by_system_id,
-            collector=prepared_batches,
-        )
-
-    elif transformation is Transformation.ASSEMBLE_WEATHER:
-        # assemble_weather reads its (sample, window) slice from the
-        # in-container collector — weather-grid backfill only (see
-        # prepare_weather above). Per-sample so distinct sample windows
-        # don't share a task hash.
-        if prepared_batches is None or grid_point_sample_index is None:
-            raise WorkflowTerminatingError(
-                'assemble_weather requires GRID_POINT_SAMPLE_INDEX and the '
-                'in-container collector (weather-grid backfill only)'
-            )
-        assemble_prepared_weather(
-            prepared_fs,
-            prepared_batches,
-            grid_point_sample_index,
-            date_range.start.isoformat(),
-            date_range.end.isoformat(),
-            config.weather_grid.version,
         )
 
     elif transformation is Transformation.ASSEMBLE_PV:
-        # Per-(system, window) so distinct slices don't share a task hash
-        # — symmetric to assemble_weather above. The daily-transform path
-        # (collector unset) reads its dates from the batch files and
-        # ignores start/end; only the collector path keys on them.
         assemble_prepared_pv(
             batches_fs,
             prepared_fs,
             pv_system_id,  # type: ignore[arg-type]
-            date_range.start.isoformat(),
-            date_range.end.isoformat(),
-            prepared_batches,
         )
 
     else:
@@ -736,7 +508,7 @@ def parse_backfill_scope(raw: str) -> BackfillScope:
 
 
 # ---------------------------------------------------------------------------
-# Pull-based transform backfill (BACKFILL_MODE=pull)
+# Transform backfill (per-slice in-memory handler)
 # ---------------------------------------------------------------------------
 
 
@@ -844,19 +616,20 @@ def _run_one_slice(
     orchestrator.record_outcome(task_hash, descriptor, outcome.status)
 
 
-def _run_transform_backfill_pull(
+def _run_transform_backfill(
     run_date: str,
     config: DataTransformationConfig,
     ledger_fs: FileSystem,
     cursors_fs: FileSystem,
 ) -> None:
-    """Pull-based transform backfill: one prepared partition file per slice.
+    """Run a transform-backfill scope end-to-end.
 
     Plans slices from the extraction backfill's consolidated ledger
     via :func:`plan_slices`, filters out slices already recorded as
     ``completed`` in the cross-run ledger pool, and runs each
     remaining slice through :func:`produce_pv_slice` /
-    :func:`produce_weather_slice` in a thread pool.
+    :func:`produce_weather_slice` in a thread pool. Produces one
+    prepared partition file per slice.
 
     No ``cleaned/`` files are written: each slice's
     clean → prepare → assemble chain runs entirely in memory. The
@@ -864,9 +637,10 @@ def _run_transform_backfill_pull(
     ``partial`` (some raw inputs missing — output still written), or
     ``failed`` (exception during processing).
 
-    Marker semantics are unchanged from the push handler: the marker
-    advances unconditionally once every slice has been *attempted*
-    (success, partial, or swallowed-Exception failure).
+    The marker advances unconditionally once every slice has been
+    *attempted* (success, partial, or swallowed-Exception failure).
+    A :class:`WorkflowTerminatingError` propagates out without
+    advancing the marker, leaving the same window for tomorrow's run.
     """
     scope = parse_backfill_scope(os.environ.get('BACKFILL_SCOPE', ''))
     max_extract_runs = int(
@@ -879,14 +653,14 @@ def _run_transform_backfill_pull(
     slices, next_marker = plan_slices(scope, ledger_fs, cursors_fs, max_extract_runs)
     if not slices:
         logger.info(
-            'run_transform_backfill[pull/%s]: no unconsumed extract ledgers; '
+            'run_transform_backfill[%s]: no unconsumed extract ledgers; '
             'marker stays at %r',
             scope.value,
             next_marker,
         )
         return
     logger.info(
-        'run_transform_backfill[pull/%s]: %d slices planned; will advance marker to %r',
+        'run_transform_backfill[%s]: %d slices planned; will advance marker to %r',
         scope.value,
         len(slices),
         next_marker,
@@ -913,8 +687,7 @@ def _run_transform_backfill_pull(
             remaining.append(slice_)
 
     logger.info(
-        'run_transform_backfill[pull/%s]: %d slices remaining after filter '
-        '(workers=%d)',
+        'run_transform_backfill[%s]: %d slices remaining after filter (workers=%d)',
         scope.value,
         len(remaining),
         max_workers,
@@ -965,7 +738,7 @@ def _run_transform_backfill_pull(
 
     save_marker(cursors_fs, workflow_name, ConsumedMarker(consumed_through=next_marker))
     logger.info(
-        'run_transform_backfill[pull/%s]: marker advanced to %r',
+        'run_transform_backfill[%s]: marker advanced to %r',
         scope.value,
         next_marker,
     )
