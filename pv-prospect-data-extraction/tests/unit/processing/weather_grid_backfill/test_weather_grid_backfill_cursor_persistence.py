@@ -4,12 +4,12 @@ from datetime import date
 
 from pv_prospect.data_extraction.processing.weather_grid_backfill import (
     WORKFLOW_NAME,
-    WeatherGridBackfillCursor,
     deserialize_cursor,
     load_cursor,
     save_cursor,
     serialize_cursor,
 )
+from pv_prospect.etl import WeatherGridBackfillCursor
 
 _CURSOR_PATH = f'{WORKFLOW_NAME}.json'
 

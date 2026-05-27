@@ -5,11 +5,8 @@ from datetime import date, timedelta
 
 from pv_prospect.data_extraction.processing.weather_grid_backfill import (
     WORKFLOW_NAME,
-    WeatherGridBackfillCursor,
-    build_weather_grid_manifest,
     commit_weather_grid_backfill,
     deserialize_next_cursor,
-    initial_weather_grid_backfill_cursor,
     load_cursor,
     plan_weather_grid_backfill,
     serialize_manifest,
@@ -17,7 +14,12 @@ from pv_prospect.data_extraction.processing.weather_grid_backfill import (
 from pv_prospect.data_extraction.processing.weather_grid_backfill import (
     build_phases as build_weather_grid_phases,
 )
-from pv_prospect.etl import compute_task_hash
+from pv_prospect.etl import (
+    WeatherGridBackfillCursor,
+    compute_task_hash,
+    initial_weather_grid_backfill_cursor,
+    weather_grid_schedule,
+)
 
 _RUN_DATE = '2026-04-09'
 _CURSOR_PATH = f'{WORKFLOW_NAME}.json'
@@ -85,11 +87,9 @@ def _plan(
 def test_serialize_manifest_carries_phases_and_next_cursor() -> None:
     today = date(2026, 4, 9)
     cursor = initial_weather_grid_backfill_cursor(today)
-    manifest, next_cursor = build_weather_grid_manifest(
-        today, _NUM_SAMPLE_FILES, cursor
-    )
+    slices, next_cursor = weather_grid_schedule(today, _NUM_SAMPLE_FILES, cursor)
     phases = build_weather_grid_phases(
-        manifest, _resources_fs(), _DATA_SOURCE, _DRY_RUN, _RUN_DATE
+        slices, _resources_fs(), _DATA_SOURCE, _DRY_RUN, _RUN_DATE
     )
 
     data = json.loads(serialize_manifest(phases, next_cursor))
@@ -101,11 +101,9 @@ def test_serialize_manifest_carries_phases_and_next_cursor() -> None:
 def test_deserialize_next_cursor_round_trips() -> None:
     today = date(2026, 4, 9)
     cursor = initial_weather_grid_backfill_cursor(today)
-    manifest, expected_next = build_weather_grid_manifest(
-        today, _NUM_SAMPLE_FILES, cursor
-    )
+    slices, expected_next = weather_grid_schedule(today, _NUM_SAMPLE_FILES, cursor)
     phases = build_weather_grid_phases(
-        manifest, _resources_fs(), _DATA_SOURCE, _DRY_RUN, _RUN_DATE
+        slices, _resources_fs(), _DATA_SOURCE, _DRY_RUN, _RUN_DATE
     )
 
     text = serialize_manifest(phases, expected_next)
@@ -240,7 +238,7 @@ def test_task_envs_carry_locations_resolved_from_sample_files() -> None:
 
 
 def test_task_envs_carry_grid_point_sample_index() -> None:
-    """Each batch env carries a GRID_POINT_SAMPLE_INDEX env var matching
+    """Each slice env carries a GRID_POINT_SAMPLE_INDEX env var matching
     its sample file. It rides alongside LOCATIONS purely so the container
     can record the index in each per-site ledger descriptor; LOCATIONS
     still drives resolution."""
@@ -252,11 +250,8 @@ def test_task_envs_carry_grid_point_sample_index() -> None:
     data = json.loads(manifests_fs.files[_MANIFEST_PATH])
 
     cursor = initial_weather_grid_backfill_cursor(today)
-    manifest, _ = build_weather_grid_manifest(today, _NUM_SAMPLE_FILES, cursor)
-    expected_indices = [
-        manifest.step2_batch.grid_point_sample_index,
-        *(b.grid_point_sample_index for b in manifest.step3_batches),
-    ]
+    slices, _ = weather_grid_schedule(today, _NUM_SAMPLE_FILES, cursor)
+    expected_indices = [s.grid_point_sample_index for s in slices]
 
     actual_indices = [
         _env_value(task, 'GRID_POINT_SAMPLE_INDEX') for task in data['phases'][0]

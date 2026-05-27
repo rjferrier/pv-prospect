@@ -39,6 +39,15 @@ from .runtime import (
     resolve_run_date,
     run_consolidate_logs,
 )
+from .slice_schedule import (
+    PVSlice,
+    WeatherGridBackfillCursor,
+    WeatherSlice,
+    initial_weather_grid_backfill_cursor,
+    pv_sites_plan,
+    pv_sites_schedule,
+    weather_grid_schedule,
+)
 
 __all__ = [
     'BackfillCursor',
@@ -50,7 +59,10 @@ __all__ = [
     'EXIT_WORKFLOW_TERMINATING',
     'Extractor',
     'Loader',
+    'PVSlice',
     'TIMESERIES_FOLDER',
+    'WeatherGridBackfillCursor',
+    'WeatherSlice',
     'WorkflowOrchestrator',
     'WorkflowTerminatingError',
     'build_backfill_plan',
@@ -65,15 +77,19 @@ __all__ = [
     'get_config_dir',
     'get_logging_filesystem',
     'initial_backfill_cursor',
+    'initial_weather_grid_backfill_cursor',
     'inject_task_hash',
     'load_cursor',
     'manifest_filename',
     'parse_date',
     'plan_backfill',
+    'pv_sites_plan',
+    'pv_sites_schedule',
     'resolve_run_date',
     'run_consolidate_logs',
     'run_entrypoint',
     'save_cursor',
     'serialize_cursor',
     'serialize_plan',
+    'weather_grid_schedule',
 ]

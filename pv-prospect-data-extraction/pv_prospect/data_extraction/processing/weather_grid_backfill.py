@@ -1,155 +1,43 @@
 """Daily extraction manifest for grid-point weather backfill.
 
-Computes the work plan for a single day's API budget, consisting of:
+This module is the extraction-side wrapper around the shared
+:mod:`pv_prospect.etl.slice_schedule` module: it converts each
+:class:`WeatherSlice` produced by :func:`weather_grid_schedule` into
+one ``extract_and_load`` task env, persists the resulting phased
+manifest, and runs the plan-commit dance for the cursor.
 
-- **Step 1** — query yesterday's weather for each PV site.
-- **Step 2** — query the trailing 14 days for one sample file (chosen by
-  ``today_epoch_days % num_sample_files``).
-- **Step 3** — resume the historical backfill from where yesterday left off,
-  processing up to ``step3_batch_count`` further sample-file batches, each
-  covering a 14-day window and marching backwards in time.
+The schedule itself (today's anchor + step-3 historical march), the
+slice value type, and the cursor type live in
+:mod:`pv_prospect.etl.slice_schedule` so the transformation pipeline
+can consume the same source of truth for slice boundaries.
 
-A :class:`WeatherGridBackfillCursor` tracks Step 3 progress between runs.
-
-The persisted manifest carries a ``phases`` list in the same shape as the
-daily-extract orchestrator manifest. Each batch becomes an
-``extract_and_load`` task env carrying the concrete list of grid-point
-locations (``LOCATIONS``) the container should process, plus the batch's
-``GRID_POINT_SAMPLE_INDEX`` so each per-site ledger entry's descriptor
-records which sample file the window belongs to. Per-site task identity is
-computed inside the container via :func:`pv_prospect.etl.compute_task_hash`
-so the workflow ledger records one entry per ``(site, window)`` pair rather
-than per batch.
+The persisted manifest carries a ``phases`` list in the same shape as
+the daily-extract orchestrator manifest. Each slice becomes one
+``extract_and_load`` task env carrying the concrete list of
+grid-point locations (``LOCATIONS``) the container should process,
+plus the slice's ``GRID_POINT_SAMPLE_INDEX`` so each per-site ledger
+entry's descriptor records which sample file the window belongs to.
+Per-site task identity is computed inside the container via
+:func:`pv_prospect.etl.compute_task_hash` so the workflow ledger
+records one entry per ``(site, window)`` pair rather than per slice.
 """
 
 import json
-from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 from pv_prospect.data_extraction.processing.sample_file import (
     read_sample_file,
     sample_file_path,
 )
 from pv_prospect.etl import (
-    BackfillScope,
+    WeatherGridBackfillCursor,
+    WeatherSlice,
     build_env_list,
-    default_window_days,
+    initial_weather_grid_backfill_cursor,
     inject_task_hash,
+    weather_grid_schedule,
 )
 from pv_prospect.etl.storage import FileSystem
-
-_EPOCH = date(1970, 1, 1)
-
-# 14-day window. Matches OpenMeteo's natural single-request window for the
-# historical-forecast endpoint. The constant is sourced from the shared
-# backfill-config in pv_prospect.etl so it cannot drift from the
-# transformation-side weather-grid backfill.
-WEATHER_GRID_BACKFILL_WINDOW_DAYS = default_window_days(BackfillScope.WEATHER_GRID)
-
-
-def _epoch_days(d: date) -> int:
-    return (d - _EPOCH).days
-
-
-@dataclass(frozen=True)
-class Batch:
-    """A unit of work: one sample file queried over one date range."""
-
-    grid_point_sample_index: int
-    start_date: date
-    end_date: date
-
-    @property
-    def sample_file_name(self) -> str:
-        return f'sample_{self.grid_point_sample_index:03d}.csv'
-
-
-@dataclass(frozen=True)
-class WeatherGridManifest:
-    """The complete daily work plan."""
-
-    step2_batch: Batch
-    step3_batches: list[Batch]
-
-
-@dataclass(frozen=True)
-class WeatherGridBackfillCursor:
-    """Tracks where the historical backfill left off.
-
-    ``next_end_date`` is the *exclusive* end of the next 14-day window to
-    query (i.e. the start of the window is ``next_end_date - 14 days``).
-    ``next_sample_offset`` is the offset (from the Step 2 anchor) used to
-    choose the next sample file.
-    """
-
-    next_end_date: date
-    next_sample_offset: int
-
-
-def initial_weather_grid_backfill_cursor(today: date) -> WeatherGridBackfillCursor:
-    """Return the cursor for a first-ever run (no prior backfill)."""
-    return WeatherGridBackfillCursor(
-        next_end_date=today - timedelta(days=WEATHER_GRID_BACKFILL_WINDOW_DAYS),
-        next_sample_offset=1,
-    )
-
-
-def build_weather_grid_manifest(
-    today: date,
-    num_sample_files: int,
-    cursor: WeatherGridBackfillCursor,
-    step3_batch_count: int = 8,
-) -> tuple[WeatherGridManifest, WeatherGridBackfillCursor]:
-    """Build today's extraction manifest and return the updated cursor.
-
-    Args:
-        today: The current date.
-        num_sample_files: Total number of ``sample_NNN.csv`` files.
-        cursor: The backfill cursor from the previous run.
-        step3_batch_count: How many backward batches to include in Step 3.
-
-    Returns:
-        A ``(manifest, updated_cursor)`` tuple.
-    """
-    anchor = _epoch_days(today) % num_sample_files
-
-    # Step 2: trailing 14 days for today's sample file
-    step2_batch = Batch(
-        grid_point_sample_index=anchor,
-        start_date=today - timedelta(days=WEATHER_GRID_BACKFILL_WINDOW_DAYS),
-        end_date=today,
-    )
-
-    # Step 3: resume from cursor, marching backwards
-    step3_batches: list[Batch] = []
-    end_date = cursor.next_end_date
-    sample_offset = cursor.next_sample_offset
-
-    for _ in range(step3_batch_count):
-        start_date = end_date - timedelta(days=WEATHER_GRID_BACKFILL_WINDOW_DAYS)
-        sample_index = (anchor - sample_offset) % num_sample_files
-        step3_batches.append(
-            Batch(
-                grid_point_sample_index=sample_index,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        )
-        end_date = start_date
-        sample_offset += 1
-
-    updated_cursor = WeatherGridBackfillCursor(
-        next_end_date=end_date,
-        next_sample_offset=sample_offset,
-    )
-
-    manifest = WeatherGridManifest(
-        step2_batch=step2_batch,
-        step3_batches=step3_batches,
-    )
-
-    return manifest, updated_cursor
-
 
 WORKFLOW_NAME = 'pv-prospect-extract-weather-grid-backfill'
 
@@ -194,37 +82,38 @@ def save_cursor(cursors_fs: FileSystem, cursor: WeatherGridBackfillCursor) -> No
     cursors_fs.write_text(_cursor_path(), serialize_cursor(cursor))
 
 
-def batch_to_task_env(
-    batch: Batch,
+def _weather_slice_to_task_env(
+    weather_slice: WeatherSlice,
     locations: list[str],
     data_source: str,
     dry_run: str,
     run_date: str,
 ) -> list[dict[str, str]]:
-    """Build the ``extract_and_load`` env list for *batch*.
+    """Build the ``extract_and_load`` env list for *weather_slice*.
 
     The env list is what the Cloud Workflow dispatches as
     ``containerOverrides.env`` for one Cloud Run Job task. The
     sample-file index is resolved to its concrete list of ``lat,lon``
     strings at plan time and passed as the ``LOCATIONS`` env var (a
     JSON array). The index itself rides along as
-    ``GRID_POINT_SAMPLE_INDEX`` so the container can record it in each
-    per-site ledger descriptor; it does not drive resolution
+    ``GRID_POINT_SAMPLE_INDEX`` so the container can record it in
+    each per-site ledger descriptor; it does not drive resolution
     (``LOCATIONS`` does) and is excluded from the per-site task hash.
 
-    The injected ``TASK_HASH`` here identifies the *whole batch* — the
-    container uses it as the filename for the one per-task scratch
-    ledger/log file it flushes at end of run. Per-*site* hashes recorded
-    in each ledger entry are still computed inside the container.
+    The injected ``TASK_HASH`` here identifies the *whole slice* —
+    the container uses it as the filename for the one per-task
+    scratch ledger/log file it flushes at end of run. Per-*site*
+    hashes recorded in each ledger entry are still computed inside
+    the container.
     """
     return inject_task_hash(
         build_env_list(
             JOB_TYPE='extract_and_load',
             DATA_SOURCE=data_source,
-            START_DATE=batch.start_date.isoformat(),
-            END_DATE=batch.end_date.isoformat(),
+            START_DATE=weather_slice.start_date.isoformat(),
+            END_DATE=weather_slice.end_date.isoformat(),
             LOCATIONS=json.dumps(locations),
-            GRID_POINT_SAMPLE_INDEX=str(batch.grid_point_sample_index),
+            GRID_POINT_SAMPLE_INDEX=str(weather_slice.grid_point_sample_index),
             DRY_RUN=dry_run,
             WORKFLOW_NAME=WORKFLOW_NAME,
             RUN_DATE=run_date,
@@ -233,30 +122,29 @@ def batch_to_task_env(
 
 
 def build_phases(
-    manifest: WeatherGridManifest,
+    slices: list[WeatherSlice],
     resources_fs: FileSystem,
     data_source: str,
     dry_run: str,
     run_date: str,
 ) -> list[list[list[dict[str, str]]]]:
-    """Convert *manifest*'s batches into the orchestrator ``phases`` shape.
+    """Convert *slices* into the orchestrator ``phases`` shape.
 
-    Each sample-file index in *manifest* is resolved to its concrete
-    list of grid-point ``lat,lon`` strings via *resources_fs*. All
-    batches go into a single phase. Within-phase order is preserved so
-    the Cloud Workflow's pacing loop can dispatch them in sequence
-    under the OpenMeteo rate limit.
+    Each slice's ``grid_point_sample_index`` is resolved to its
+    concrete list of grid-point ``lat,lon`` strings via
+    *resources_fs*. All slices go into a single phase. Within-phase
+    order is preserved so the Cloud Workflow's pacing loop can
+    dispatch them in sequence under the OpenMeteo rate limit.
     """
-    batches = [manifest.step2_batch, *manifest.step3_batches]
     tasks = [
-        batch_to_task_env(
-            b,
-            read_sample_file(resources_fs, sample_file_path(b.grid_point_sample_index)),
+        _weather_slice_to_task_env(
+            s,
+            read_sample_file(resources_fs, sample_file_path(s.grid_point_sample_index)),
             data_source,
             dry_run,
             run_date,
         )
-        for b in batches
+        for s in slices
     ]
     return [tasks]
 
@@ -267,9 +155,9 @@ def serialize_manifest(
 ) -> str:
     """Serialize the phased manifest plus its next cursor to JSON.
 
-    Consumed by the Cloud Workflow dispatcher (which iterates ``phases``)
-    and by :func:`commit_weather_grid_backfill` (which reads
-    ``next_cursor`` to advance the live cursor).
+    Consumed by the Cloud Workflow dispatcher (which iterates
+    ``phases``) and by :func:`commit_weather_grid_backfill` (which
+    reads ``next_cursor`` to advance the live cursor).
     """
     return json.dumps(
         {
@@ -306,16 +194,18 @@ def plan_weather_grid_backfill(
     manifests_fs: FileSystem,
     resources_fs: FileSystem,
     step3_batch_count: int = 8,
-) -> WeatherGridManifest:
+) -> list[WeatherSlice]:
     """Compute today's manifest and persist it to storage.
 
-    Reads the current cursor, builds the batch plan, resolves each
-    sample-file index to its concrete list of grid-point locations via
-    *resources_fs*, and writes both the phased manifest and the *next*
-    cursor to ``<run_date>/<workflow_name>.json`` on the manifests
-    filesystem. The live cursor at ``<workflow_name>.json`` on the
-    cursors filesystem is **not** advanced — that happens later via
-    :func:`commit_weather_grid_backfill`, after the batches have been
+    Reads the current cursor, asks the shared slice schedule for
+    today's slice list and the updated cursor, resolves each slice's
+    sample-file index to its concrete list of grid-point locations
+    via *resources_fs*, and writes both the phased manifest and the
+    *next* cursor to ``<run_date>/<workflow_name>.json`` on the
+    manifests filesystem. The live cursor at
+    ``<workflow_name>.json`` on the cursors filesystem is **not**
+    advanced — that happens later via
+    :func:`commit_weather_grid_backfill`, after the slices have been
     dispatched successfully.
 
     The planner does not consult the ledger to skip already-completed
@@ -324,14 +214,14 @@ def plan_weather_grid_backfill(
     rather than perpetual retries.
     """
     cursor = load_cursor(cursors_fs, today)
-    manifest, next_cursor = build_weather_grid_manifest(
+    slices, next_cursor = weather_grid_schedule(
         today, num_sample_files, cursor, step3_batch_count=step3_batch_count
     )
-    phases = build_phases(manifest, resources_fs, data_source, dry_run, run_date)
+    phases = build_phases(slices, resources_fs, data_source, dry_run, run_date)
     manifests_fs.write_text(
         _manifest_path(run_date), serialize_manifest(phases, next_cursor)
     )
-    return manifest
+    return slices
 
 
 def commit_weather_grid_backfill(
@@ -341,7 +231,7 @@ def commit_weather_grid_backfill(
 ) -> WeatherGridBackfillCursor:
     """Promote the manifest's next cursor to the live cursor.
 
-    Called after all batches dispatched by the workflow have completed.
+    Called after all slices dispatched by the workflow have completed.
     """
     next_cursor = deserialize_next_cursor(
         manifests_fs.read_text(_manifest_path(run_date))

@@ -501,7 +501,7 @@ def _run_plan_weather_grid_backfill(
         raise ValueError('No sample files found on the resources filesystem.')
     data_source = os.environ.get('DATA_SOURCE', 'weather')
     dry_run = os.environ.get('DRY_RUN', 'false')
-    manifest = plan_weather_grid_backfill(
+    slices = plan_weather_grid_backfill(
         today,
         run_date,
         num_sample_files,
@@ -512,9 +512,9 @@ def _run_plan_weather_grid_backfill(
         resources_fs,
     )
     logger.info(
-        'plan_weather_grid_backfill: wrote manifest (step2=%s, step3_batches=%d)',
-        manifest.step2_batch,
-        len(manifest.step3_batches),
+        'plan_weather_grid_backfill: wrote manifest (step2=%s, step3_slices=%d)',
+        slices[0],
+        len(slices) - 1,
     )
 
 

@@ -1,30 +1,28 @@
 """Daily PV backfill for PV sites.
 
-Computes the work plan for a single day's PV-site backfill budget:
+This module is the extraction-side wrapper around the shared
+:mod:`pv_prospect.etl.slice_schedule` module: it asks the schedule
+for today's :class:`PVSlice` list, builds per-site PV and weather
+``extract_and_load`` task envs, and runs the plan-commit dance for
+the cursor.
 
-- Backfill PV output data for all PV sites over a 28-day window, marching
-  backwards through history one window per day.
-- Backfill weather data for the same PV sites over the same 28-day window
-  (covered as two 14-day sub-windows, matching the OpenMeteo API's natural
-  granularity).
+The slice value type and the schedule itself (today's window from
+the cursor × the universe of pv_system_ids) live in
+:mod:`pv_prospect.etl.slice_schedule` so the transformation pipeline
+can consume the same source of truth for slice boundaries.
 
-The cursor / plan-commit machinery lives in :mod:`pv_prospect.etl.backfill`
-and is shared with the transformation pipeline. This module is the
-extraction-side wrapper that pins the workflow name and the
-:class:`BackfillScope`, and additionally enumerates the per-site PV and
-weather tasks into the orchestrator ``phases`` shape so the Cloud
-Workflow dispatcher gets an env list for every task. A per-task
-``TASK_HASH`` is pre-injected so each container has a stable identity
-for naming its per-task scratch ledger/log file at flush time; the
-per-*site* hashes recorded in each ledger entry are still computed
-inside the container.
+The 28-day window is the largest round-week multiple compatible with
+the PVOutput rate limit. PVOutput's ``getstatus.jsp`` endpoint is
+single-date only — one HTTP call per (system, day) — and the API
+rate-limits at 300 requests per hour. With 10 PV sites and 28 days
+per site the daily budget is 280 calls, safely under the cap when
+dispatched sequentially from the Cloud Workflow and leaving headroom
+for retries.
 
-The 28-day window is the largest round-week multiple compatible with the
-PVOutput rate limit. PVOutput's ``getstatus.jsp`` endpoint is single-date
-only — one HTTP call per (system, day) — and the API rate-limits at 300
-requests per hour. With 10 PV sites and 28 days per site the daily budget
-is 280 calls, safely under the cap when dispatched sequentially from the
-Cloud Workflow and leaving headroom for retries.
+A per-task ``TASK_HASH`` is pre-injected so each container has a
+stable identity for naming its per-task scratch ledger/log file at
+flush time; the per-*site* hashes recorded in each ledger entry are
+still computed inside the container.
 """
 
 from datetime import date
@@ -32,12 +30,15 @@ from datetime import date
 from pv_prospect.etl import (
     BackfillCursor,
     BackfillPlan,
-    BackfillScope,
+    PVSlice,
     build_env_list,
     commit_backfill,
-    default_window_days,
     inject_task_hash,
-    plan_backfill,
+    load_cursor,
+    manifest_filename,
+    pv_sites_plan,
+    pv_sites_schedule,
+    serialize_plan,
 )
 from pv_prospect.etl.storage import FileSystem
 
@@ -45,19 +46,17 @@ WORKFLOW_NAME = 'pv-prospect-extract-pv-sites-backfill'
 
 
 def _pv_task_env(
-    pv_system_id: int,
+    pv_slice: PVSlice,
     pv_data_source: str,
-    start_date: date,
-    end_date: date,
     dry_run: str,
     run_date: str,
 ) -> list[dict[str, str]]:
     return build_env_list(
         JOB_TYPE='extract_and_load',
         DATA_SOURCE=pv_data_source,
-        PV_SYSTEM_ID=str(pv_system_id),
-        START_DATE=start_date.isoformat(),
-        END_DATE=end_date.isoformat(),
+        PV_SYSTEM_ID=str(pv_slice.pv_system_id),
+        START_DATE=pv_slice.start_date.isoformat(),
+        END_DATE=pv_slice.end_date.isoformat(),
         DRY_RUN=dry_run,
         SPLIT_BY='day',
         WORKFLOW_NAME=WORKFLOW_NAME,
@@ -66,63 +65,43 @@ def _pv_task_env(
 
 
 def _weather_task_env(
-    pv_system_id: int,
+    pv_slice: PVSlice,
     weather_data_source: str,
-    start_date: date,
-    end_date: date,
     run_date: str,
 ) -> list[dict[str, str]]:
     return build_env_list(
         JOB_TYPE='extract_and_load',
         DATA_SOURCE=weather_data_source,
-        PV_SYSTEM_ID=str(pv_system_id),
-        START_DATE=start_date.isoformat(),
-        END_DATE=end_date.isoformat(),
+        PV_SYSTEM_ID=str(pv_slice.pv_system_id),
+        START_DATE=pv_slice.start_date.isoformat(),
+        END_DATE=pv_slice.end_date.isoformat(),
         WORKFLOW_NAME=WORKFLOW_NAME,
         RUN_DATE=run_date,
     )
 
 
 def build_phases(
-    plan: BackfillPlan,
-    pv_system_ids: list[int],
+    slices: list[PVSlice],
     pv_data_source: str,
     weather_data_source: str,
     dry_run: str,
     run_date: str,
 ) -> list[list[list[dict[str, str]]]]:
-    """Enumerate per-site PV and weather tasks into orchestrator phases.
+    """Enumerate per-slice PV and weather tasks into orchestrator phases.
 
-    Phase 0 holds the per-site PV ``extract_and_load`` envs (one per
-    system) and is dispatched sequentially by the Cloud Workflow to stay
-    under the PVOutput rate limit. Phase 1 holds the per-site weather
-    ``extract_and_load`` envs and is dispatched in parallel since
-    OpenMeteo's limits are generous enough.
+    Phase 0 holds the per-slice PV ``extract_and_load`` envs (one per
+    slice) and is dispatched sequentially by the Cloud Workflow to
+    stay under the PVOutput rate limit. Phase 1 holds the per-slice
+    weather ``extract_and_load`` envs and is dispatched in parallel
+    since OpenMeteo's limits are generous enough.
     """
     pv_phase = [
-        inject_task_hash(
-            _pv_task_env(
-                sid,
-                pv_data_source,
-                plan.start_date,
-                plan.end_date,
-                dry_run,
-                run_date,
-            )
-        )
-        for sid in pv_system_ids
+        inject_task_hash(_pv_task_env(s, pv_data_source, dry_run, run_date))
+        for s in slices
     ]
     weather_phase = [
-        inject_task_hash(
-            _weather_task_env(
-                sid,
-                weather_data_source,
-                plan.start_date,
-                plan.end_date,
-                run_date,
-            )
-        )
-        for sid in pv_system_ids
+        inject_task_hash(_weather_task_env(s, weather_data_source, run_date))
+        for s in slices
     ]
     return [pv_phase, weather_phase]
 
@@ -147,24 +126,17 @@ def plan_pv_site_backfill(
     The live cursor is not advanced — that happens later via
     :func:`commit_pv_site_backfill`, after the extraction jobs succeed.
     """
-    if window_days is None:
-        window_days = default_window_days(BackfillScope.PV_SITES)
-    return plan_backfill(
-        cursors_fs,
-        manifests_fs,
-        WORKFLOW_NAME,
-        run_date,
-        today,
-        window_days,
-        phases_fn=lambda plan: build_phases(
-            plan,
-            pv_system_ids,
-            pv_data_source,
-            weather_data_source,
-            dry_run,
-            run_date,
-        ),
+    cursor = load_cursor(cursors_fs, WORKFLOW_NAME, today)
+    plan, next_cursor = pv_sites_plan(cursor, window_days=window_days)
+    slices = pv_sites_schedule(plan, pv_system_ids)
+    phases = build_phases(
+        slices, pv_data_source, weather_data_source, dry_run, run_date
     )
+    manifests_fs.write_text(
+        manifest_filename(WORKFLOW_NAME, run_date),
+        serialize_plan(plan, next_cursor, phases),
+    )
+    return plan
 
 
 def commit_pv_site_backfill(
