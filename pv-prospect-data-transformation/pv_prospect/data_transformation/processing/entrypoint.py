@@ -46,13 +46,29 @@ GRID_POINT_SAMPLE_INDEX
     unit belongs to. Set only for the weather-grid backfill's
     ``prepare_weather`` tasks; it groups the prepared rows into one
     ``weather/`` partition file per (sample file, window).
+PREPARED_PREFIX_OVERRIDE
+    (Optional) replaces ``staged_prepared_data_storage.prefix`` after
+    config load. Used to redirect a shadow run's prepared output to a
+    non-prod prefix without rebuilding the image.
+CURSORS_PREFIX_OVERRIDE
+    (Optional) replaces ``cursors_storage.prefix``. For a shadow run,
+    pair this with ``PREPARED_PREFIX_OVERRIDE`` so the shadow's marker
+    advancement doesn't trip prod's next-day planning.
+LEDGER_PREFIX_OVERRIDE
+    (Optional) replaces ``ledger_storage.prefix``. For a shadow run,
+    pair this with the other two so prod's previously-completed task
+    hashes don't filter out the shadow's task list and so the shadow's
+    ledger entries don't pollute prod's resume pool. The shadow
+    operator is expected to seed the shadow ledger prefix with the
+    relevant extraction consolidated ledgers first, since the slice
+    planner reads them from this prefix.
 """
 
 import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 
 from pv_prospect.common import (
@@ -143,6 +159,37 @@ def _required(fs: FileSystem | None, name: str) -> FileSystem:
     return fs
 
 
+def apply_prefix_overrides(
+    config: DataTransformationConfig,
+) -> DataTransformationConfig:
+    """Apply ``*_PREFIX_OVERRIDE`` env-var redirections to *config*.
+
+    Used by shadow runs to point prepared-output / cursor / ledger
+    writes at non-prod prefixes without rebuilding the image. Each
+    override mutates only its target storage's ``prefix`` — backend,
+    bucket, and tracking are preserved. Unset overrides are no-ops.
+
+    Cursors and ledger overrides are no-ops when the corresponding
+    storage is unconfigured (some local-dev configs leave them out).
+    """
+    prepared = os.environ.get('PREPARED_PREFIX_OVERRIDE')
+    cursors = os.environ.get('CURSORS_PREFIX_OVERRIDE')
+    ledger = os.environ.get('LEDGER_PREFIX_OVERRIDE')
+    updates: dict[str, object] = {}
+    if prepared:
+        updates['staged_prepared_data_storage'] = replace(
+            config.staged_prepared_data_storage, prefix=prepared
+        )
+    if cursors and config.cursors_storage is not None:
+        updates['cursors_storage'] = replace(config.cursors_storage, prefix=cursors)
+    if ledger and config.ledger_storage is not None:
+        updates['ledger_storage'] = replace(config.ledger_storage, prefix=ledger)
+    if not updates:
+        return config
+    logger.info('Applying prefix overrides: %s', sorted(updates))
+    return replace(config, **updates)
+
+
 def main() -> None:
     job_type = os.environ.get('JOB_TYPE', '')
     run_date = resolve_run_date()
@@ -155,6 +202,7 @@ def main() -> None:
             get_dt_config_dir(),
         ],
     )
+    config = apply_prefix_overrides(config)
 
     manifests_fs = (
         get_filesystem(config.manifests_storage) if config.manifests_storage else None
