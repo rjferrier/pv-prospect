@@ -379,9 +379,12 @@ Cloud Scheduler invokes the `data-transformation` Cloud Run Job directly
    ConsumedMarker(next_marker))` advances the marker.
 
 Because the plan is a pure function of the extraction ledger and the
-marker, resetting the marker to the empty string re-derives every
-transform task from the oldest extraction ledger forward — the supported
-way to re-transform after a feature-spec change.
+marker, lowering the marker re-derives the transform units covering the
+windows above it. Marker-rewind alone is not sufficient to replay a
+window, though — the resume filter pools `completed` hashes across every
+prior consolidated ledger; see
+[`pv-prospect-data-transformation/doc/runbooks/replay-window.md`](../pv-prospect-data-transformation/doc/runbooks/replay-window.md)
+for the full recovery procedure.
 
 The two scopes use independent markers, so a hiccup transforming the
 weather grid does not block PV-sites progress (or vice versa).

@@ -2,7 +2,6 @@
 
 ## Next
 
-- [ ] [Plug the 2025-08-08 → 2025-09-05 PV window](briefs/pv-window-2025-08.md)
 - [ ] [Investigate the data-versioner hang-on-exit](briefs/versioner-hang.md)
 - [ ] [After the pull-mode bake-in (target: ~1 week from cutover)](briefs/pull-mode-cleanup.md)
 - [ ] [Train the PV model](briefs/model-trainer.md)
