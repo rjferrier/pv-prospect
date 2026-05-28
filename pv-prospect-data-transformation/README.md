@@ -23,13 +23,21 @@ The transformation process consists of six steps, organised into three layers:
 #### `prepare_weather`
 - **Input**: Cleaned weather CSV (`cleaned/`).
 - **Role**: Selects a subset of weather features (e.g. `temperature`, `direct_normal_irradiance`, `diffuse_radiation`), injects latitude/longitude/elevation, and downsamples time resolution. This step runs **only for grid-point weather** — the weather-grid backfill — and its prepared rows feed the `weather/` corpus. PV-site weather is cleaned (for the `prepare_pv` join) but never prepared; it is sparse and not wanted in the weather corpus.
-- **Output**: Prepared frames buffered in memory under a `(grid_point_sample_index, window)` key for `assemble_weather`.
+- **Output**: Prepared frames assembled with latitude/longitude/elevation from
+  the raw metadata sidecar, ready for merging into `prepared/weather/` partition
+  files. In the in-container backfill (pull mode) this happens inline within
+  `produce_weather_slice` — no separate `assemble_weather` step. In the local
+  runner (push mode), frames are buffered via `PreparedBatchCollector` for a
+  subsequent `assemble_weather` pass.
 
 #### `prepare_pv`
 - **Input**: Cleaned weather CSV + cleaned PV output CSV (`cleaned/`).
 - **Role**: Inner-joins the two cleaned datasets on `time`, calculates Plane of Array (POA) irradiance using `pvlib` (accounting for panel tilt, azimuth, and area fraction), selects the final feature set (e.g. `temperature`, `plane_of_array_irradiance`, `power`, `power_max`), and downsamples time resolution.
 - **`power_max` derivation**: The maximum of the native-cadence `pv_df['power']` over each output row's period, looked up *before* the PV is time-weighted-averaged onto weather cadence. Computing it post-reduce would smear sub-hour clipping into the hourly average — an inverter spike lasting a few minutes can be ~5–10× the hour's mean, so the post-reduce max would systematically under-report. Downstream PV-model training uses `power_max` as a censoring flag: a row whose `power_max` reaches the inverter capacity has a biased daily-mean `power` (the inverter has truncated the panel's actual output) and must be dropped from the training set.
-- **Output**: Per-day micro-batch CSV (`prepared-batches/pv/{system_id}_{date}.csv`) in the daily transform, or in-memory frames for `assemble_pv` in the backfill.
+- **Output**: Per-day micro-batch CSV (`prepared-batches/pv/{system_id}_{date}.csv`)
+  in the daily transform. In the in-container backfill (pull mode), day frames are
+  accumulated in memory within `produce_pv_slice` and merged directly into the
+  `prepared/pv/{site}/` partition file — no batch CSV is written.
 
 #### Downsampling
 
@@ -61,11 +69,12 @@ one, so the corpus is retrievable as a whole — see the top-level `README.md`.
 **Two hand-off modes.** In the *daily transform*, `prepare` and `assemble`
 run as separate Cloud Run tasks, so `prepare_pv` writes batch CSVs to
 `prepared-batches/` and `assemble_pv` reads, merges, and deletes them. In the
-*in-container backfill*, the whole transform runs in one process: `prepare`
-contributes each unit's prepared frame to an in-memory
-`PreparedBatchCollector` and `assemble` drains it — no batch CSV is written,
-listed, read, or deleted. The backfill processes hundreds of thousands of
-units per run, for which the per-batch GCS round-trip does not scale.
+*in-container backfill* (pull mode, the default), the whole transform runs in
+one process per slice: `produce_weather_slice` and `produce_pv_slice` each
+read the slice's raw files, run clean → prepare → assemble entirely in memory,
+and write one prepared partition file directly. No intermediate `cleaned/`
+files are written; independent slices execute in a
+`ThreadPoolExecutor(max_workers=32)`.
 
 #### `assemble_weather`
 - **Input**: The collector's slice for one `(grid_point_sample_index, start,
@@ -100,18 +109,23 @@ units per run, for which the per-batch GCS round-trip does not scale.
 
 ### How the stages connect
 
-Clean → prepare → assemble run as three **ordered phases**: every task in one
-finishes before the next begins. There is no finer dependency graph —
+**Daily transform.** Clean → prepare → assemble run as three **ordered
+phases**: every task in one finishes before the next begins.
 `build_transform_phases` (in `transform_backfill.py`) enumerates each
-`TransformInput`'s tasks, and the phase barrier alone orders them.
+`TransformInput`'s tasks and the phase barrier alone orders them. This leaves
+one cross-step dependency **implicit**: `prepare_pv` joins cleaned PV power
+with cleaned on-site weather, but those come from *separate* tasks — `clean_pv`
+and a `clean_weather` from a different `TransformInput` — and `prepare_pv`
+reads the cleaned weather back by shared path convention (see `run_prepare_pv`
+in `core.py`). Nothing declares that dependency: it holds only because every
+clean runs before any prepare and because writer and reader agree on the
+cleaned-data path. A `clean_weather` that never ran (weather extraction having
+failed for that site) is not flagged here — `run_prepare_pv` finds no file and
+skips the day.
 
-That leaves one cross-step dependency **implicit**. `prepare_pv` joins cleaned
-PV power with cleaned on-site weather, but those come from *separate* tasks —
-`clean_pv` and a `clean_weather` belonging to a different `TransformInput` —
-and `prepare_pv` simply reads the cleaned weather back by a shared path
-convention (see `run_prepare_pv` in `core.py`). Nothing declares that
-dependency: it holds only because every clean runs before any prepare, and
-because writer and reader agree on the cleaned-data path. A `clean_weather`
-that never ran (weather extraction having failed for that site) is not flagged
-here — `run_prepare_pv` finds no file and skips the day. Bear this in mind
-when changing the phase model or the cleaned-data path layout.
+**In-container backfill (pull mode).** Each slice task (`produce_weather_slice`
+/ `produce_pv_slice`) reads its raw inputs, runs clean → prepare → assemble in
+the same call stack, and writes one partition file. The cross-step dependency is
+explicit: both `clean_weather` and `clean_pv` are sequential function calls
+within `produce_pv_slice`, not separate tasks. There is no phase barrier and no
+`cleaned/` write — the cleaned frames live only in memory.

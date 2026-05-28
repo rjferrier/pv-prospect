@@ -150,18 +150,18 @@ Workflows on a daily or weekly basis:
 * **PV-Sites Transformation Backfill (`pv-prospect-daily-transform-pv-sites-backfill`)**:
   Runs at **06:00 UTC**. Unlike the other pipelines, this one has no Cloud
   Workflow — Cloud Scheduler invokes the `data-transformation` Cloud Run Job
-  directly with `JOB_TYPE=run_transform_backfill`. The job plans, runs (with
-  internal thread-pool parallelism over the clean → prepare → assemble
-  phases), flushes its run ledger to a single consolidated file, and commits
-  the marker — all in a single execution. Plans its work from the PV-sites extraction backfill's
-  committed task-outcome ledger rather than a cursor of its own: each
-  `completed` extraction entry becomes a transform unit over that entry's
-  window. A small **consumed-through marker** bounds each run to the next
-  `MAX_EXTRACT_RUNS` (default 4) unconsumed extraction ledgers; the marker
-  advances at the end of the run only if every phase completes (an exit-2
-  terminating error skips the commit). Per-unit failures inside a phase are
-  logged-and-swallowed, so a transiently-failed transform task is a recorded
-  hole rather than a perpetual retry.
+  directly with `JOB_TYPE=run_transform_backfill`. The job plans, runs (with per-slice thread-pool parallelism: each slice runs
+  clean → prepare → assemble entirely in memory and writes one prepared
+  partition file directly, without intermediate `cleaned/` writes), flushes
+  its run ledger to a single consolidated file, and commits the marker — all
+  in a single execution. Plans its work from the PV-sites extraction
+  backfill's committed task-outcome ledger: completed extraction entries gate
+  which slices are ready to transform. A small **consumed-through marker**
+  bounds each run to the next `MAX_EXTRACT_RUNS` (default 4) unconsumed
+  extraction ledgers; the marker advances at the end of the run only after
+  every slice has been attempted (an exit-2 terminating error skips the
+  commit). Per-slice failures are logged-and-swallowed, so a
+  transiently-failed slice is a recorded hole rather than a perpetual retry.
 * **Weather-Grid Transformation Backfill
   (`pv-prospect-daily-transform-weather-grid-backfill`)**: Runs at **08:00 UTC**.
   Same pattern as above but planning from the weather-grid extraction
