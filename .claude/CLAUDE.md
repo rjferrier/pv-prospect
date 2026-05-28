@@ -155,53 +155,38 @@ CSVs are read from the `resources_storage` config backend (GCS
 For local development, create a `resources/` directory with the required CSVs --
 this directory is gitignored.
 
-## Code Style and Practices
+## Development Workflow
 
-General code style (including Markdown):
-- 88-char line length
+### Tracking Work
 
-Python style:
-- Python 3.12, single quotes (see `ruff.toml` at repo root).
-- All functions must be typed (`--disallow-untyped-defs`).
-- `__init__.py` files are excluded from mypy.
-- Ruff rules: `E4`, `E7`, `E9`, `F`, `I` (isort), `B` (bugbear),
-  `C4` (comprehensions).
+Outstanding work is tracked in `.claude/work/TODO.md`. This file contains lists of
+**tasks**.
 
-Practices:
-- Refactor when appropriate. Is the same code used in two places, and do those places
-  share a common library or modules? Then extract the code to the library or one of the
-  shared modules, or consider creating a new shared module. Refactoring may be done
-  in a commit separate from functional changes.
-- As a rule, non-trivial logic should exist in pure functions or methods, which means
-  unit tests can be written without the need to create patches. The existence of patches
-  is therefore considered a code smell which necessitates one of two things: (1) the
-  logic should be moved to a pure function, or the existing function be made pure, and
-  collaborating objects that would otherwise make the function impure should be passed
-  at an appropriately high (i.e. factory or orchestration) level. At that
-  level, unit tests may be omitted; integration or acceptance tests would be more
-  appropriate. (2) If the pure logic is actually trivial, e.g. there is no conditional
-  branching or other such constructs, it may be overkill to try and extract it and create
-  a unit test for it. The unit test in this case is not pulling its weight and may simply
-  be omitted. (Again, integration or acceptance tests should cover the functionality.)
-- When adding or modifying functionality, be sure to add and/or update the automated
-  tests, whether they are unit, integration, system or acceptance tests.
-  You may create a new unit test module when adding a new unit to be tested.
-  However, do not automatically create new modules for higher-level tests unless instructed.
-- Changes should be documented if they are not self-explanatory from the code.
-  This includes explaining _why_ a change was done. Locate the place for adding
-  documentation thus:
-  - If the change (1) spans multiple sub-projects (packages/supporting libraries)
-    and (2) either (2.1) describes the system design or behaviour at a high level
-    or (2.2) has external implications (e.g. affects the contents of a bucket in
-    cloud storage), documentation should go in the top-level README.md.
-  - If the change (1) concerns just one sub-project and (2) either (2.1) describes
-    the system design or behaviour at a high level or (2.2) has external
-    implications, then document it in the README.md of the appropriate sub-project.
-  - Otherwise, if the change spans multiple sub-projects, document it in an
-    appropriate `.md` file in the top-level `doc/` directory. (Create the file if
-    necessary.)
-  - Otherwise, if the change (1) concerns just one sub-project, document it in an
-    appropriate .md file in the `doc/` directory of the appropriate sub-project.
-    (Create the directory and file if necessary.)
-- Check all such documentation when modifying or removing functionality, and update it
-  as appropriate.
+Each task links to a **brief** in `.claude/work/briefs/`. Each brief contains the
+context and what is needed for the task.
+
+Each task may additionally have a **plan** in `.claude/work/plans/`. The plan contains
+detailed design sketches if the task requires extended specification before implementation
+(e.g., architectural decisions, multi-component refactors, or blocked work with complex
+prerequisites). The plan has the same filename as the task's brief.
+
+A typical task lifecycle:
+- Start as a brief (what, why, any blockers).
+- Optionally promote to a plan if the scope requires design work.
+- Both can coexist: the brief summarises; the plan specifies.
+- When implementing, work from the brief/plan context.
+- Finalise: integrate the relevant content into the project's permanent documentation
+  and delete the task together with its brief and plan.
+
+In the finalisation step, permanent documentation may include the README, doc/, or
+package-specific docs, following placement rules given in `documenting.md`.
+Finalisation may be done in the same commit as the completing work, or in the final
+commit of a multi-commit task, but it must not be deferred.
+
+### Working on Tasks
+
+In general, follow the rules under `.claude/rules/general`.
+
+Some contexts call for specific rules:
+* System design and planning → `.claude/rules/system-design.md`
+* Writing code → `.claude/rules/coding-*.md`
