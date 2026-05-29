@@ -4,7 +4,7 @@
 
 - [ ] [Investigate the data-versioner hang-on-exit](briefs/versioner-hang.md)
 - [ ] [After the pull-mode bake-in (target: ~1 week from cutover)](briefs/pull-mode-cleanup.md)
-- [ ] [Train the PV model](briefs/model-trainer.md)
+- [ ] [Train the PV model](briefs/pv-model-trainer.md)
 - [ ] [Train the weather model](briefs/weather-model-trainer.md)
 - [ ] [Clarify end-date semantics in backfill cursors and manifests](briefs/end-date-semantics.md)
 - [ ] [Decommission hand-rolled CSV write logs under `tracking/`](briefs/csv-write-logs.md)

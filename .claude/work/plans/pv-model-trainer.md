@@ -1,7 +1,7 @@
-# Model Trainer — Design Sketch
+# PV Model Trainer — Design Sketch
 
-Scope: `pv-prospect-model`, PV model and weather model as sibling workstreams
-sharing the same scaffolding shape.
+Scope: the PV model in `pv-prospect-model`. The sibling weather model has its own
+plan, `weather-model-trainer.md`; both share the same scaffolding shape.
 
 ## Locked-in decisions
 
@@ -72,18 +72,9 @@ sharing the same scaffolding shape.
   `data-exploration` first, then lift to `pv-prospect-model` as a local
   Python script. Productionising as a Cloud Run Job (with GPU) is a later
   step once the design has stabilised.
-- **D. Weather model in parallel: yes (revised 2026-05-25).** While the data
-  versioner consolidation blocks end-to-end PV runs, the weather model
-  scaffold can land in parallel — it consumes a different prepared corpus
-  (`staging/prepared/weather/`) and shares no code with the PV side beyond
-  conventions. Multi-output regression: predicts
-  `(temperature, direct_normal_irradiance, diffuse_radiation)` from
-  `(latitude, longitude, day_of_year_sin, day_of_year_cos)`. DNI + DHI →
-  POA happens downstream at inference time, in the prediction API, where
-  panel geometry is known (per `doc/architecture.puml`). Elevation is
-  deliberately omitted — the diagram's inference contract is
-  `call_model(lat, lon, day, year)`; the model learns elevation implicitly
-  via lat/lon.
+- **D. Weather model in parallel** — moved to its own plan,
+  `weather-model-trainer.md` (the contract, cross-grid validation history, and
+  the climatology evaluation design all live there now).
 
 ## Adjacent work needed before production training
 
@@ -137,98 +128,11 @@ is suppressed even on uncensored days; the model overshoots
 systematically. 79336 also underperforms. Both are flagged for
 investigation before lifting to `pv-prospect-model`.
 
-### `data-exploration` cross-grid weather notebook — **run**
+### `data-exploration` cross-grid weather notebook
 
-Two files in `pv-prospect-instance/data-exploration/main_models/`:
-
-- `common_cross_grid.py` — pure-function module: loader walks
-  `{data_root}/weather/weather_*.csv` partitions, attaches no metadata
-  (lat/lon/elevation are already in the rows from the assemble step in
-  `core.py`), adds cyclic `day_of_year_sin`/`day_of_year_cos` features,
-  sorts globally by time, splits at the 80th percentile, fits separate
-  `StandardScaler`s for features and targets on train only. Returns a
-  `CrossGridDataset` dataclass.
-- `neural-network-cross-grid-weather.ipynb` — `WeatherNet` (4 dense
-  layers × 64 units, dropout, output dim 3), trained with Adam + MSE
-  on standardised targets, early stopping on a temporal validation
-  slice (last 10% of train). Evaluates per-target after inverse-scaling
-  back to physical units; reports per-grid-point RMSE to surface any
-  geographically clustered error structure.
-
-**First real-data run (2026-05-26):** 805,896 rows, 20,638 grid points,
-April 2023 – May 2026. Temporal split at 2024-12-01 (80th percentile):
-643,864 train / 162,032 test. Early-stopped at epoch 11 (best model =
-epoch 1).
-
-**Test set results:**
-
-| Target | R² | RMSE |
-|---|---|---|
-| `temperature` | 0.240 | 3.5 °C |
-| `direct_normal_irradiance` | 0.067 | 78.8 W/m² |
-| `diffuse_radiation` | 0.854 | 18.9 W/m² |
-
-**Findings:**
-- DHI generalises well — strong seasonal/lat signal that day_of_year +
-  lat/lon captures cleanly.
-- DNI is poor throughout (expected) — dominated by cloud cover
-  variability, which is absent from the feature set.
-- Temperature has a large train→test gap (0.686 → 0.240). The test
-  window falls in winter; worst grid points are Scottish Highlands
-  (RMSE 8–9 °C), best are Cornwall (RMSE < 1 °C). Elevation was
-  deliberately excluded from the inference contract; the geographic
-  evidence here suggests it may be load-bearing for Scotland.
-- Early stopping behaviour: val_loss rose monotonically after epoch 1
-  while train_loss kept falling — initially read as temporal
-  distribution shift, but see below; the actual root cause is the
-  test-set composition.
-
-**Test-set composition discovery (most important caveat):**
-
-The bimodal predicted/true scatter plots prompted a closer look at the
-test rows' time coverage:
-
-| Cluster | Period | Rows | Temp mean | DNI mean | DHI mean |
-|---|---|---|---|---|---|
-| Winter | Dec 2024 – Feb 2025 | 72,488 | 4.9 °C | 35 W/m² | 15 W/m² |
-| Late spring | **May 2026 only** | 89,544 | 9.7 °C | 105 W/m² | 110 W/m² |
-
-The prepared-weather corpus runs continuously from Apr 2023 to Feb 7
-2025, then has a 15-month gap with no partitions, then resumes with
-sliding 14-day windows for May 2026 (six overlapping partition files,
-consistent with a recently-restarted daily extract). The "test set"
-the 80th-percentile split lands on is therefore two disjoint seasonal
-islands — not a continuous holdout.
-
-This invalidates parts of the readout above:
-
-- DHI's test R² = 0.854 is largely the model learning "winter mean
-  ≈ 15, May mean ≈ 110" from day_of_year. The within-cluster std is
-  only 7.8 (winter) and 17.5 (May), so cluster-mean discrimination
-  alone scores well.
-- Temperature's train→test gap is partly genuine (winter prediction
-  is hard) but is also inflated by the unrepresentative test slice.
-- The epoch-1 early-stopping behaviour is consistent: any reasonable
-  init quickly nails the cluster-mean discrimination, and further
-  training can't help without features that distinguish within-cluster
-  variation.
-
-The numbers should not be treated as a real generalisation probe
-until the prepared-weather gap is plugged — see TODO
-"Plug the 2025-02-07 → 2026-05-05 weather gap".
-
-**Open questions before lifting to `pv-prospect-model`:**
-- DNI accuracy is likely insufficient as a PV model input; noisy DNI
-  propagates into the POA calculation and then into capacity factor.
-  Consider whether cloud_cover (or similar atmospheric state variable)
-  should be added to the feature set, which would require also
-  including it in the weather extraction and preparation pipeline.
-- Elevation's exclusion from the inference contract is suggestive but
-  not conclusively load-bearing for Scotland — re-evaluate after a
-  continuous test set is available.
-- Re-run the notebook once the weather corpus is gap-free; the
-  current metrics aren't a basis for an architecture or feature-set
-  decision.
+Migrated to `weather-model-trainer.md` (scaffolding, validation history
+including the test-set-composition lesson, and the climatology /
+spatially-blocked evaluation design).
 
 ## Package layout
 

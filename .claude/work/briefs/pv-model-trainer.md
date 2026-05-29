@@ -71,4 +71,4 @@ end-to-end smoke test. ~1–2 days focused work once blockers cleared.
 - **Evaluation:** Report metrics in f-space and clamped-power-space.
 - **Training infra (v1):** Local Python script; Cloud Run Job deployment is later.
 
-See `plans/model-trainer.md` for the full design sketch.
+See `plans/pv-model-trainer.md` for the full design sketch.

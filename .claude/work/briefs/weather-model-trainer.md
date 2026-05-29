@@ -37,5 +37,5 @@ feature spec, eval report).
 **Architecture:** Mirror the PV model conventions in `pv-prospect-model` (shared
 package skeleton, feature building, splits, evaluation, persistence, CLI).
 
-See `briefs/model-trainer.md` for the sibling PV model task and locked-in
+See `briefs/pv-model-trainer.md` for the sibling PV model task and locked-in
 cross-model design decisions (split strategy, training infra, etc.).
