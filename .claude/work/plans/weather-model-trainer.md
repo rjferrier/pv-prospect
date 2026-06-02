@@ -96,6 +96,49 @@ the seasonality baseline. These established the hard ceiling of
 These readings — and the recognition that per-row temporal-hold-out R² is the
 wrong lens — motivate the evaluation design below.
 
+**Spatially-blocked evaluation — first run (2026-06-02, fold 0, monthly +
+elevation, 5-fold, D ∈ {0, 10, 25, 50} km).**
+
+194,512 monthly rows, 20,638 grid points, 1,540 coarse 0.16° blocks. Test
+set: fold 0 = 308 blocks / 40,045 rows.
+
+Block-climatology RMSE and bootstrap 1-σ noise floor:
+
+| Target | floor | IDW D=0 | model D=0 | lift | IDW D=10 | model D=10 | lift | IDW D=25 | model D=25 | lift |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| temperature (°C) | 0.54 | 0.78 | 0.63 | **+20%** | 0.81 | 0.72 | **+11%** | 0.96 | 0.74 | **+24%** |
+| DNI (W/m²) | 15.6 | 16.5 | 17.3 | −5% | 16.3 | 18.7 | −15% | 17.4 | 18.9 | −9% |
+| DHI (W/m²) | 2.48 | 3.11 | 3.98 | −28% | 3.05 | 4.77 | −56% | 3.34 | 4.23 | −27% |
+
+D=50 km result omitted: buffer collapsed the training set to 85 rows (2 blocks).
+The 5-fold scheme with test blocks scattered across the UK creates near-Swiss-
+cheese training at large buffers — see Evaluation design note on this.
+
+**Elevation ablation at D=0 (same fold, base vs +elevation):**
+
+| Target | base (lat/lon) | +elevation | delta | IDW |
+|---|---:|---:|---:|---:|
+| temperature (°C) | 1.017 | 0.672 | **−0.35** | 0.784 |
+| DNI (W/m²) | 18.60 | 18.27 | −0.33 | 16.53 |
+| DHI (W/m²) | 4.36 | 4.34 | −0.02 | 3.11 |
+
+**Conclusions:**
+- **Elevation is load-bearing for temperature**: without elevation, the model
+  (1.017°C) is *worse* than IDW (0.784°C); adding elevation brings it to
+  0.672°C, beating IDW by 14%. The entire temperature lift seen at D=0 (+20%)
+  is elevation-driven — lat/lon alone cannot beat spatial interpolation.
+- **DNI and DHI**: IDW wins at every setting. Both sit close to their bootstrap
+  noise floors (DNI 15.6 W/m², IDW 16.5; DHI 2.48 W/m², IDW 3.11). The model
+  adds noise on top of noise regardless of feature set.
+- **D-curve caveat**: only D=0 is a clean extrapolation test. The scattered-fold
+  buffer depletes training data globally: 1232 blocks at D=0 → 166 at D=25
+  (86% gone). D>0 lift numbers are partly a "less training data" effect, not
+  pure distance. Report D=0 as the headline; D>0 shows model degrades less than
+  IDW under depletion (directional signal) but is not a clean distance curve.
+- **D=50 km**: train collapsed to 85 rows (2 blocks) — result meaningless.
+  Contiguous fold regions (each fold a single geographic rectangle) would fix
+  the D-curve but are a later improvement.
+
 ## The evaluation problem
 
 The current notebook uses a temporal hold-out + per-row R². Three mismatches with
