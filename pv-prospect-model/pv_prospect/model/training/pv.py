@@ -13,13 +13,13 @@ from pv_prospect.model.domain import (
     TrainingConfig,
 )
 from pv_prospect.model.evaluation import build_eval_report
-from pv_prospect.model.features.pv import (
+from pv_prospect.model.features import (
     BINARY_FEATURES,
     CONTINUOUS_FEATURES,
     TARGET_COLUMN,
     build_pv_features,
 )
-from pv_prospect.model.nets.pv import CapacityFactorNet
+from pv_prospect.model.nets import CapacityFactorNet
 from pv_prospect.model.splits import fit_scaler, scale_features, temporal_holdout_split
 from pv_prospect.model.training.loop import run_train_loop
 

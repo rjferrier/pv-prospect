@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler
 
@@ -27,7 +28,7 @@ from pv_prospect.model.domain import (
     SplitMetrics,
     TrainingConfig,
 )
-from pv_prospect.model.nets.pv import CapacityFactorNet
+from pv_prospect.model.nets import CapacityFactorNet
 
 
 def save_artifact(artifact: ModelArtifact, output_dir: Path) -> None:
@@ -75,8 +76,6 @@ def load_artifact(artifact_dir: Path) -> ModelArtifact:
     state_dict = torch.load(artifact_dir / 'model.pt', weights_only=True)
     model.load_state_dict(state_dict)
     model.eval()
-
-    import pandas as pd
 
     return ModelArtifact(
         model=model,
