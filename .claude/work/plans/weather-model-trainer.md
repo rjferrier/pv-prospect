@@ -139,6 +139,29 @@ cheese training at large buffers — see Evaluation design note on this.
   Contiguous fold regions (each fold a single geographic rectangle) would fix
   the D-curve but are a later improvement.
 
+**Coastal proximity screening — first run (2026-06-02, fold 0, D=0).**
+
+Feature sets compared (block-climatology RMSE at D=0, fold 0):
+
+| Target | base | +elev | +elev+coastal | IDW |
+|---|---:|---:|---:|---:|
+| temperature (°C) | 0.94 | 0.67 | 0.71 | 0.78 |
+| DNI (W/m²) | 17.4 | 17.8 | 18.3 | 16.5 |
+| DHI (W/m²) | 3.76 | 4.16 | 4.14 | 3.11 |
+
+Coastal features (`dist_coast_km`, `W_fetch_km`, `SW_fetch_km`, computed via
+`data-exploration/utils/compute_coastal_features.py`, saved to
+`data/static/coastal_features.csv`) do **not** improve over +elevation for
+any target. Temperature lift over IDW drops from +15% to +10%; DNI/DHI
+worsen slightly. Likely reason: the DNI/DHI interannual noise floor dominates;
+coastal signal can't push through. Temperature is already well-captured by
+lat/lon/elevation; coastal features add noise rather than signal.
+
+**Verdict: coastal features deferred.** The +elevation model is the current
+best — it beats IDW for temperature (+15%) and is effectively at the noise
+floor for DNI/DHI. Coastal proximity is a candidate to revisit if more years
+of data reduce the DNI floor.
+
 ## The evaluation problem
 
 The current notebook uses a temporal hold-out + per-row R². Three mismatches with
