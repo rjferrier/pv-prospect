@@ -340,35 +340,29 @@ Cloud Scheduler invokes the `data-transformation` Cloud Run Job directly
 (`_run_transform_backfill` in
 `pv_prospect.data_transformation.processing.entrypoint`) does the full run:
 
-1. **Plan** — `plan_units(scope, ledger_fs, cursors_fs, max_extract_runs)`
+1. **Plan** — `plan_slices(scope, ledger_fs, cursors_fs, max_extract_runs)`
    loads the scope's **consumed-through marker** from
    `tracking/cursors/<workflow>.json`, lists the corresponding extraction
    backfill's consolidated ledgers, takes the oldest `MAX_EXTRACT_RUNS`
    (default 4) whose filename sorts above the marker, and turns every
-   `completed` descriptor into a `TransformUnit`. Returns the units plus
-   the `next_marker` that the marker should advance to once the work
-   succeeds. `failed` extraction entries are skipped (no raw data → no
-   transform task, correctly leaving a hole).
-2. **Filter** — `WorkflowOrchestrator.filter_remaining_tasks` drops units
+   `completed` descriptor into a `PVSlice` or `WeatherSlice`. Returns the
+   slices plus the `next_marker` that the marker should advance to once the
+   work succeeds. `failed` extraction entries are skipped (no raw data, no
+   transform task — correctly leaving a hole).
+2. **Filter** — a direct `completed_task_hashes()` lookup drops slices
    whose hashes already appear `completed` in any prior consolidated
    ledger. (The backfill writes no per-task ledger files, so a fresh run
    resumes from the consolidated layer alone.) This makes the run
-   idempotent: a second invocation re-plans the same units but only the
+   idempotent: a second invocation re-plans the same slices but only the
    unfinished ones run.
-3. **Run** — `build_transform_phases` orders the units into clean →
-   prepare → assemble; `_run_phase_parallel` runs each phase via a
-   `ThreadPoolExecutor` (`MAX_WORKERS=32` by default), so all phase-0
-   tasks finish before phase-1 starts. Three in-memory, thread-safe
-   collectors replace GCS fan-out between worker threads and across
-   phases: a `LedgerCollector` (task outcomes) and a `LogCollector`
-   (write-audit lines), plus a `PreparedBatchCollector` — `prepare`
-   contributes each unit's prepared frame to it and `assemble` drains it,
-   so the prepare → assemble hand-off needs no per-batch CSV on GCS.
-   Per-unit `Exception` is logged and swallowed; the failed entry is in
-   the ledger and the rest of the phase continues.
-   `WorkflowTerminatingError` propagates: pending tasks are cancelled,
-   in-flight tasks finish, and the handler raises out without advancing
-   the marker.
+3. **Run** — remaining slices are dispatched through a `ThreadPoolExecutor`
+   (`MAX_WORKERS=32` by default), each calling `produce_pv_slice` or
+   `produce_weather_slice`. Each function reads the slice's raw inputs,
+   runs clean -> prepare -> assemble entirely in memory, and writes one
+   prepared partition file directly. No `cleaned/` files are written and
+   no per-batch CSV hand-off is needed. Per-slice `Exception` is logged
+   and swallowed (outcome recorded as `failed` in the ledger);
+   `WorkflowTerminatingError` propagates out without advancing the marker.
 4. **Flush** — the `LedgerCollector` and `LogCollector` are each flushed
    once, writing a single consolidated
    `<run_date>-<HHMMSS>-<workflow>.jsonl` / `.txt` — the same files the
@@ -379,7 +373,7 @@ Cloud Scheduler invokes the `data-transformation` Cloud Run Job directly
    ConsumedMarker(next_marker))` advances the marker.
 
 Because the plan is a pure function of the extraction ledger and the
-marker, lowering the marker re-derives the transform units covering the
+marker, lowering the marker re-derives the transform slices covering the
 windows above it. Marker-rewind alone is not sufficient to replay a
 window, though — the resume filter pools `completed` hashes across every
 prior consolidated ledger; see

@@ -25,10 +25,8 @@ The transformation process consists of six steps, organised into three layers:
 - **Role**: Selects a subset of weather features (e.g. `temperature`, `direct_normal_irradiance`, `diffuse_radiation`), injects latitude/longitude/elevation, and downsamples time resolution. This step runs **only for grid-point weather** — the weather-grid backfill — and its prepared rows feed the `weather/` corpus. PV-site weather is cleaned (for the `prepare_pv` join) but never prepared; it is sparse and not wanted in the weather corpus.
 - **Output**: Prepared frames assembled with latitude/longitude/elevation from
   the raw metadata sidecar, ready for merging into `prepared/weather/` partition
-  files. In the in-container backfill (pull mode) this happens inline within
-  `produce_weather_slice` — no separate `assemble_weather` step. In the local
-  runner (push mode), frames are buffered via `PreparedBatchCollector` for a
-  subsequent `assemble_weather` pass.
+  files. This step runs inline within `produce_weather_slice` — no separate
+  `assemble_weather` step.
 
 #### `prepare_pv`
 - **Input**: Cleaned weather CSV + cleaned PV output CSV (`cleaned/`).
@@ -69,12 +67,11 @@ one, so the corpus is retrievable as a whole — see the top-level `README.md`.
 **Two hand-off modes.** In the *daily transform*, `prepare` and `assemble`
 run as separate Cloud Run tasks, so `prepare_pv` writes batch CSVs to
 `prepared-batches/` and `assemble_pv` reads, merges, and deletes them. In the
-*in-container backfill* (pull mode, the default), the whole transform runs in
-one process per slice: `produce_weather_slice` and `produce_pv_slice` each
-read the slice's raw files, run clean → prepare → assemble entirely in memory,
-and write one prepared partition file directly. No intermediate `cleaned/`
-files are written; independent slices execute in a
-`ThreadPoolExecutor(max_workers=32)`.
+*in-container backfill*, the whole transform runs in one process per slice:
+`produce_weather_slice` and `produce_pv_slice` each read the slice's raw
+files, run clean -> prepare -> assemble entirely in memory, and write one
+prepared partition file directly. No intermediate `cleaned/` files are
+written; independent slices execute in a `ThreadPoolExecutor(max_workers=32)`.
 
 #### `assemble_weather`
 - **Input**: The collector's slice for one `(grid_point_sample_index, start,

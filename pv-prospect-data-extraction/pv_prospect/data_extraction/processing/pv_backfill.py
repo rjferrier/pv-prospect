@@ -58,7 +58,6 @@ def _pv_task_env(
         START_DATE=pv_slice.start_date.isoformat(),
         END_DATE=pv_slice.end_date.isoformat(),
         DRY_RUN=dry_run,
-        SPLIT_BY='day',
         WORKFLOW_NAME=WORKFLOW_NAME,
         RUN_DATE=run_date,
     )

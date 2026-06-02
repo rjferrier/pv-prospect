@@ -59,7 +59,6 @@ from pv_prospect.data_extraction import (
     DataSource,
     default_split_period,
     get_extractor,
-    supports_multi_date,
 )
 from pv_prospect.data_extraction.config import DataExtractionConfig
 from pv_prospect.data_extraction.processing import core
@@ -203,10 +202,7 @@ def _final_ranges(
     )
     if split_period is None:
         return [complete_date_range]
-    sub_date_ranges = complete_date_range.split_by(split_period)
-    if split_period == Period.WEEK and not supports_multi_date(data_source):
-        return [d for dr in sub_date_ranges for d in dr.split_by(Period.DAY)]
-    return sub_date_ranges
+    return complete_date_range.split_by(split_period)
 
 
 def _extract_one_site(
@@ -365,8 +361,6 @@ def _extract_into_collectors(
     }
     if end_date_str:
         base_env['END_DATE'] = end_date_str
-    if split_by:
-        base_env['SPLIT_BY'] = split_by
 
     for site in sites:
         locator_name, locator_value = _site_locator(site)
@@ -430,7 +424,6 @@ def _run_plan_extract(
     pv_sources = json.loads(os.environ.get('PV_MODEL_DATA_SOURCES', '[]'))
     weather_sources = json.loads(os.environ.get('WEATHER_MODEL_DATA_SOURCES', '[]'))
     dry_run = os.environ.get('DRY_RUN', 'false')
-    split_by = os.environ.get('SPLIT_BY', '')
     run_label = os.environ.get('RUN_LABEL', '')
 
     orchestrator = WorkflowOrchestrator(
@@ -453,7 +446,6 @@ def _run_plan_extract(
                         DATE=start_date_str,
                         START_DATE=start_date_str,
                         DRY_RUN=dry_run,
-                        SPLIT_BY=split_by,
                         WORKFLOW_NAME=workflow_name,
                         RUN_DATE=run_date,
                     )
@@ -471,7 +463,6 @@ def _run_plan_extract(
                         DATE=start_date_str,
                         START_DATE=start_date_str,
                         DRY_RUN=dry_run,
-                        SPLIT_BY=split_by,
                         WORKFLOW_NAME=workflow_name,
                         RUN_DATE=run_date,
                     )

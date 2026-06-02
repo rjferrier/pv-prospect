@@ -19,11 +19,10 @@ hashes from **every** consolidated transform ledger ever written
 excludes `RUN_DATE`, so a unit the bad run recorded `completed` is
 filtered out on re-run regardless of which day's ledger holds the entry.
 
-The in-memory `PreparedBatchCollector` makes the failure mode sharp:
-`prepare` and `assemble` exchange frames in the same Cloud Run process,
-so if `prepare` is filtered out, the collector has nothing in its slot
-and `assemble` writes no partition file — exactly the silent hole the
-original bad run produced.
+The failure mode is sharp: each slice runs clean -> prepare -> assemble
+in a single call stack, so if the slice is filtered out by the completed
+hash, no partition file is written — exactly the silent hole the original
+bad run produced.
 
 To actually replay, the offending run's consolidated ledger must leave
 the resume-scan root. `tracking/superseded-ledgers/` is outside the scan

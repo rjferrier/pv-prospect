@@ -2,7 +2,6 @@
 
 ## Next
 
-- [ ] [After the pull-mode bake-in (target: ~1 week from cutover)](briefs/pull-mode-cleanup.md)
 - [ ] [Train the weather model](briefs/weather-model-trainer.md)
 
 ## Later
