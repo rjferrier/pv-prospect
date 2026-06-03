@@ -1,4 +1,4 @@
-from pv_prospect.data_versioner.dvc_ops import inject_remote
+from pv_prospect.versioning import inject_remote
 
 
 def test_inject_remote_adds_field_to_each_out() -> None:

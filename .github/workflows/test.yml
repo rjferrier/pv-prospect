@@ -13,6 +13,7 @@ jobs:
           - pv-prospect-common
           - pv-prospect-physics
           - pv-prospect-etl
+          - pv-prospect-versioning
           - pv-prospect-data-sources
           - pv-prospect-data-extraction
           - pv-prospect-data-transformation

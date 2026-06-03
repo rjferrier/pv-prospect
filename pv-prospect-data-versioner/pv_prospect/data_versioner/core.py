@@ -7,16 +7,17 @@ from datetime import date
 from typing import Iterable
 
 from pv_prospect.data_versioner.config import DataVersionerConfig
-from pv_prospect.data_versioner.dvc_ops import dvc_add_files, dvc_push
-from pv_prospect.data_versioner.git_ops import (
+from pv_prospect.data_versioner.readiness import verify_readiness
+from pv_prospect.etl.storage import FileSystem
+from pv_prospect.versioning import (
     clone_instance_repo,
+    dvc_add_files,
+    dvc_push,
     git_commit_and_tag,
     git_push,
     set_commit_identity,
     setup_ssh,
 )
-from pv_prospect.data_versioner.readiness import verify_readiness
-from pv_prospect.etl.storage import FileSystem
 
 logger = logging.getLogger(__name__)
 

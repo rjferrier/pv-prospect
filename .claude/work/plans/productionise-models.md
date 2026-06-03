@@ -226,11 +226,13 @@ and runs only after a clean version.
    and log loudly (the previous model keeps serving).
 6. Push metrics to Cloud Monitoring (§4).
 
-**Shared git/dvc/ssh refactor (`system-design.md`):** the versioner's
-`git_ops`/`dvc_ops`/`setup_ssh` are exactly what the trainer needs. Extract them
-into `pv-prospect-etl` and have both the versioner and trainer consume the shared
-module — this is the worked example in `system-design.md`, so do it rather than
-copy. Separate refactor commit.
+**Shared git/dvc/ssh refactor (`system-design.md`) — DONE:** the versioner's
+`git_ops`/`dvc_ops`/`setup_ssh` are exactly what the trainer needs. Extracted
+into a new `pv-prospect-versioning` package (not `pv-prospect-etl`, to keep the
+heavy `dvc[gs]` stack out of `etl`'s extraction/transformation consumers); the
+data-versioner now consumes it and the trainer will too. The trainer will add
+the `git checkout <tag>` + `dvc pull` operations it additionally needs to the
+same package.
 
 **Terraform:** `artifact_registry` repo `pv-prospect-model`, `cloud_run_job`
 `model-trainer` (needs `GITHUB_DEPLOY_KEY` secret + `model` bucket `objectAdmin` +
@@ -298,11 +300,16 @@ model keeps serving.
 
 ## Suggested phasing (each phase shippable)
 
-1. **Refactors first** (separate commits): shared POA function (§2.5) —
-   **DONE**: extracted to a new `pv-prospect-physics` package
-   (`compute_poa_irradiance`); `prepare_pv` now delegates to it. A new package
-   (rather than `pv-prospect-common`) keeps `pvlib` out of the packages that
-   don't need it. Still to do: shared git/dvc/ssh into `pv-prospect-etl` (§3).
+1. **Refactors first** (separate commits) — **DONE**:
+   - Shared POA function (§2.5): extracted to a new `pv-prospect-physics`
+     package (`compute_poa_irradiance`); `prepare_pv` now delegates to it.
+   - Shared git/dvc/ssh (§3): extracted to a new `pv-prospect-versioning`
+     package (`setup_ssh`, `clone_instance_repo`, `set_commit_identity`,
+     `git_commit_and_tag`, `git_push`, `inject_remote`, `dvc_add_files`,
+     `dvc_push`); the data-versioner now consumes it. Placed in its own
+     package rather than `pv-prospect-etl` (as originally sketched) because
+     `dvc[gs]` is very heavy and `etl` is installed by extraction/transformation
+     — the same dependency-isolation reasoning as the physics package.
    - §2.4 cadence question is also settled: `prepare_pv(timescale_days=1)`
      produces **daily-mean** rows, so the step-6 `× 24 / 1000` integration holds.
 2. **Prediction API against a manually-trained artifact** (§2) — the key objective;

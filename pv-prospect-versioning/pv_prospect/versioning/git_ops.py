@@ -1,4 +1,4 @@
-"""Git operations for data versioning."""
+"""Git operations for versioning a DVC-tracked repo."""
 
 import logging
 import os

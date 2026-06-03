@@ -7,6 +7,7 @@ WORKDIR /build
 # Copy dependency packages
 COPY ./pv-prospect-common /build/pv-prospect-common
 COPY ./pv-prospect-etl /build/pv-prospect-etl
+COPY ./pv-prospect-versioning /build/pv-prospect-versioning
 
 # Copy the data-versioner project
 COPY ./pv-prospect-data-versioner /build/pv-prospect-data-versioner
@@ -24,6 +25,7 @@ RUN poetry export --without=dev --without-hashes -f requirements.txt -o /tmp/req
     pip install --no-cache-dir --no-deps \
     /build/pv-prospect-common \
     /build/pv-prospect-etl \
+    /build/pv-prospect-versioning \
     /build/pv-prospect-data-versioner
 
 
