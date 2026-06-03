@@ -1,4 +1,4 @@
-from .dvc_ops import dvc_add_files, dvc_push, inject_remote
+from .dvc_ops import dvc_add_files, dvc_pull, dvc_push, inject_remote
 from .git_ops import (
     clone_instance_repo,
     git_commit_and_tag,
@@ -10,6 +10,7 @@ from .git_ops import (
 __all__ = [
     'clone_instance_repo',
     'dvc_add_files',
+    'dvc_pull',
     'dvc_push',
     'git_commit_and_tag',
     'git_push',

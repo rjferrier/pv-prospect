@@ -10,6 +10,8 @@ that the **model-trainer** will reuse to version trained model artefacts:
   commit/tag/push of the generated `.dvc` (and `.gitignore`) files.
 - `inject_remote`, `dvc_add_files`, `dvc_push` — DVC add/push with a per-output
   `remote` field so `dvc pull` resolves the remote without an explicit `-r`.
+- `dvc_pull` — pull DVC-tracked files from a named remote (used by the model-trainer
+  bootstrap to fetch the prepared corpus at a `data-v<date>` tag).
 
 ## Why this is a package
 
@@ -28,7 +30,7 @@ heavy `dvc[gs]` + `gitpython` stack stays out of the packages that install
 from pv_prospect.versioning import (
     setup_ssh, clone_instance_repo, set_commit_identity,
     git_commit_and_tag, git_push,
-    inject_remote, dvc_add_files, dvc_push,
+    inject_remote, dvc_add_files, dvc_pull, dvc_push,
 )
 ```
 

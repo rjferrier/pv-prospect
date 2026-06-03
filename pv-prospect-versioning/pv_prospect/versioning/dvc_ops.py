@@ -73,6 +73,28 @@ def _write_remote_to_dvc_file(abs_dvc_path: str, remote_name: str) -> None:
         yaml.safe_dump(dvc_data, f)
 
 
+def dvc_pull(
+    instance_repo_dir: str,
+    remote_name: str,
+    targets: list[str] | None = None,
+) -> None:
+    """Pull DVC-tracked files from the named remote.
+
+    Parameters
+    ----------
+    instance_repo_dir
+        Absolute path to the cloned instance repo.
+    remote_name
+        DVC remote name (e.g. ``feature``).
+    targets
+        Absolute paths of files or directories to pull. ``None`` pulls all
+        tracked files.
+    """
+    logger.info('dvc pull from remote %r in %s', remote_name, instance_repo_dir)
+    with DvcRepo(root_dir=instance_repo_dir) as repo:
+        repo.pull(remote=remote_name, targets=targets)
+
+
 def dvc_push(
     instance_repo_dir: str,
     remote_name: str,
