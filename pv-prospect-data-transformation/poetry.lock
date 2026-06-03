@@ -524,7 +524,7 @@ grpcio-status = [
 ]
 proto-plus = [
     {version = ">=1.25.0,<2.0.0", markers = "python_version >= \"3.13\""},
-    {version = ">=1.22.3,<2.0.0", markers = "python_version < \"3.13\""},
+    {version = ">=1.22.3,<2.0.0"},
 ]
 protobuf = ">=4.25.8,<7.0.0"
 requests = ">=2.20.0,<3.0.0"
@@ -628,7 +628,7 @@ grpcio = [
 ]
 proto-plus = [
     {version = ">=1.25.0,<2.0.0", markers = "python_version >= \"3.13\""},
-    {version = ">=1.22.3,<2.0.0"},
+    {version = ">=1.22.3,<2.0.0", markers = "python_version < \"3.13\""},
 ]
 protobuf = ">=4.25.8,<8.0.0"
 
@@ -1682,6 +1682,26 @@ type = "directory"
 url = "../pv-prospect-etl"
 
 [[package]]
+name = "pv-prospect-physics"
+version = "0.1.0"
+description = "Shared solar-irradiance physics (plane-of-array) for PV Prospect"
+optional = false
+python-versions = "^3.12"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+numpy = ">=2.3.5,<3"
+pandas = ">=2.0.0,<3"
+pv-prospect-common = "*"
+pvlib = ">=0.11.0,<0.12"
+
+[package.source]
+type = "directory"
+url = "../pv-prospect-physics"
+
+[[package]]
 name = "pvlib"
 version = "0.11.2"
 description = "A set of functions and classes for simulating the performance of photovoltaic energy systems."
@@ -2199,4 +2219,4 @@ zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "ac89932d192dc1a76b2ed3a68f07a0366885e877c9c760902d13d33785b2f851"
+content-hash = "311ff91eb7e14b509abf75466439d18119871dd358f5924415a4afe614850007"

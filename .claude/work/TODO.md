@@ -2,6 +2,8 @@
 
 ## Next
 
+- [ ] [Productionise the PV and weather models (prediction API, retrain, monitoring)](briefs/productionise-models.md) — plan: [plans/productionise-models.md](plans/productionise-models.md)
+
 ## Later
 
 - [ ] [Restructure `tracking/` prefix to group files by date](briefs/tracking-restructure.md) 

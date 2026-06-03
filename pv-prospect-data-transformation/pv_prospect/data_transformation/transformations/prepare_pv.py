@@ -1,12 +1,10 @@
 import numpy as np
 import pandas as pd
-import pvlib
 
 from pv_prospect.common.domain import PVSite
 from pv_prospect.data_transformation.helpers import downsample_by_days
 from pv_prospect.data_transformation.helpers.data_operations import reduce_rows
-
-ALTITUDE = 0
+from pv_prospect.physics import compute_poa_irradiance
 
 DEFAULT_KEEP_COLUMNS = (
     'temperature',
@@ -122,8 +120,8 @@ def _calculate_poa_irradiance(df: pd.DataFrame, pv_site: PVSite) -> pd.Series:
     """
     Calculate plane-of-array irradiance for each row in the dataframe.
 
-    Uses pvlib to calculate POA based on DNI, DHI, solar position, and
-    panel geometries (tilt, azimuth, area fraction).
+    Sums the shared POA calculation (``pv_prospect.physics``) over the site's
+    panel geometries, weighted by ``area_fraction``.
 
     Args:
         df: DataFrame containing 'time', 'direct_normal_irradiance', and
@@ -133,42 +131,16 @@ def _calculate_poa_irradiance(df: pd.DataFrame, pv_site: PVSite) -> pd.Series:
     Returns:
         Series with POA irradiance values.
     """
-    location = pvlib.location.Location(
-        float(pv_site.location.latitude),
-        float(pv_site.location.longitude),
-        altitude=ALTITUDE,
-        tz='UTC',
-    )
-
-    # Subtract 30 minutes because data is right-labeled hourly intervals
-    times = df['time'] - pd.Timedelta('30min')
-    times_utc = pd.DatetimeIndex(times).tz_localize('UTC')
-
-    solar_position = location.get_solarposition(times_utc)
-    apparent_zenith = solar_position['apparent_zenith']
-    solar_azimuth = solar_position['azimuth']
-
+    # Subtract 30 minutes because data is right-labelled hourly intervals
+    times = pd.DatetimeIndex(df['time'] - pd.Timedelta('30min'))
     dni = df['direct_normal_irradiance'].values
     dhi = df['diffuse_radiation'].values
 
-    # GHI = DNI * cos(apparent_zenith) + DHI
-    zenith_radians = np.radians(apparent_zenith)
-    ghi = dni * np.cos(zenith_radians) + dhi
-
-    # Calculate POA for each panel geometry, weighted by area_fraction
     poa_total = np.zeros(len(df))
-
-    for panel_geom in pv_site.panel_geometries:
-        poa_components = pvlib.irradiance.get_total_irradiance(
-            surface_tilt=panel_geom.tilt,
-            surface_azimuth=panel_geom.azimuth,
-            dni=dni,
-            ghi=ghi,
-            dhi=dhi,
-            solar_zenith=apparent_zenith,
-            solar_azimuth=solar_azimuth,
-            model='isotropic',
+    for panel_geometry in pv_site.panel_geometries:
+        poa_total += (
+            compute_poa_irradiance(times, dni, dhi, pv_site.location, panel_geometry)
+            * panel_geometry.area_fraction
         )
-        poa_total += poa_components['poa_global'].values * panel_geom.area_fraction
 
     return pd.Series(poa_total, index=df.index)

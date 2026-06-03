@@ -11,6 +11,7 @@ jobs:
       matrix:
         package:
           - pv-prospect-common
+          - pv-prospect-physics
           - pv-prospect-etl
           - pv-prospect-data-sources
           - pv-prospect-data-extraction

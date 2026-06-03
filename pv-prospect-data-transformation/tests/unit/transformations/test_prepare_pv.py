@@ -116,26 +116,6 @@ def test_custom_keep_columns(pv_site, weather_df, pv_df):
     assert list(result.columns) == ['time', 'temperature', 'power']
 
 
-# --- POA irradiance ---
-
-
-def test_poa_irradiance_has_no_meaningfully_negative_values(pv_site, weather_df, pv_df):
-    """POA irradiance should not have meaningfully negative values.
-
-    Note: pvlib's isotropic model can produce negligible negative values at
-    night due to floating-point arithmetic; we tolerate noise < 0.1 W/m².
-    """
-    result = prepare_pv(
-        weather_df,
-        pv_df,
-        pv_site,
-        keep_columns=('plane_of_array_irradiance',),
-        timescale_days=None,
-    )
-
-    assert (result['plane_of_array_irradiance'] >= -0.1).all()
-
-
 # --- Join behaviour ---
 
 

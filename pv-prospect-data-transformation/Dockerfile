@@ -6,6 +6,7 @@ WORKDIR /build
 
 # Copy dependency packages
 COPY ./pv-prospect-common /build/pv-prospect-common
+COPY ./pv-prospect-physics /build/pv-prospect-physics
 COPY ./pv-prospect-etl /build/pv-prospect-etl
 COPY ./pv-prospect-data-sources /build/pv-prospect-data-sources
 
@@ -24,6 +25,7 @@ RUN poetry export --without=dev --without-hashes -f requirements.txt -o /tmp/req
     pip install --no-cache-dir -r /tmp/requirements.txt && \
     pip install --no-cache-dir --no-deps \
     /build/pv-prospect-common \
+    /build/pv-prospect-physics \
     /build/pv-prospect-etl \
     /build/pv-prospect-data-sources \
     /build/pv-prospect-data-transformation

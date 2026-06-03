@@ -78,7 +78,9 @@ before preparation can begin. Implemented in `pv-prospect-data-transformation`.
 ### P — Data Preparation
 
 Reads cleaned CSVs, performs feature selection, downsampling, joins weather with PV
-data, and computes plane-of-array (POA) irradiance via `pvlib`. The PV-side output
+data, and computes plane-of-array (POA) irradiance via the shared
+`pv-prospect-physics` package (`pvlib` under the hood) — shared so the prediction
+API computes POA identically to training. The PV-side output
 also carries `power_max` — the maximum of the native-cadence cleaned PV power over
 each output row's period — derived before the time-weighted average to weather
 cadence so that sub-hour clipping survives the reduction. Downstream model

@@ -16,6 +16,7 @@ This is a Python monorepo with four primary packages and supporting directories:
 | Directory | Purpose |
 |---|---|
 | `pv-prospect-common/` | Shared domain models and utilities |
+| `pv-prospect-physics/` | Shared solar-irradiance physics (plane-of-array), used by both the transformation pipeline and the prediction API |
 | `pv-prospect-etl/` | Storage abstraction (Loader/Extractor protocols) and workflow orchestration (manifests, task-outcome ledger) |
 | `pv-prospect-data-sources/` | Shared constants, path builders, source descriptors |
 | `pv-prospect-data-extraction/` | API extraction pipeline (PVOutput + OpenMeteo) with manifest planning and backfill cursors |
