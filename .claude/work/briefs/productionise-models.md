@@ -57,6 +57,21 @@ range matters.
   *temperature* only (DNI/DHI do not beat IDW — do not alert on them).
 * **New package `pv-prospect-app`** realises the architecture's "App (A)" node and
   houses the Prediction API.
+* **Repo-separation invariant:** `pv-prospect` (public) is *machinery*;
+  `pv-prospect-instance` (private) owns the *corpus and model artifacts*. Nothing
+  private is committed here; corpus/artifact access is config-driven via the
+  instance repo + its DVC remotes (the data-versioner's existing pattern).
+* **Bootstrap to produce models (decided requirement):** `pv-prospect` ships
+  runnable bootstrap code + a "Producing the models" guide — clone instance @
+  `data-v<date>` → `dvc pull -r feature` → `train-*` → artifacts. Whatever form it
+  takes must keep the heavy `dvc[gs]` stack out of `pv-prospect-model` (the serving
+  app imports that package).
+
+* **Trainer packaging (decided):** a new `pv-prospect-model-trainer` package,
+  separate from `pv-prospect-model` (keeps `dvc[gs]` out of the serving app). Only
+  the **local bootstrap mode** is built in Phase 2; the scheduled-job mode +
+  promotion gate + metrics are deferred to the automation phases, growing into the
+  same package without re-homing. See plan §3.
 
 ## Hard problems (flagged, designed in the plan)
 
@@ -74,15 +89,17 @@ wrapper:
   the PV model is on the same scale the model trained on. This must be validated
   against prepared POA for a known site — it is the single biggest correctness
   risk.
-* **POA code must be shared, not re-derived.** `prepare_pv._calculate_poa_irradiance`
-  and the API must call one shared POA function or they will drift. Extract it to a
-  shared module (per `system-design.md`).
+* **POA code must be shared, not re-derived — DONE.** Extracted to the
+  `pv-prospect-physics` package (`compute_poa_irradiance`); `prepare_pv` delegates
+  to it and the API calls the same function, so they cannot drift.
 * **Age for a not-yet-built panel.** Default `age_years = 0`, `age_known = 1`
   (we *do* know a prospect install is new); expose an optional override.
-* **Git/DVC/SSH machinery is duplicated.** The trainer needs the same
-  checkout-tag / dvc-pull / dvc-add / git-tag operations the versioner already has.
-  Extract them into `pv-prospect-etl` rather than copying (the `system-design.md`
-  worked example is literally this situation).
+* **Git/DVC/SSH machinery is duplicated — DONE (for the ops the versioner has).**
+  Extracted to a new `pv-prospect-versioning` package (not `pv-prospect-etl`, to
+  keep the heavy `dvc[gs]` stack out of etl's extraction/transformation
+  consumers); the data-versioner now consumes it. The trainer (Phase 3) will add
+  the `git checkout <tag>` + `dvc pull` ops it additionally needs to the same
+  package.
 
 ## Open question deferred to implementation
 

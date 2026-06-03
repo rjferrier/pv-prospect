@@ -34,6 +34,25 @@ New DVC remote `model` → `gs://<prefix>-versioned-model` (mirrors the existing
 `raw`/`feature` split; per-output `remote:` field as the instance `CLAUDE.md`
 requires).
 
+### Repo separation invariant (governs §1–§3)
+
+**`pv-prospect` (this repo, public) is *machinery*; `pv-prospect-instance`
+(private) owns the *data and model artifacts*.** The prepared corpus and the
+trained-model store both live on the instance side (its repo + private DVC
+remotes / GCS buckets); nothing private is committed to `pv-prospect`. Access is
+config-driven and follows the path the data-versioner already uses — clone the
+instance repo, `dvc pull` the relevant remote. Concretely:
+
+* The **corpus** is obtained by cloning `pv-prospect-instance` at a `data-v<date>`
+  tag and `dvc pull -r feature` (the versioner's `DataVersionerConfig` already
+  carries `instance_repo_url` / `dvc_remote_name` / `prepared_data_dir`).
+* The **model store** (DVC `model` remote + `promoted/` prefix, §1) lives on the
+  instance side too; the public serving app is merely *pointed at* its bucket by
+  config.
+* `pv-prospect` ships the **machinery and a documented bootstrap** to *produce*
+  models from a corpus (§3), never the models themselves. The local `.tmp/`
+  sample is dev-only scratch, not the corpus.
+
 ---
 
 ## 1. Deploy the models in GCP (model store)
@@ -83,8 +102,84 @@ bucket and grant the pipeline SA `objectAdmin` on it (mirrors
 ## 2. Prediction API — `pv-prospect-app` (KEY OBJECTIVE)
 
 New Poetry package `pv-prospect/pv-prospect-app`, Python 3.12, FastAPI + uvicorn,
-depending on `pv-prospect-common`, `pv-prospect-etl`, `pv-prospect-model` (for the
-nets + `load_artifact`/`load_weather_artifact`), and `pvlib`.
+depending on `pv-prospect-common`, `pv-prospect-etl` (storage, to read the
+promoted artifacts), `pv-prospect-model`, `pv-prospect-physics` (shared POA), and
+`pvlib` (clear-sky reconstruction, §2.3).
+
+> **Prerequisite — produce artifacts via the bootstrap (§3.1) before this runs.**
+> The API loads a 4-file trained artifact dir per model (§2.0); the §2.3 POA gate
+> + §5 smoke test need a real prepared corpus. Per the §0 separation invariant the
+> corpus and artifacts are **instance-private** — not in this public repo
+> (`.tmp/prepared/` is dev-only scratch, and in the wrong layout: flat
+> `weather.csv` + `pv/<id>.csv` vs the builders' `weather/weather_*.csv` and
+> `pv/<id>/pv_*.csv`). So **build the local bootstrap (§3.1) first**, then run it to
+> clone `pv-prospect-instance` at a `data-v<date>` tag, `dvc pull -r feature`, and
+> `train-pv` / `train-weather` into a local artifact dir the API points at. This
+> needs instance access (repo URL + read deploy key + DVC remotes) — confirm those
+> are available before starting.
+
+### 2.0 Building blocks already in place (read before coding)
+
+Phase 1 is complete. The inference chain is assembled from existing, tested code
+— **reuse it, do not re-derive**; matching training exactly is the whole point.
+All symbols below are verified present at the cited paths.
+
+* **POA** — `from pv_prospect.physics import compute_poa_irradiance`:
+  `compute_poa_irradiance(times, dni, dhi, location, panel_geometry,
+  altitude=ALTITUDE)` returns `poa_global` (W/m²) for one `PanelGeometry`.
+  `ALTITUDE = 0` (sea level — do **not** pass site elevation; elevation is a
+  weather-model feature only). The caller supplies `times` already
+  label-corrected (tz-naive → UTC). The prediction path builds its own intraday
+  grid (§2.3), so it applies **no** −30 min shift (that shift is `prepare_pv`'s,
+  for its right-labelled hourly data).
+* **Model loading** — `from pv_prospect.model.persistence import load_artifact,
+  load_weather_artifact`. `load_artifact(dir) -> ModelArtifact` (`.model`
+  =`CapacityFactorNet`, `.scaler`, `.feature_spec`, `.eval_report`);
+  `load_weather_artifact(dir) -> WeatherModelArtifact` (`.model` =`WeatherNet`,
+  `.feature_scaler`, `.target_scaler`, `.feature_spec`). Each artifact is a 4-file
+  dir: `model.pt`, `feature_spec.json`, `training_config.json`, `eval_report.json`.
+* **Running a model — the exact transform training/eval use; mirror it:**
+  * **Weather** (`training/weather.py:59-122`): build one row per calendar month
+    with `feature_spec.feature_columns`
+    = `[latitude, longitude, elevation, day_of_year_sin, day_of_year_cos]`;
+    `feats = scale_features(df, artifact.feature_scaler, list(feature_columns), [])`;
+    `scaled = artifact.model(torch.FloatTensor(feats.values)).detach().numpy()`;
+    inverse-transform `raw = scaled * target_scaler_scale + target_scaler_mean`
+    (or `artifact.target_scaler.inverse_transform(scaled)`), columns
+    `= [temperature, direct_normal_irradiance, diffuse_radiation]`.
+  * **PV** (`training/pv.py:65-127`): build a frame with `continuous_features`
+    = `[day_of_year, temperature, plane_of_array_irradiance, age_years]` and
+    `binary_features = [age_known]`;
+    `feats = scale_features(df, artifact.scaler, list(continuous), list(binary))`
+    (scales continuous, appends binary **unscaled**);
+    `cf = artifact.model(torch.FloatTensor(feats.values)).detach().numpy().ravel()`.
+    The net output **is** capacity factor (no final activation).
+  * `scale_features` / `fit_scaler` live in `pv_prospect.model.splits`. **Do this
+    first (directive, not optional):** add `predict_capacity_factor(artifact, df)`
+    and `predict_weather(artifact, df)` to `pv-prospect-model` (a new
+    `pv_prospect/model/inference.py`, re-exported from the package `__init__`),
+    each implementing exactly the transform above, and have the API call them.
+    Refactor training/eval to call the same helpers (same commit or an immediate
+    follow-up) so one inference path serves both — this is the `system-design.md`
+    consistency rule, and it is what prevents the API silently diverging from
+    training.
+* **Weather feature construction** — reuse from `pv_prospect.model.features.weather`:
+  `add_cyclic_day_of_year(df)` (angle = 2π·day_of_year/365.25 → `_sin`/`_cos`) and
+  the **month-midpoint** convention from `downsample_to_monthly`: the
+  representative `time` for a month is its 1st + 14 days. So per month set
+  `time = <month-1st> + 14d`, then derive the cyclic pair from it.
+* **PV feature constants** — `CONTINUOUS_FEATURES`, `BINARY_FEATURES`,
+  `TARGET_COLUMN` in `pv_prospect.model.features.pv`. Inference defaults:
+  `age_years = install_age_years` (default 0), `age_known = 1` (a prospect install
+  is known-new).
+* **Clamp / delivery** — `from pv_prospect.model.evaluation import
+  clamped_power_pred`: `min(cf × panel_capacity, inverter_capacity)`.
+* **Critical metric** (for `/version` + the promotion gate) —
+  `artifact.eval_report.test_power_space.r2`.
+* **Packaging note:** none of the above is re-exported from
+  `pv_prospect.model.__init__` today. Per the package-export convention, add the
+  symbols the app imports to `pv-prospect-model`'s `__init__` (or the new
+  inference module's), rather than importing module paths across packages.
 
 ### 2.1 HTTP contract
 
@@ -115,20 +210,18 @@ GET /version   → loaded model tags + critical metrics + data-version provenanc
 For the requested day-of-year range, grouped by **calendar month** (the weather
 model's native resolution):
 
-1. **Elevation lookup** for `(lat, lon)`. **Source-skew warning:** extraction reads
-   `elevation` from the Open-Meteo *archive/forecast* response — the **grid-cell**
-   elevation the weather model trained on — whereas the standalone `/v1/elevation`
-   endpoint returns the **point** 90 m DEM. These diverge most in the Scottish
-   Highlands, exactly where elevation is "load-bearing", and a skew here biases
-   *temperature* (which flows into the PV model too). **Validation item (its own
-   gate, separate from POA §2.3):** compare candidate inference elevations against
-   the `elevation` column already present in the prepared weather corpus
-   (`weather.py` confirms every partition carries it) for a handful of known
-   coordinates. If `/v1/elevation` matches within tolerance, use it (cache by
-   rounded coordinate); if not, source elevation the way training did (archive-API
-   `elevation`) or interpolate from the corpus grid. Fail closed if unavailable.
-   The §2.3 POA gate will *not* catch this skew — POA is DNI/DHI-driven — so it
-   needs its own check.
+1. **Elevation lookup** for `(lat, lon)` — **default recipe:** source elevation
+   the same way training did — from the Open-Meteo **archive/forecast** response's
+   `elevation` field (the grid-cell value; extraction reads it at
+   `extractors/openmeteo.py:330`), cached by rounded coordinate. Fail closed if
+   unavailable. **Do *not* default to the standalone `/v1/elevation` endpoint:** it
+   returns the **point** 90 m DEM, which diverges from the grid-cell elevation the
+   weather model trained on (worst in the Scottish Highlands), silently biasing
+   *temperature* (which flows into the PV model too) — and the §2.3 POA gate will
+   *not* catch this (POA is DNI/DHI-driven). *Optional sanity check (not a
+   prerequisite branch):* for a handful of known coordinates, compare the chosen
+   elevation against the `elevation` column in the prepared weather corpus (every
+   partition carries it, per `features/weather.py`).
 2. **Domain guard.** Reject (HTTP 422) `(lat, lon)` outside the UK bounding box the
    models were trained on — the weather model is UK-only and must not silently
    extrapolate. Reuse the bounding boxes in `pv-prospect-common`.
@@ -138,12 +231,13 @@ model's native resolution):
    the target scaler → `(temperature, DNI, DHI)` monthly means.
 4. **POA reconstruction** (highest-risk step — see 2.3) → daily-mean
    `plane_of_array_irradiance` for that month, for the caller's `tilt`/`azimuth`.
-5. **PV model** per day in the month: features `[day_of_year, temperature(month),
-   POA(month), age_years, age_known]`, apply the PV scaler, run `CapacityFactorNet`
-   → `capacity_factor`.
-6. **Deliver:** `power_w = min(f × panels_capacity_w, inverter_capacity_w)`;
-   `daily_kwh = power_w × 24 / 1000` (power is a daily-mean watt figure — confirm
-   the training cadence is daily-mean, §2.4); sum days → monthly → annual.
+5. **PV model** per day in the month: build the PV feature frame
+   `[day_of_year, temperature(month), POA(month), age_years, age_known]` and run
+   the PV transform (§2.0) → `capacity_factor`.
+6. **Deliver:** `power_w = clamped_power_pred(cf, panels_capacity_w,
+   inverter_capacity_w)` (§2.0); `daily_kwh = power_w × 24 / 1000` (power is a
+   daily-mean watt figure — confirmed daily-mean, §2.4); sum days → monthly →
+   annual.
 
 ### 2.3 POA reconstruction (the correctness crux)
 
@@ -159,31 +253,34 @@ training:
   the *shape* of hourly DNI/DHI.
 * Scale the shape so its daytime mean equals the weather model's monthly-mean
   DNI/DHI.
-* Compute hourly POA with the **shared** `get_total_irradiance(..., model='isotropic')`
-  call (§2.5) using the caller's `tilt`/`azimuth`, then average to daily-mean POA —
-  exactly the reduction training applied.
+* Compute hourly POA with the shared `compute_poa_irradiance` (§2.0) for the
+  caller's `tilt`/`azimuth` (as a `PanelGeometry`), then average over the day →
+  daily-mean POA — exactly the reduction training applied.
 
 **Validation gate (must pass before trusting the API):** for a known training site
 and period, the API's reconstructed daily-mean POA must match the prepared
 `plane_of_array_irradiance` distribution to a documented tolerance. If the clear-sky
 shape proves too crude, fall back to a calibrated zenith-weighting; either way the
 acceptance criterion is "inference POA ≈ training POA on held-out known sites".
+**Reference POA to compare against:** run `prepare_pv` on a known site (e.g. the
+cleaned 82517 CSV in `.tmp/samples/` joined with matching cleaned weather), or use
+any prepared `pv/<site>/` partition from the versioned corpus; `.tmp/prepared/
+weather.csv` (10 grid points) is a sample for shape inspection.
 
-### 2.4 Cadence confirmation
+### 2.4 Cadence confirmation — CONFIRMED (daily mean)
 
-Confirm from the prepared PV partitions that a row is a **daily mean** (features use
-integer `day_of_year`; weather prepared cadence is daily). If it is sub-daily,
-adjust the energy integration in step 6 accordingly. This is a 10-minute check on a
-real partition before writing the integration.
+`prepare_pv(timescale_days=1)` (the production default) time-weighted-averages to
+1-day rows, so a prepared PV row's `power` is daily-mean watts and
+`capacity_factor = power / panels_capacity` is a daily mean. The step-6
+`× 24 / 1000` integration is therefore correct as written; no adjustment needed.
 
-### 2.5 Shared POA refactor (`system-design.md` consistency)
+### 2.5 Shared POA refactor (`system-design.md` consistency) — DONE
 
-Extract the POA computation into a single shared function (candidate home:
-`pv-prospect-common`, or a small `pv-prospect-transform`-shared module) consumed by
-**both** `prepare_pv` and the API. Signature roughly
-`poa_irradiance(times, dni, dhi, lat, lon, tilt, azimuth) -> Series`. Without this,
-training and inference POA will drift and §2.3's validation will rot. Do this as a
-separate refactor commit ahead of the API work.
+Extracted to the new `pv-prospect-physics` package as `compute_poa_irradiance`
+(contract in §2.0); `prepare_pv` now delegates to it. A dedicated package (rather
+than `pv-prospect-common`) keeps `pvlib` out of the packages that install `common`
+but never compute POA. The API consumes the same function, so training and
+inference POA cannot drift.
 
 ### 2.6 Serving infra
 
@@ -194,10 +291,20 @@ separate refactor commit ahead of the API work.
 * `allow_unauthenticated` Terraform variable (default `false` = IAM auth for
   private testing; `true` for a public demo). When public, an optional
   `X-API-Key` checked in-app against a Secret Manager value bounds casual abuse.
-* Models pulled at start-up: the container clones the instance repo at the promoted
-  `model-v<date>` tag and `dvc pull -r model` (or pulls the artifact objects
-  directly from the model bucket — simpler, no git in the serving image; decide in
-  implementation, leaning "direct object read" to keep the serving image thin).
+* **Models loaded at start-up via direct object read (resolved in §1, not a
+  choice to revisit):** the Service reads each model's promoted 4-file artifact
+  from the `promoted/{pv,weather}/` layout, selected by a `current.json` pointer —
+  **no git and no DVC in the serving image** (the DVC/git-tag path is the
+  *trainer's* lineage mechanism, §1/§3). Use `pv-prospect-etl` storage to fetch the
+  objects, then call `load_artifact`/`load_weather_artifact` (§2.0). Keeps the
+  image thin and avoids pulling `dvc`/`gitpython` into the app.
+  * **The store location is config-driven** (resolves the phase-ordering gap): a
+    **local directory** for dev — which is exactly what the §3.1 bootstrap writes —
+    or `gs://<model-bucket>/promoted/...` in prod, both holding the same
+    `{pv,weather}/` artifact dirs + `current.json`. So Phase 2's bootstrap already
+    yields a readable store; Phase 4 makes the GCS/DVC version first-class **without
+    changing this serving contract**. The bootstrap (§3.1) must therefore write the
+    `promoted/`-style layout + `current.json`, not just a loose artifact dir.
 * `Dockerfile` (torch CPU wheel + pvlib + fastapi/uvicorn). Keep the image CPU-only;
   these nets are tiny.
 * **README** (`pv-prospect-app/README.md`) with demo `curl` examples for both the
@@ -205,7 +312,50 @@ separate refactor commit ahead of the API work.
 
 ---
 
-## 3. Scheduled retraining (item 3)
+## 3. Model trainer — local bootstrap + scheduled retraining (item 3)
+
+> **Status (decided):** a new `pv-prospect-model-trainer` package, with **only the
+> local bootstrap mode (§3.1) implemented in Phase 2**. The scheduled-job mode +
+> promotion gate + metrics (§3.2, §4) are deferred to the automation phases — the
+> package is their permanent home, so they grow in later without re-homing code.
+
+**Package & two run modes.** The trainer is **machinery**, so it lives in
+`pv-prospect` as a new `pv-prospect-model-trainer` package depending on
+`pv-prospect-model` (training code), `pv-prospect-versioning` (clone/dvc/git ops),
+and `pv-prospect-etl`. It is **not** folded into `pv-prospect-model`: that package
+is imported by the serving app and must stay free of the heavy `dvc[gs]` /
+`gitpython` stack (the same dependency-isolation reasoning as `pv-prospect-physics`
+and `pv-prospect-versioning`). One entrypoint, two run modes:
+
+* **Local bootstrap (the Phase-2 enabler — build this first, §3.1).** Run on a dev
+  machine to produce the initial artifacts the API needs: clone
+  `pv-prospect-instance` at a `data-v<date>` tag, `dvc pull -r feature`, then
+  `train-pv` / `train-weather` (§2.0), writing the `promoted/{pv,weather}/` +
+  `current.json` store layout (§2.6) to a local path the API reads; optionally also
+  promote to the instance bucket/DVC. No GCP scheduling required.
+* **Scheduled job (automation — the rest of this section).** The same flow wrapped
+  as a Cloud Run Job, chained off the version workflow, adding the promotion gate
+  (§4) and metrics.
+
+### 3.1 Bootstrap deliverable (public instructions + code)
+
+`pv-prospect` must be self-sufficient as *machinery*: shipping a runnable,
+documented path to produce models from a corpus (the invariant in §0).
+
+* **Code:** the `pv-prospect-model-trainer` entrypoint, runnable locally (e.g.
+  `python -m pv_prospect.model_trainer bootstrap --data-version <date>
+  --output-dir ...`), reusing `pv-prospect-versioning` for clone/`dvc pull` and
+  `pv-prospect-model` for training, and writing the `promoted/`-layout store +
+  `current.json` (§2.6) to `--output-dir` so the API can read it directly.
+* **Config / access (instance-side, never committed here):** instance repo URL, a
+  read deploy key, and the `feature` (and `model`) DVC remote / bucket names —
+  supplied via the same `config-{env}.yaml` + env-var mechanism the versioner
+  uses. Document these as required inputs; **fail closed** if absent.
+* **Docs:** a "Producing the models" section (top-level `README.md` and/or
+  `pv-prospect-model-trainer/README.md`) giving the exact clone → `dvc pull` →
+  `train-*` → (promote) sequence and stating the §0 separation invariant.
+
+### 3.2 Scheduled retraining (automation)
 
 **Trigger:** extend the existing **version Workflow**
 (`terraform/modules/version/workflow`) with a second step that, on versioner
@@ -214,7 +364,8 @@ success, executes a new **model-trainer Cloud Run Job**, passing
 (rather than a separate scheduler) guarantees the trainer pins the *exact* snapshot
 and runs only after a clean version.
 
-**Trainer job** (new entrypoint; reuse `pv-prospect-model`'s training code):
+**Trainer job** (the `pv-prospect-model-trainer` job mode — the §3.1 bootstrap flow
+plus gate + promote + metrics):
 1. SSH + shallow clone instance repo, `git checkout data-v<date>`.
 2. `dvc pull -r feature` the prepared CSVs for that tag.
 3. `train_pv` + `train_weather` (existing code) → artifacts + `eval_report`.
@@ -270,7 +421,7 @@ design.
   → notify.
 * Cloud Run Service 5xx rate / p95 latency / no-healthy-instances → notify.
 
-The promotion gate (§3.4) is what turns "alert on degradation" into an *action*: a
+The promotion gate (§3.2) is what turns "alert on degradation" into an *action*: a
 degraded retrain never reaches the serving path; it raises an alert and the prior
 model keeps serving.
 
@@ -290,11 +441,13 @@ model keeps serving.
 * **End-to-end smoke test:** predict for a known PV site over a past period and
   sanity-check the annual kWh against its actual recorded output — the single most
   valuable integration test, and the acceptance gate for the whole chain.
-* **Docs (finalisation, per `documenting.md`):** new package READMEs; update the
-  top-level `README.md` operational-workflows table to add the trainer step and the
-  Prediction API; document the `model` DVC remote in the instance `CLAUDE.md`
-  (per-output `remote:` rule); architecture diagram update (`doc/architecture.puml`)
-  to add the Service + trainer nodes.
+* **Docs (finalisation, per `documenting.md`):** new package READMEs, including a
+  **"Producing the models"** guide for the bootstrap (§3.1); a top-level statement
+  of the **repo-separation invariant** (§0 — public machinery vs instance-private
+  data/artifacts); update the top-level `README.md` operational-workflows table to
+  add the trainer step and the Prediction API; document the `model` DVC remote in
+  the instance `CLAUDE.md` (per-output `remote:` rule); architecture diagram update
+  (`doc/architecture.puml`) to add the Service + trainer nodes.
 
 ---
 
@@ -312,20 +465,28 @@ model keeps serving.
      — the same dependency-isolation reasoning as the physics package.
    - §2.4 cadence question is also settled: `prepare_pv(timescale_days=1)`
      produces **daily-mean** rows, so the step-6 `× 24 / 1000` integration holds.
-2. **Prediction API against a manually-trained artifact** (§2) — the key objective;
-   demoable end-to-end with the §2.3 POA validation and §5 smoke test as the gate.
-   Manually `train-pv`/`train-weather`, hand-place artifacts in the model store.
-3. **Model store + DVC versioning** (§1) made first-class.
-4. **Automated retrain chained off versioning** (§3).
-5. **Metrics, promotion gate, alerting** (§4).
-6. **Demo hardening + docs** (§5): public toggle, README, architecture update.
+2. **Predict-helper extraction + model-trainer bootstrap** (§2.0, §3.1) — the
+   Phase-2 *enabler*. Add `predict_capacity_factor` / `predict_weather` to
+   `pv-prospect-model`; build the `pv-prospect-model-trainer` bootstrap (clone
+   instance @ `data-v<date>` → `dvc pull -r feature` → `train-*`) and run it to
+   produce the first PV + weather artifacts. Requires instance access (§0 / §3.1).
+3. **Prediction API** (§2) against those artifacts — the key objective; demoable
+   end-to-end, with the §2.3 POA validation and §5 smoke test as the acceptance gate.
+4. **Model store + DVC versioning** (§1) made first-class (trainer promote step,
+   `current.json`, `model` remote).
+5. **Automated retrain chained off versioning** (§3.2): wrap the same trainer as a
+   Cloud Run Job + workflow second step + promotion gate.
+6. **Metrics & alerting** (§4).
+7. **Demo hardening + docs** (§5): public toggle, READMEs (incl. "Producing the
+   models"), architecture update.
 
 ## Risks / watch-items
 
 * **POA reconstruction fidelity (§2.3)** — the make-or-break risk; gate on it.
 * **Cold start** on the Service with `min_instances=0` — first request pays model
-  load + clone/pull. Acceptable for a demo; raise `min_instances` to 1 only if the
-  demo needs snappy first response (small ongoing cost).
+  load + the object fetch of the promoted artifacts from the model bucket (§2.6;
+  no clone/pull — that's the trainer's path). Acceptable for a demo; raise
+  `min_instances` to 1 only if the demo needs a snappy first response (small cost).
 * **Versioner already hangs on exit** (see `briefs/versioner-hang.md`) — chaining a
   second workflow step after it must key off the *job's real success signal*, not
   the flapping "Completed False" badge, or the trainer will never fire.
