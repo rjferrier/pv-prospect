@@ -7,18 +7,21 @@ produces trained model artifacts.
 
 ```
 pv_prospect/model/
-├── domain.py          # FeatureSpec, TrainingConfig, EvalReport, ModelArtifact
+├── domain.py          # Domain types for both models
 ├── features/
-│   └── pv.py          # Load prepared per-site CSVs, apply censoring, augment features
+│   ├── pv.py          # Load prepared per-site CSVs, apply censoring, augment features
+│   └── weather.py     # Load prepared weather partitions, monthly downsample, cyclic encoding
 ├── splits.py          # Temporal hold-out split and StandardScaler fitting
-├── evaluation.py      # Metrics in capacity-factor space and clamped-power space
+├── evaluation.py      # PV metrics + weather block-climatology evaluation
 ├── nets/
-│   └── pv.py          # CapacityFactorNet (4-layer feed-forward network)
+│   ├── pv.py          # CapacityFactorNet (4-layer feed-forward)
+│   └── weather.py     # WeatherNet (4-layer feed-forward, 3 outputs)
 ├── training/
 │   ├── loop.py        # Shared training loop with early stopping
-│   └── pv.py          # train_pv(): full pipeline from data → ModelArtifact
-├── persistence.py     # save_artifact() / load_artifact()
-└── entrypoint.py      # CLI: train-pv, train-weather (stub)
+│   ├── pv.py          # train_pv(): full pipeline from data → ModelArtifact
+│   └── weather.py     # train_weather(): full pipeline from data → WeatherModelArtifact
+├── persistence.py     # save/load artifact for both models
+└── entrypoint.py      # CLI: train-pv, train-weather
 ```
 
 ## PV Model Data Flow
@@ -66,13 +69,13 @@ pv_prospect/model/
 # Install
 poetry install
 
-# Train with defaults (all sites, standard config)
+# Train PV model with defaults (all sites, standard config)
 poetry run python -m pv_prospect.model.entrypoint train-pv \
     --data-root /path/to/prepared \
     --pv-sites-csv /path/to/pv_sites.csv \
     --output-dir /path/to/artifact
 
-# Train on specific sites with a custom cutoff
+# Train PV model on specific sites with a custom cutoff
 poetry run python -m pv_prospect.model.entrypoint train-pv \
     --data-root /path/to/prepared \
     --pv-sites-csv /path/to/pv_sites.csv \
@@ -80,28 +83,44 @@ poetry run python -m pv_prospect.model.entrypoint train-pv \
     --system-ids 25724,56874,61272 \
     --cutoff-quantile 0.75 \
     --num-epochs 200
+
+# Train weather model with defaults
+poetry run python -m pv_prospect.model.entrypoint train-weather \
+    --data-root /path/to/prepared \
+    --output-dir /path/to/weather-artifact
 ```
 
 ## Artifact Format
 
+Both models use the same four-file layout:
+
 ```
 <output_dir>/
 ├── model.pt              # torch.nn.Module state dict
-├── feature_spec.json     # feature order, target column, scaler mean/scale
+├── feature_spec.json     # feature/target columns, scaler params
 ├── training_config.json  # all hyperparameters used
-└── eval_report.json      # metrics in both evaluation spaces
+└── eval_report.json      # evaluation metrics
 ```
 
 Load with:
 
 ```python
-from pv_prospect.model.persistence import load_artifact
+from pv_prospect.model.persistence import load_artifact, load_weather_artifact
 
-artifact = load_artifact('/path/to/artifact')
+# PV artifact
+artifact = load_artifact('/path/to/pv-artifact')
 # artifact.model        → CapacityFactorNet (eval mode)
-# artifact.scaler       → fitted StandardScaler
-# artifact.feature_spec → FeatureSpec (column order, scaler params)
+# artifact.scaler       → fitted StandardScaler (continuous features only)
+# artifact.feature_spec → FeatureSpec (column order, target, scaler params)
 # artifact.eval_report  → EvalReport (R², RMSE, MAE per space and per site)
+
+# Weather artifact
+artifact = load_weather_artifact('/path/to/weather-artifact')
+# artifact.model          → WeatherNet (eval mode)
+# artifact.feature_scaler → fitted StandardScaler (inputs)
+# artifact.target_scaler  → fitted StandardScaler (outputs)
+# artifact.feature_spec   → WeatherFeatureSpec (columns, both scaler params)
+# artifact.eval_report    → WeatherEvalReport (temporal + block-clim metrics)
 ```
 
 ## Design Notes
@@ -118,3 +137,70 @@ artifact = load_artifact('/path/to/artifact')
 - **Tobit / censored regression not used.** Biased days are simply dropped
   (see step 2). The 1% margin was verified against site 82517 (inverter cap
   sharp at 6,000 W, max observed 6,004 W).
+
+---
+
+## Weather Model
+
+Predicts a UK weather **climatology** (not a forecast) for any lat/lon/elevation
+point. Used at inference to estimate the expected weather at an unmeasured
+prospect site, which is then fed into the PV model.
+
+**Input contract:** `(latitude, longitude, elevation, day_of_year_sin, day_of_year_cos)`
+
+**Output contract:** `(temperature, direct_normal_irradiance, diffuse_radiation)`
+
+POA irradiance is *not* an output — it depends on panel orientation and is
+computed downstream in the prediction API.
+
+### Weather Model Data Flow
+
+1. **Load.** Weather CSVs are walked from `{data_root}/weather/weather_*.csv`
+   (one partition per geographic cell). Each row has lat/lon/elevation and daily
+   weather values.
+2. **Downsample to monthly.** Daily rows are collapsed to monthly means per
+   grid cell. Overlapping extraction windows can produce duplicate
+   `(grid, day)` rows; these are de-duplicated before averaging.
+   Monthly aggregation discards within-month cloud-driven noise, which is
+   not learnable from static geographic features.
+3. **Cyclic day-of-year encoding.** `day_of_year` → `(day_of_year_sin,
+   day_of_year_cos)` using a 365.25-day period. The cos component encodes
+   the winter–summer axis (peak near 1 Jan, trough near 1 Jul); the sin
+   component encodes the spring–autumn axis.
+4. **Split.** Temporal hold-out at the 80th-percentile date. Train on the
+   earlier window; test on the later window.
+5. **Scale.** Two separate `StandardScaler`s — one for features, one for
+   targets — both fitted on train only. The target scaler is required because
+   temperature, DNI, and DHI have very different physical scales.
+6. **Train.** `WeatherNet`: 4 uniform layers × 64 units, Dropout(0.1), 3
+   outputs. MSE loss on standardised targets, Adam, early stopping on a
+   temporal val slice.
+7. **Evaluate.** Two sections in the artifact:
+   - *Temporal test*: per-target R²/RMSE on the held-out test rows (smoke
+     check; temporal R² reflects interannual noise, not spatial skill).
+   - *Block-climatology vs IDW*: model predictions and IDW predictions both
+     pushed through the same block-level climatology aggregation
+     (`assign_coarse_blocks` → `block_climatology`), then compared against
+     observed block climatologies. This is the honest holdout signal.
+8. **Persist.** Same four-file artifact layout as the PV model, with
+   `feature_spec.json` holding params for both the feature and target scalers.
+
+### Weather Design Notes
+
+- **Elevation is load-bearing.** Without elevation, temperature RMSE (1.017°C)
+  is *worse* than IDW interpolation (0.784°C). Adding elevation brings it to
+  0.672°C, beating IDW by 14%. The Scottish Highlands have a structural
+  temperature bias that survives monthly averaging; lat/lon alone cannot
+  represent it.
+- **DNI and DHI are near the noise floor.** Their interannual variance is
+  cloud-driven and absent from the static feature set. The model does not beat
+  IDW for these targets; it is retained because a single artifact covering all
+  three outputs simplifies the downstream prediction API.
+- **Features must be static and inference-available.** Cloud cover and other
+  dynamic atmospheric state are excluded as a category error: they are
+  unknowable at a prospect site / future period, and they target variance that
+  a long-run yield estimate averages out.
+- **Two scalers, not one.** Feature and target distributions have very
+  different scales (~15× difference between temperature and DNI). Both are
+  stored as tuple params in `WeatherFeatureSpec` for JSON round-trip without
+  pickling sklearn objects.

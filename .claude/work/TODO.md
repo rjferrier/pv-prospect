@@ -2,8 +2,6 @@
 
 ## Next
 
-- [ ] [Train the weather model](briefs/weather-model-trainer.md)
-
 ## Later
 
 - [ ] [Restructure `tracking/` prefix to group files by date](briefs/tracking-restructure.md) 
