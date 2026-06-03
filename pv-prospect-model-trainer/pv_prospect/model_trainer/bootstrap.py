@@ -67,6 +67,8 @@ def bootstrap_models(
             env=env,
         )
 
+        # DVC resolves the remote from each .dvc file's per-output remote: field.
+        # config.feature_remote_name is reserved for the scheduled-job promote step.
         dvc_pull(clone_dir)
 
         data_root = Path(clone_dir) / config.prepared_data_dir

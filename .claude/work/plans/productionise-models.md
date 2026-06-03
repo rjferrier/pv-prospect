@@ -465,11 +465,13 @@ model keeps serving.
      — the same dependency-isolation reasoning as the physics package.
    - §2.4 cadence question is also settled: `prepare_pv(timescale_days=1)`
      produces **daily-mean** rows, so the step-6 `× 24 / 1000` integration holds.
-2. **Predict-helper extraction + model-trainer bootstrap** (§2.0, §3.1) — the
-   Phase-2 *enabler*. Add `predict_capacity_factor` / `predict_weather` to
-   `pv-prospect-model`; build the `pv-prospect-model-trainer` bootstrap (clone
-   instance @ `data-v<date>` → `dvc pull -r feature` → `train-*`) and run it to
-   produce the first PV + weather artifacts. Requires instance access (§0 / §3.1).
+2. **Predict-helper extraction + model-trainer bootstrap** (§2.0, §3.1) — **DONE**:
+   - `predict_capacity_factor` / `predict_weather` in `pv-prospect-model/inference.py`;
+     training refactored to call the same core helpers.
+   - `pv-prospect-model-trainer` bootstrap: clone @ `data-v<date>` → `dvc pull` →
+     `train-*` → writes `promoted/{pv,weather}/` + `current.json` store.
+   - `dvc_pull` added to `pv-prospect-versioning`.
+   - Bootstrap run: `data-v2026-05-31`, PV R²=0.845. Disk→load→predict seam verified.
 3. **Prediction API** (§2) against those artifacts — the key objective; demoable
    end-to-end, with the §2.3 POA validation and §5 smoke test as the acceptance gate.
 4. **Model store + DVC versioning** (§1) made first-class (trainer promote step,
