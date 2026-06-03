@@ -1,4 +1,4 @@
-"""Domain types for the PV model trainer."""
+"""Domain types shared by the PV and weather model trainers."""
 
 from __future__ import annotations
 
@@ -102,4 +102,97 @@ class ModelArtifact:
     feature_spec: FeatureSpec
     training_config: TrainingConfig
     eval_report: EvalReport
+    cutoff: pd.Timestamp
+
+
+# ---------------------------------------------------------------------------
+# Weather model types
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WeatherTrainingConfig:
+    """Hyperparameters and data-splitting settings for weather model training."""
+
+    cutoff_quantile: float = 0.8
+    val_fraction: float = 0.1
+    patience: int = 10
+    num_epochs: int = 100
+    batch_size: int = 256
+    learning_rate: float = 1e-3
+
+
+@dataclass(frozen=True)
+class WeatherFeatureSpec:
+    """Feature/target schema and fitted scaler parameters for the weather model.
+
+    Both the feature scaler and the target scaler are stored here so the
+    artifact can be fully reconstructed from JSON without pickling sklearn
+    objects. The target scaler is required because temperature (°C), DNI
+    (W/m²), and DHI (W/m²) have very different natural scales; without
+    target scaling the MSE loss is dominated by DNI.
+    """
+
+    feature_columns: tuple[str, ...]
+    target_columns: tuple[str, ...]
+    feature_scaler_mean: tuple[float, ...]
+    feature_scaler_scale: tuple[float, ...]
+    target_scaler_mean: tuple[float, ...]
+    target_scaler_scale: tuple[float, ...]
+
+    @property
+    def input_size(self) -> int:
+        return len(self.feature_columns)
+
+
+@dataclass(frozen=True)
+class WeatherTargetMetrics:
+    """Regression metrics for a single weather target on a single split."""
+
+    target: str
+    r2: float
+    rmse: float
+    mae: float
+    bias: float
+
+
+@dataclass(frozen=True)
+class WeatherEvalReport:
+    """Evaluation metrics for the weather model.
+
+    ``temporal_test`` — per-row metrics on the temporal hold-out test set.
+    Training smoke-check only: temporal-holdout R² reflects interannual
+    noise fitting, not spatial generalisation.
+
+    ``block_clim_model`` — block-level climatology RMSE comparing model
+    predictions to observed block climatologies, evaluated on the temporal
+    test set.
+
+    ``block_clim_idw`` — same blocks, same observed reference, but
+    predictions come from IDW of training-set block climatologies. Provides
+    the natural interpolation baseline.
+
+    Both block metrics use the temporal hold-out test rows as the reference,
+    so they measure climatology prediction quality on genuinely unseen data.
+    The spatial-fold evaluation (with geographic hold-out) is performed
+    separately in data-exploration and is the validation of record for
+    spatial generalisation.
+    """
+
+    temporal_test: tuple[WeatherTargetMetrics, ...]
+    block_clim_model: tuple[WeatherTargetMetrics, ...]
+    block_clim_idw: tuple[WeatherTargetMetrics, ...]
+    cutoff: str
+
+
+@dataclass
+class WeatherModelArtifact:
+    """In-memory bundle produced by the weather training pipeline."""
+
+    model: nn.Module
+    feature_scaler: StandardScaler
+    target_scaler: StandardScaler
+    feature_spec: WeatherFeatureSpec
+    training_config: WeatherTrainingConfig
+    eval_report: WeatherEvalReport
     cutoff: pd.Timestamp

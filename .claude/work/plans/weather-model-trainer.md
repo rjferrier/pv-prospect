@@ -238,19 +238,36 @@ known sites?
    held-out climatology error / raises lift-over-IDW — not when it merely raises
    per-row temporal R².
 
-## Plumbing (`common_cross_grid.py`)
+## Package implementation (`pv-prospect-model`) — completed 2026-06-03
 
-- `spatial_block_split(df, block_deg, buffer_km, fold)`
-- `block_climatology(df, by=['block', 'month_of_year'])`
-- `idw_baseline(train_climatology, test_blocks)`
-- evaluation module: layered per-variable bias/RMSE + bootstrap floor.
-- Loader, scaling, and training loop reused unchanged.
+The weather model is now implemented in `pv-prospect-model`. Files added:
+
+| File | Purpose |
+|---|---|
+| `features/weather.py` | Loader, `downsample_to_monthly`, `add_cyclic_day_of_year`, `build_weather_features` |
+| `nets/weather.py` | `WeatherNet` — 4 × 64 uniform layers, dropout 0.1, 3 outputs |
+| `training/weather.py` | `train_weather(data_root, config)` → `WeatherModelArtifact` |
+| `evaluation.py` (extended) | `assign_coarse_blocks`, `block_climatology`, `idw_predictions`, `evaluate_block_climatology`, `build_weather_eval_report` |
+| `persistence.py` (extended) | `save_weather_artifact`, `load_weather_artifact` |
+| `domain.py` (extended) | `WeatherTrainingConfig`, `WeatherFeatureSpec`, `WeatherTargetMetrics`, `WeatherEvalReport`, `WeatherModelArtifact` |
+| `entrypoint.py` (extended) | `train-weather` CLI command |
+
+**Artifact eval report contents:** Two sections:
+1. `temporal_test` — per-target per-row R²/RMSE on the temporal hold-out test set
+   (training smoke check; temporal R² reflects interannual noise, not spatial skill).
+2. `block_clim_model` / `block_clim_idw` — block-climatology RMSE comparing model
+   predictions (and IDW) against observed block climatologies computed from the
+   temporal test set. This is the honest holdout signal in the artifact.
+
+The spatial-fold evaluation (fold 0, D=0, geographic hold-out, true extrapolation
+probe) is in `data-exploration/main_models/neural-network-cross-grid-weather-spatial-eval.ipynb`
+and is documented in the **Spatially-blocked evaluation** section above.
 
 ## MVP vs north-star
 
-- **MVP (now):** blocked hold-out + per-variable block-climatology bias/RMSE + IDW
-  baseline + bootstrap floor. Sufficient to screen elevation and coastal features
-  immediately — it does not block the feature work.
+- **MVP (done):** blocked hold-out + per-variable block-climatology bias/RMSE + IDW
+  baseline + bootstrap floor in data-exploration; package implementation in
+  `pv-prospect-model` with temporal + block-climatology eval in the artifact.
 - **Later:** accumulate more years to firm up the climatology (especially DNI); a
   finer coastline if estuary-scale detail is ever needed. Downstream energy-yield
   validation belongs to the end-to-end PV pipeline, not to this model.

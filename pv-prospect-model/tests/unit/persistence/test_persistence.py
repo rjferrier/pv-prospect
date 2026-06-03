@@ -17,7 +17,7 @@ from pv_prospect.model.domain import (
 )
 from pv_prospect.model.nets.pv import CapacityFactorNet
 from pv_prospect.model.persistence import (
-    _scaler_from_feature_spec,
+    _scaler_from_params,
     load_artifact,
     save_artifact,
 )
@@ -44,7 +44,11 @@ def _make_artifact() -> ModelArtifact:
         cutoff='2026-01-01',
     )
     model = CapacityFactorNet(feature_spec.input_size)
-    scaler = _scaler_from_feature_spec(feature_spec)
+    scaler = _scaler_from_params(
+        feature_spec.scaler_mean,
+        feature_spec.scaler_scale,
+        n_features=len(feature_spec.continuous_features),
+    )
     return ModelArtifact(
         model=model,
         scaler=scaler,

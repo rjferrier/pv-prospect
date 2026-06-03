@@ -11,6 +11,14 @@ from .pv import (
     load_prepared_pv_partitions,
     load_site_metadata,
 )
+from .weather import (
+    FEATURE_COLUMNS,
+    TARGET_COLUMNS,
+    add_cyclic_day_of_year,
+    build_weather_features,
+    downsample_to_monthly,
+    load_prepared_weather_partitions,
+)
 
 __all__ = [
     'BINARY_FEATURES',
@@ -24,4 +32,10 @@ __all__ = [
     'compute_age_years',
     'load_prepared_pv_partitions',
     'load_site_metadata',
+    'FEATURE_COLUMNS',
+    'TARGET_COLUMNS',
+    'add_cyclic_day_of_year',
+    'build_weather_features',
+    'downsample_to_monthly',
+    'load_prepared_weather_partitions',
 ]

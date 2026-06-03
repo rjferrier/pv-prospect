@@ -1,14 +1,14 @@
-"""CLI entrypoint: train-pv and (stub) train-weather."""
+"""CLI entrypoint: train-pv and train-weather."""
 
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
-from pv_prospect.model.domain import TrainingConfig
-from pv_prospect.model.persistence import save_artifact
+from pv_prospect.model.domain import TrainingConfig, WeatherTrainingConfig
+from pv_prospect.model.persistence import save_artifact, save_weather_artifact
 from pv_prospect.model.training.pv import train_pv
+from pv_prospect.model.training.weather import train_weather
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -55,7 +55,37 @@ def _build_parser() -> argparse.ArgumentParser:
     pv.add_argument('--batch-size', type=int, default=TrainingConfig.batch_size)
     pv.add_argument('--learning-rate', type=float, default=TrainingConfig.learning_rate)
 
-    sub.add_parser('train-weather', help='(stub) Train the weather model')
+    weather = sub.add_parser('train-weather', help='Train the weather climatology model')
+    weather.add_argument(
+        '--data-root',
+        required=True,
+        type=Path,
+        help='Root of prepared data (contains weather/ subdirectory)',
+    )
+    weather.add_argument(
+        '--output-dir',
+        required=True,
+        type=Path,
+        help='Directory to write the artifact into',
+    )
+    weather.add_argument(
+        '--cutoff-quantile',
+        type=float,
+        default=WeatherTrainingConfig.cutoff_quantile,
+    )
+    weather.add_argument(
+        '--val-fraction', type=float, default=WeatherTrainingConfig.val_fraction
+    )
+    weather.add_argument('--patience', type=int, default=WeatherTrainingConfig.patience)
+    weather.add_argument(
+        '--num-epochs', type=int, default=WeatherTrainingConfig.num_epochs
+    )
+    weather.add_argument(
+        '--batch-size', type=int, default=WeatherTrainingConfig.batch_size
+    )
+    weather.add_argument(
+        '--learning-rate', type=float, default=WeatherTrainingConfig.learning_rate
+    )
 
     return parser
 
@@ -82,6 +112,32 @@ def _cmd_train_pv(args: argparse.Namespace) -> None:
     print(f'Test R² (clamped-power):   {artifact.eval_report.test_power_space.r2:.4f}')
 
 
+def _cmd_train_weather(args: argparse.Namespace) -> None:
+    config = WeatherTrainingConfig(
+        cutoff_quantile=args.cutoff_quantile,
+        val_fraction=args.val_fraction,
+        patience=args.patience,
+        num_epochs=args.num_epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+    )
+    artifact = train_weather(data_root=args.data_root, config=config)
+    save_weather_artifact(artifact, args.output_dir)
+    print(f'\nArtifact saved to {args.output_dir}')
+    for m in artifact.eval_report.temporal_test:
+        print(f'  Temporal test R² ({m.target}): {m.r2:.4f}  RMSE: {m.rmse:.4f}')
+    print()
+    for m in artifact.eval_report.block_clim_model:
+        idw = next(
+            i for i in artifact.eval_report.block_clim_idw if i.target == m.target
+        )
+        lift_pct = 100.0 * (idw.rmse - m.rmse) / idw.rmse
+        print(
+            f'  Block-clim RMSE ({m.target}): model={m.rmse:.4f}  '
+            f'IDW={idw.rmse:.4f}  lift={lift_pct:+.1f}%'
+        )
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -89,8 +145,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == 'train-pv':
         _cmd_train_pv(args)
     elif args.command == 'train-weather':
-        print('train-weather not yet implemented', file=sys.stderr)
-        sys.exit(1)
+        _cmd_train_weather(args)
 
 
 if __name__ == '__main__':
