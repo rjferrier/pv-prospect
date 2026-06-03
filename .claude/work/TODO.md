@@ -6,6 +6,7 @@
 
 ## Later
 
+- [ ] [Align OpenMeteo vintage between prepared-weather and prepared-PV corpora](briefs/weather-pv-vintage-alignment.md) — root cause of ~30% yield underestimate in Prediction API
 - [ ] [Restructure `tracking/` prefix to group files by date](briefs/tracking-restructure.md) 
 - [ ] [Investigate the data-versioner hang-on-exit](briefs/versioner-hang.md)
 - [ ] [Clarify end-date semantics in backfill cursors and manifests](briefs/end-date-semantics.md)

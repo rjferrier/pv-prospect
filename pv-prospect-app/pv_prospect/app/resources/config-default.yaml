@@ -1,0 +1,3 @@
+# Path to the promoted-artifact store written by pv-prospect-model-trainer bootstrap.
+# Override in config-local.yaml with the path from your local bootstrap run.
+store_dir: '/tmp/pv-prospect-models'
