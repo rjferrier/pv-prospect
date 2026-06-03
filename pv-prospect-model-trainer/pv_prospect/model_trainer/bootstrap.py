@@ -67,8 +67,7 @@ def bootstrap_models(
             env=env,
         )
 
-        prepared_abs = os.path.join(clone_dir, config.prepared_data_dir)
-        dvc_pull(clone_dir, config.feature_remote_name, targets=[prepared_abs])
+        dvc_pull(clone_dir)
 
         data_root = Path(clone_dir) / config.prepared_data_dir
         pv_sites_csv = Path(clone_dir) / config.pv_sites_csv_path

@@ -75,24 +75,24 @@ def _write_remote_to_dvc_file(abs_dvc_path: str, remote_name: str) -> None:
 
 def dvc_pull(
     instance_repo_dir: str,
-    remote_name: str,
-    targets: list[str] | None = None,
+    remote_name: str | None = None,
 ) -> None:
-    """Pull DVC-tracked files from the named remote.
+    """Pull all DVC-tracked files from the named remote.
+
+    When ``remote_name`` is ``None``, DVC resolves the remote from each
+    ``.dvc`` file's per-output ``remote:`` field (the pattern the versioner
+    uses). Pass an explicit name to override.
 
     Parameters
     ----------
     instance_repo_dir
         Absolute path to the cloned instance repo.
     remote_name
-        DVC remote name (e.g. ``feature``).
-    targets
-        Absolute paths of files or directories to pull. ``None`` pulls all
-        tracked files.
+        DVC remote name to use, or ``None`` to resolve per-file remotes.
     """
-    logger.info('dvc pull from remote %r in %s', remote_name, instance_repo_dir)
+    logger.info('dvc pull (remote=%r) in %s', remote_name, instance_repo_dir)
     with DvcRepo(root_dir=instance_repo_dir) as repo:
-        repo.pull(remote=remote_name, targets=targets)
+        repo.pull(remote=remote_name)
 
 
 def dvc_push(
