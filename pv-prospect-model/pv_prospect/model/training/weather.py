@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -19,6 +18,7 @@ from pv_prospect.model.features.weather import (
     TARGET_COLUMNS,
     build_weather_features,
 )
+from pv_prospect.model.inference import _run_weather_forward
 from pv_prospect.model.nets.weather import WeatherNet
 from pv_prospect.model.splits import fit_scaler, scale_features, temporal_holdout_split
 from pv_prospect.model.training.loop import run_train_loop
@@ -60,7 +60,6 @@ def train_weather(
     target_scaler = fit_scaler(train_df, list(TARGET_COLUMNS))
 
     train_features = scale_features(train_df, feature_scaler, list(FEATURE_COLUMNS), [])
-    test_features = scale_features(test_df, feature_scaler, list(FEATURE_COLUMNS), [])
     train_targets_scaled = scale_features(
         train_df, target_scaler, list(TARGET_COLUMNS), []
     )
@@ -110,18 +109,12 @@ def train_weather(
     model.load_state_dict(result.best_state)
     model.eval()
 
-    with torch.no_grad():
-        train_pred_scaled = (
-            model(torch.FloatTensor(train_features.values).to(device)).cpu().numpy()
-        )
-        test_pred_scaled = (
-            model(torch.FloatTensor(test_features.values).to(device)).cpu().numpy()
-        )
-
-    target_scale = np.array(feature_spec.target_scaler_scale)
-    target_mean = np.array(feature_spec.target_scaler_mean)
-    train_pred_raw = train_pred_scaled * target_scale + target_mean
-    test_pred_raw = test_pred_scaled * target_scale + target_mean
+    train_pred_raw = _run_weather_forward(
+        model, feature_scaler, feature_spec, train_df
+    ).values
+    test_pred_raw = _run_weather_forward(
+        model, feature_scaler, feature_spec, test_df
+    ).values
 
     eval_report = build_weather_eval_report(
         train_targets_raw=train_df[list(TARGET_COLUMNS)].values,

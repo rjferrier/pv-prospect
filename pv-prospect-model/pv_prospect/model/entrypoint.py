@@ -55,7 +55,9 @@ def _build_parser() -> argparse.ArgumentParser:
     pv.add_argument('--batch-size', type=int, default=TrainingConfig.batch_size)
     pv.add_argument('--learning-rate', type=float, default=TrainingConfig.learning_rate)
 
-    weather = sub.add_parser('train-weather', help='Train the weather climatology model')
+    weather = sub.add_parser(
+        'train-weather', help='Train the weather climatology model'
+    )
     weather.add_argument(
         '--data-root',
         required=True,

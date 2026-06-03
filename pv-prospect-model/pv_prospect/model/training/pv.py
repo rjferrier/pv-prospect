@@ -19,6 +19,7 @@ from pv_prospect.model.features import (
     TARGET_COLUMN,
     build_pv_features,
 )
+from pv_prospect.model.inference import _run_pv_forward
 from pv_prospect.model.nets import CapacityFactorNet
 from pv_prospect.model.splits import fit_scaler, scale_features, temporal_holdout_split
 from pv_prospect.model.training.loop import run_train_loop
@@ -66,9 +67,6 @@ def train_pv(
     train_features = scale_features(
         train_df, scaler, list(CONTINUOUS_FEATURES), list(BINARY_FEATURES)
     )
-    test_features = scale_features(
-        test_df, scaler, list(CONTINUOUS_FEATURES), list(BINARY_FEATURES)
-    )
 
     feature_spec = FeatureSpec(
         continuous_features=tuple(CONTINUOUS_FEATURES),
@@ -114,19 +112,8 @@ def train_pv(
     model.load_state_dict(result.best_state)
     model.eval()
 
-    with torch.no_grad():
-        train_pred_cf = (
-            model(torch.FloatTensor(train_features.values).to(device))
-            .cpu()
-            .numpy()
-            .flatten()
-        )
-        test_pred_cf = (
-            model(torch.FloatTensor(test_features.values).to(device))
-            .cpu()
-            .numpy()
-            .flatten()
-        )
+    train_pred_cf = _run_pv_forward(model, scaler, feature_spec, train_df)
+    test_pred_cf = _run_pv_forward(model, scaler, feature_spec, test_df)
 
     eval_report = build_eval_report(
         train_target=train_df[TARGET_COLUMN].values,

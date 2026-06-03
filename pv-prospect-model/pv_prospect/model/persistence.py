@@ -209,7 +209,9 @@ def _scaler_from_params(
 def _weather_eval_report_from_dict(d: dict) -> WeatherEvalReport:  # type: ignore[type-arg]
     return WeatherEvalReport(
         temporal_test=tuple(WeatherTargetMetrics(**m) for m in d['temporal_test']),
-        block_clim_model=tuple(WeatherTargetMetrics(**m) for m in d['block_clim_model']),
+        block_clim_model=tuple(
+            WeatherTargetMetrics(**m) for m in d['block_clim_model']
+        ),
         block_clim_idw=tuple(WeatherTargetMetrics(**m) for m in d['block_clim_idw']),
         cutoff=d['cutoff'],
     )

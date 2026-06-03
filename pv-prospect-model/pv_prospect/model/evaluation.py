@@ -123,7 +123,9 @@ _EARTH_RADIUS_KM = 6371.0
 _BLOCK_DEG = 0.16
 
 
-def assign_coarse_blocks(df: pd.DataFrame, block_deg: float = _BLOCK_DEG) -> pd.DataFrame:
+def assign_coarse_blocks(
+    df: pd.DataFrame, block_deg: float = _BLOCK_DEG
+) -> pd.DataFrame:
     """Add ``block_row`` and ``block_col`` integer identifiers to each row.
 
     Each block is a ``block_deg`` × ``block_deg`` tile in (lat, lon) space.
@@ -187,8 +189,12 @@ def idw_predictions(
     """
     result_rows = []
     for month in sorted(test_clim['month_of_year'].unique()):
-        test_month = test_clim[test_clim['month_of_year'] == month].reset_index(drop=True)
-        train_month = train_clim[train_clim['month_of_year'] == month].reset_index(drop=True)
+        test_month = test_clim[test_clim['month_of_year'] == month].reset_index(
+            drop=True
+        )
+        train_month = train_clim[train_clim['month_of_year'] == month].reset_index(
+            drop=True
+        )
         if train_month.empty:
             continue
 
@@ -265,7 +271,9 @@ def build_weather_eval_report(
         WeatherTargetMetrics(
             target=t,
             r2=float(r2_score(test_targets_raw[:, i], test_pred_raw[:, i])),
-            rmse=float(np.sqrt(mean_squared_error(test_targets_raw[:, i], test_pred_raw[:, i]))),
+            rmse=float(
+                np.sqrt(mean_squared_error(test_targets_raw[:, i], test_pred_raw[:, i]))
+            ),
             mae=float(mean_absolute_error(test_targets_raw[:, i], test_pred_raw[:, i])),
             bias=float(np.mean(test_pred_raw[:, i] - test_targets_raw[:, i])),
         )
@@ -280,9 +288,9 @@ def build_weather_eval_report(
     train_clim = block_climatology(train_with_pred, target_columns)
     obs_clim = block_climatology(test_with_pred, target_columns)
     pred_clim_df = test_with_pred.copy()
-    pred_clim_df[target_columns] = test_with_pred[[f'{t}_pred' for t in target_columns]].rename(
-        columns={f'{t}_pred': t for t in target_columns}
-    )
+    pred_clim_df[target_columns] = test_with_pred[
+        [f'{t}_pred' for t in target_columns]
+    ].rename(columns={f'{t}_pred': t for t in target_columns})
     model_clim = block_climatology(pred_clim_df, target_columns)
 
     idw_clim = idw_predictions(obs_clim, train_clim, target_columns)

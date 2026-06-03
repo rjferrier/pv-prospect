@@ -49,8 +49,12 @@ def test_new_year_and_year_end_are_adjacent() -> None:
     result = add_cyclic_day_of_year(df)
     # sin encodes spring–autumn axis; cos encodes winter–summer axis.
     # Jan 1 has cos ≈ 1; Jul 1 has cos ≈ -1; Dec 31 has cos ≈ 1.
-    gap_year_ends = abs(result.loc[0, 'day_of_year_cos'] - result.loc[1, 'day_of_year_cos'])
-    gap_to_summer = abs(result.loc[0, 'day_of_year_cos'] - result.loc[2, 'day_of_year_cos'])
+    gap_year_ends = abs(
+        result.loc[0, 'day_of_year_cos'] - result.loc[1, 'day_of_year_cos']
+    )
+    gap_to_summer = abs(
+        result.loc[0, 'day_of_year_cos'] - result.loc[2, 'day_of_year_cos']
+    )
     assert gap_year_ends < 0.05
     assert gap_to_summer > 1.5
 
