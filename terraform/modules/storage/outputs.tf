@@ -17,3 +17,8 @@ output "versioned_feature_bucket_name" {
   value       = google_storage_bucket.versioned_feature.name
   description = "Name of the versioned feature data bucket"
 }
+
+output "versioned_model_bucket_name" {
+  value       = google_storage_bucket.versioned_model.name
+  description = "Name of the versioned model artifacts bucket"
+}

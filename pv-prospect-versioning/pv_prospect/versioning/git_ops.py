@@ -79,17 +79,23 @@ def git_commit_and_tag(
     dvc_file_paths: list[str],
     tag: str,
     message: str,
+    extra_paths: list[str] | None = None,
 ) -> None:
-    """Stage ``.dvc`` and ``.gitignore`` files, commit, and tag.
+    """Stage ``.dvc``, ``.gitignore``, and any extra files, commit, and tag.
 
     DVC ``add`` creates or updates ``.gitignore`` entries alongside ``.dvc``
-    files, so those are staged too.
+    files, so those are staged too.  Pass ``extra_paths`` (relative to the
+    repo root) for additional tracked files to commit in the same changeset
+    (e.g. ``models/current.json``).
     """
     repo.index.add(dvc_file_paths)
 
     gitignore_paths = _find_gitignore_files(repo, dvc_file_paths)
     if gitignore_paths:
         repo.index.add(gitignore_paths)
+
+    if extra_paths:
+        repo.index.add(extra_paths)
 
     logger.info('Committing: %s', message)
     repo.index.commit(message)

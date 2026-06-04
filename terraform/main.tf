@@ -331,6 +331,14 @@ resource "google_storage_bucket_iam_member" "pipeline_versioned_feature" {
   member = "serviceAccount:${google_service_account.pipeline.email}"
 }
 
+# The pipeline SA needs full access to the versioned-model bucket for DVC
+# push + plain serving-path upload from the model-trainer job.
+resource "google_storage_bucket_iam_member" "pipeline_versioned_model" {
+  bucket = module.storage.versioned_model_bucket_name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
 module "cloud_run_version" {
   source                = "./modules/cloud_run_job"
   job_name              = "data-versioner"
@@ -453,6 +461,11 @@ output "pipeline_service_account_email" {
 output "staging_bucket_name" {
   value       = module.storage.staging_bucket_name
   description = "Name of the staging bucket"
+}
+
+output "versioned_model_bucket_name" {
+  value       = module.storage.versioned_model_bucket_name
+  description = "Name of the versioned model artifacts bucket"
 }
 
 output "artifact_registry_extractor_url" {

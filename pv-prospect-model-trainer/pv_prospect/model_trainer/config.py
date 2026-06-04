@@ -15,6 +15,9 @@ class ModelTrainerConfig:
     feature_remote_name: str
     prepared_data_dir: str
     pv_sites_csv_path: str
+    model_remote_name: str
+    model_dir: str
+    model_bucket_name: str
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ModelTrainerConfig':
@@ -24,4 +27,7 @@ class ModelTrainerConfig:
             feature_remote_name=data.get('feature_remote_name', 'feature'),
             prepared_data_dir=data.get('prepared_data_dir', 'data/prepared'),
             pv_sites_csv_path=data.get('pv_sites_csv_path', 'data/static/pv_sites.csv'),
+            model_remote_name=data.get('model_remote_name', 'model'),
+            model_dir=data.get('model_dir', 'models'),
+            model_bucket_name=data.get('model_bucket_name', ''),
         )

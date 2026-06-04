@@ -26,21 +26,23 @@ def inject_remote(dvc_data: dict[str, Any], remote_name: str) -> None:
 
 def dvc_add_files(
     instance_repo_dir: str,
-    prepared_data_dir: str,
+    data_dir: str,
     file_paths: list[str],
     remote_name: str,
 ) -> list[str]:
-    """Run ``dvc add`` on each file, returning generated ``.dvc`` file paths.
+    """Run ``dvc add`` on each path, returning generated ``.dvc`` file paths.
 
     Parameters
     ----------
     instance_repo_dir
         Absolute path to the cloned pv-prospect-instance repo.
-    prepared_data_dir
-        Relative directory within the instance repo (e.g. ``data/prepared``).
+    data_dir
+        Relative directory within the instance repo (e.g. ``data/prepared``
+        or ``models``).
     file_paths
-        Relative paths within *prepared_data_dir*
-        (e.g. ``['weather.csv', 'pv/89665.csv']``).
+        Relative paths within *data_dir*
+        (e.g. ``['weather.csv', 'pv/89665.csv']`` or ``['pv', 'weather']``).
+        May refer to files or directories.
     remote_name
         DVC remote name to embed in each generated ``.dvc`` file so that
         ``dvc pull`` resolves the remote without an explicit ``-r`` flag.
@@ -53,7 +55,7 @@ def dvc_add_files(
     dvc_file_paths: list[str] = []
     with DvcRepo(root_dir=instance_repo_dir) as repo:
         for rel_path in file_paths:
-            rel_target = os.path.join(prepared_data_dir, rel_path)
+            rel_target = os.path.join(data_dir, rel_path)
             abs_target = os.path.join(instance_repo_dir, rel_target)
             logger.info('dvc add %s', rel_target)
             repo.add(targets=abs_target)

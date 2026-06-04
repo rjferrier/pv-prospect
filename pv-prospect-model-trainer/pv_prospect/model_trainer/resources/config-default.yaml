@@ -3,3 +3,8 @@ instance_repo_branch: 'main'
 feature_remote_name: 'feature'
 prepared_data_dir: 'data/prepared'
 pv_sites_csv_path: 'data/static/pv_sites.csv'
+model_remote_name: 'model'
+model_dir: 'models'
+# Leave empty for local-only promote (no GCS serving-path upload).
+# Set to the versioned-model bucket name for production promote.
+model_bucket_name: ''

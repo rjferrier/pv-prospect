@@ -483,8 +483,20 @@ model keeps serving.
      vintage-mismatch bias documented in every response caveat.
    - Smoke test (site 89665 east/west, data-v2026-05-31): predicted 12,743 kWh vs
      actual ~13,800 kWh annualized (8% underestimate) — acceptable for demo.
-4. **Model store + DVC versioning** (§1) made first-class (trainer promote step,
-   `current.json`, `model` remote).
+4. **Model store + DVC versioning** (§1) made first-class — **DONE**:
+   - `model` DVC remote added to instance `.dvc/config` → `gs://pv-prospect-versioned-model`.
+   - `bootstrap` now writes `provenance.json` (data-tag SHA, trained-at, critical metric)
+     alongside `current.json` in the artifact store.
+   - New `promote` subcommand: clones instance repo at main, copies 4-file artifacts to
+     `models/{pv,weather}/`, `dvc add` + push to `model` remote, commits `models/current.json`
+     + `models/provenance.json`, tags `model-v<date>`, pushes.  If `model_bucket_name`
+     configured, also uploads serving artifacts to `gs://<bucket>/promoted/...`.
+   - `pv-prospect-versioning`: `dvc_add_files` param renamed `prepared_data_dir` → `data_dir`;
+     `git_commit_and_tag` gains `extra_paths` for committing plain files alongside `.dvc` files.
+   - `pv-prospect-app`: `load_store` accepts `gs://<bucket>` URI — downloads artifacts to a
+     temp dir via `google-cloud-storage`, then delegates to the local loader.
+   - Terraform: `versioned_model` bucket added to storage module; DVC SA gets `objectCreator`,
+     pipeline SA gets `objectAdmin` on it; `versioned_model_bucket_name` output added.
 5. **Automated retrain chained off versioning** (§3.2): wrap the same trainer as a
    Cloud Run Job + workflow second step + promotion gate.
 6. **Metrics & alerting** (§4).
