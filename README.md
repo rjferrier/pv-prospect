@@ -106,20 +106,36 @@ merges them into the partition files. Implemented in
 
 ### A — App Data Loading
 
-Loads versioned model data and trained model weights into the application at
-startup.
+At startup, `pv-prospect-app` downloads the promoted model artifacts from the
+model store (`gs://pv-prospect-versioned-model/promoted/` in production, or a
+local directory for development) and loads them into memory. The store is written
+by the model trainer's promote step (see M below). See `pv-prospect-app` for the
+`/predict`, `/healthz`, and `/version` endpoints.
 
-### V — Data/Model Versioning
+### V — Data Versioning
 
-Snapshots prepared CSV data and trained model artefacts on a weekly cadence,
-producing a versioned dataset for the next training run.
+Snapshots prepared CSV data on a weekly cadence: stages `.dvc` files pointing at
+the prepared-feature corpus and pushes them to `gs://pv-prospect-versioned-feature`,
+then commits and tags `data-v<date>` in the instance repo. Implemented in
+`pv-prospect-data-versioner`.
 
 ### M — Model Training
 
-Trains two neural networks from versioned CSV data: one to predict weather
-variables (temperature, DNI, DHI) from location and time, and another to predict
-PV power output from POA irradiance and other features. Implemented in
-`pv-prospect-model`.
+Triggered automatically by the version workflow (V) on success. The model trainer
+(`pv-prospect-model-trainer`):
+
+1. Clones `pv-prospect-instance` at the `data-v<date>` tag and `dvc pull`s the
+   prepared corpus.
+2. Trains two neural networks (`pv-prospect-model`): a weather model (temperature,
+   DNI, DHI from location + time) and a PV model (capacity factor from POA
+   irradiance, temperature, age).
+3. Runs a **promotion gate** — compares the new model's clamped-power R² against
+   the incumbent. If the new model degrades beyond the configured tolerance, it is
+   rejected and the incumbent continues serving.
+4. If promoted: `dvc add`s the artifacts, pushes to `gs://pv-prospect-versioned-model`
+   (DVC lineage), copies the 4-file serving artifacts to the `promoted/` prefix
+   (plain GCS, read by A), commits `models/current.json` + `models/provenance.json`,
+   and tags `model-v<date>` in the instance repo.
 
 ## Operational Workflows
 
@@ -171,9 +187,24 @@ Workflows on a daily or weekly basis:
   it can advance separately from the PV-sites transform backfill. The start
   time sits past the weather-grid extract's ~06:44 finish + consolidation, so
   the planner always sees a consolidated ledger to read from.
-* **Data Versioning (`data-versioner`)**: Runs weekly at **Sunday 23:00 UTC**.
-  Snapshots prepared CSV data and trained model artefacts, producing a versioned
-  dataset for the next training run.
+* **Data Versioning + Model Training (`pv-prospect-version` workflow)**: Runs weekly
+  at **Sunday 23:00 UTC**. A two-step Cloud Workflow:
+  1. **Data versioner** (`data-versioner` Cloud Run Job): snapshots the prepared CSV
+     corpus, pushes to `gs://pv-prospect-versioned-feature`, commits and tags
+     `data-v<date>` in the instance repo.
+  2. **Model trainer** (`model-trainer` Cloud Run Job): clones the instance repo at
+     the new data tag, pulls the corpus, trains both models, runs the promotion gate,
+     and if promoted: pushes artifacts to `gs://pv-prospect-versioned-model`, commits
+     `model-v<date>`. The model trainer always runs after the versioner step, even if
+     the versioner's Cloud Run status reports non-success (the versioner has a known
+     hang-on-exit bug — see `briefs/versioner-hang.md` — that reports failure despite
+     completing all work; the trainer self-verifies by cloning the `data-v<date>` tag).
+
+* **Prediction API (`pv-prospect-app`)**: A Cloud Run Service that loads the promoted
+  model artifacts from `gs://pv-prospect-versioned-model/promoted/` at startup and
+  serves `/predict`, `/healthz`, and `/version` endpoints. Scale-to-zero with
+  `max_instances=2`. Set `allow_unauthenticated=true` in Terraform for a public demo
+  (default is IAM-authenticated).
 
 > **Scheduling rationale**: The daily extraction and PV-sites extraction backfill
 > both use the PVOutput API, which rate-limits at 300 requests/hour. With

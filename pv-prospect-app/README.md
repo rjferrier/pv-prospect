@@ -5,14 +5,23 @@ reconstruction → PV model to produce climatological annual/monthly yield estim
 
 ## Quick start (local dev)
 
-```bash
-# Produce artifacts first (requires pv-prospect-model-trainer):
-# RUNTIME_ENV=local CONFIG_DIR=... python -m pv_prospect.model_trainer bootstrap \
-#     --data-version 2026-05-31 --output-dir /tmp/pv-prospect-models
+Produce artifacts first with `pv-prospect-model-trainer`:
 
+```bash
+python -m pv_prospect.model_trainer bootstrap \
+    --data-version 2026-05-31 \
+    --output-dir /tmp/pv-prospect-models
+```
+
+Then start the API (the default config points `store_dir` at `/tmp/pv-prospect-models`):
+
+```bash
 poetry install
 poetry run uvicorn pv_prospect.app.main:app --reload
 ```
+
+The `store_dir` config value can be overridden via the `STORE_DIR` environment
+variable (e.g. `STORE_DIR=gs://pv-prospect-versioned-model` in production).
 
 ## Endpoints
 
@@ -22,7 +31,7 @@ GET  /healthz   → 200 once models are loaded
 GET  /version   → loaded model versions + critical metric
 ```
 
-### Example request
+### Example request (local / public demo)
 
 ```bash
 curl -X POST http://localhost:8000/predict \
@@ -35,6 +44,28 @@ curl -X POST http://localhost:8000/predict \
     "inverter_capacity_w": 8000
   }'
 ```
+
+### Example request (authenticated Cloud Run Service)
+
+```bash
+TOKEN=$(gcloud auth print-identity-token)
+curl -X POST https://<service-url>/predict \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "latitude": 52.65, "longitude": 0.78,
+    "start_date": "2025-01-01", "end_date": "2025-12-31",
+    "panels_capacity_w": 7800,
+    "azimuth_deg": 180, "tilt_deg": 36,
+    "inverter_capacity_w": 8000
+  }'
+```
+
+## Configuration
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `store_dir` | `/tmp/pv-prospect-models` | Artifact store path. Override with `STORE_DIR` env var (e.g. `gs://pv-prospect-versioned-model` in production). Local path for dev; `gs://` URI for Cloud Run. |
 
 ## Known limitation
 

@@ -2,6 +2,7 @@
 
 !include theme.puml
 
+
 collections "Third Party APIs" as ThirdPartyAPIs
 
 database Staging {
@@ -14,40 +15,38 @@ database Staging {
 database "Versioned Raw Data" as VersionedRaw
 database "Versioned Feature Store" as VersionedFeature
 
-component "Data Extractor" as DataExtractor
-component "Data Transformer" as DataTransformer
-
-component Models {
-  component "Weather Model" as WeatherModel
-  component "PV Model" as PvModel
-}
+database "Versioned Model Store" as VersionedModel
 
 component "Model Trainer" as ModelTrainer
 
-component "PV Prospect App" as PvProspectApp {
-  component "Prediction API" as PredictionApi
-  component "Validation API" as ValidationApi
-  component "In-Memory Data" as InMemoryData
-}
-
+component "Data Extractor" as DataExtractor
+component "Data Transformer" as DataTransformer
 component "Data Versioner" as DataVersioner
 database "Project Instance Repo" as ProjectInstanceRepo #transparent
+
+component "PV Prospect App" as PvProspectApp {
+  component "Prediction API" as PredictionApi
+  component "Weather Model" as WeatherModel
+  component "PV Model" as PvModel
+  ' Roadmap (not yet implemented):
+  component "Validation API <<roadmap>>" as ValidationApi
+  component "In-Memory Data <<roadmap>>" as InMemoryData
+}
 
 actor User
 
 
-User --> ValidationApi
 User --> PredictionApi : lat, lon, period
 
-PredictionApi ---> WeatherModel : DNI, DHI, \ntemperature = \ncall_model(\nlat, lon, \nday, year)
+PredictionApi --> WeatherModel : DNI, DHI, \ntemperature = \ncall_model(\nlat, lon, \nday, year)
 PredictionApi <- PredictionApi : calculate_POA
-PredictionApi ----> PvModel : predicted\nenergy \nyield = \ncall_model(\nPOA, \ntemperature)
+PredictionApi --> PvModel : predicted\nenergy \nyield = \ncall_model(\nPOA, \ntemperature)
 
-ValidationApi --> PvModel : predicted\nenergy\nyield = \ncall_model(\nPOA, \ntemperature, \nsite ID)
-ValidationApi --> InMemoryData : get_actual_energy_yield()
-
-VersionedFeature <-- ModelTrainer : M1: pull
-Models <-- ModelTrainer : M2: train
+' Roadmap flows (not yet implemented):
+User --> ValidationApi #lightgray
+ValidationApi --> PvModel #lightgray
+ValidationApi --> InMemoryData #lightgray
+InMemoryData <--- DataVersioner #lightgray
 
 ThirdPartyAPIs <-- DataExtractor : E2: call
 
@@ -61,16 +60,19 @@ DataTransformer <- DataTransformer : P2: calculate_POA
 DataTransformer --> StagingPrepared : P3: put
 StagingCleaned -[hidden]> StagingPrepared
 
-InMemoryData <--- DataTransformer : P3: put
+component "Data Transformer" as DataTransformer
 
 StagingRaw <-- DataVersioner : V1: get
 VersionedRaw <- DataVersioner : V2: push (using DVC)
 
 StagingPrepared <-- DataVersioner : V3: get
 VersionedFeature <-- DataVersioner : V4: push (using DVC)
-DataVersioner -> ProjectInstanceRepo : V5: push (using Git)
+DataVersioner -> ProjectInstanceRepo : V5: tag data-v<date>
 
-InMemoryData ---> VersionedFeature : A1: pull
-InMemoryData ---> StagingPrepared : A2: get
+VersionedFeature <-- ModelTrainer : M1: pull (dvc)
+VersionedModel <-- ModelTrainer : M2: push promoted\nartifacts (DVC +\nplain serving path)
+ProjectInstanceRepo <- ModelTrainer : M3: tag model-v<date>
+
+PvProspectApp ---> VersionedModel : A1: load promoted\nartifacts at startup
 
 @enduml

@@ -1,9 +1,5 @@
 # TODO
 
-## Next
-
-- [ ] [Productionise the PV and weather models (prediction API, retrain, monitoring)](briefs/productionise-models.md) — plan: [plans/productionise-models.md](plans/productionise-models.md)
-
 ## Later
 
 - [ ] [Align OpenMeteo vintage between prepared-weather and prepared-PV corpora](briefs/weather-pv-vintage-alignment.md) — root cause of ~30% yield underestimate in Prediction API
