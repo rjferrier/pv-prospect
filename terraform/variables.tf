@@ -104,6 +104,12 @@ variable "versioner_image_tag" {
   description = "Docker image tag for the data versioner container"
 }
 
+variable "model_trainer_image_tag" {
+  type        = string
+  default     = "latest"
+  description = "Docker image tag for the model trainer container"
+}
+
 variable "versioner_scheduler_cron" {
   type        = string
   default     = "0 23 * * 0"

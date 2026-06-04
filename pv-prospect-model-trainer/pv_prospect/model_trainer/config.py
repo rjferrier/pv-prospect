@@ -18,6 +18,7 @@ class ModelTrainerConfig:
     model_remote_name: str
     model_dir: str
     model_bucket_name: str
+    promotion_tolerance: float
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ModelTrainerConfig':
@@ -30,4 +31,5 @@ class ModelTrainerConfig:
             model_remote_name=data.get('model_remote_name', 'model'),
             model_dir=data.get('model_dir', 'models'),
             model_bucket_name=data.get('model_bucket_name', ''),
+            promotion_tolerance=float(data.get('promotion_tolerance', 0.02)),
         )

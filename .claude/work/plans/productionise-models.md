@@ -497,8 +497,15 @@ model keeps serving.
      temp dir via `google-cloud-storage`, then delegates to the local loader.
    - Terraform: `versioned_model` bucket added to storage module; DVC SA gets `objectCreator`,
      pipeline SA gets `objectAdmin` on it; `versioned_model_bucket_name` output added.
-5. **Automated retrain chained off versioning** (§3.2): wrap the same trainer as a
-   Cloud Run Job + workflow second step + promotion gate.
+5. **Automated retrain chained off versioning** (§3.2) — **DONE**:
+   - `gate.py`: `passes_promotion_gate(new, incumbent, tolerance)` pure function + `get_incumbent_metric(bucket_name)` reading `gs://<bucket>/current.json`.
+   - `trainer.py`: `run_trainer_job` composes bootstrap → gate → promote; returns bool (promoted or rejected).
+   - `job.py`: Cloud Run Job entrypoint — reads `DATA_VERSION` env var, calls `run_trainer_job`.
+   - `ModelTrainerConfig`: `promotion_tolerance` field (default 0.02).
+   - `Dockerfile`: CPU torch wheel + git/openssh; CMD `python -m pv_prospect.model_trainer.job`.
+   - Terraform: `artifact_registry` repo `pv-prospect-model`; `cloud_run_job` `model-trainer` (4Gi, 3600s, `GITHUB_DEPLOY_KEY` from Secret Manager); `model_trainer_image_tag` variable; outputs.
+   - Version workflow extended: `run_versioner` step wrapped in `try/except` (handles versioner hang bug — see `briefs/versioner-hang.md`); new `run_trainer` step passes `DATA_VERSION` = version_date.
+   - `deploy.sh`: `build-trainer` stage added; included in `build` and `all` aliases; `registry` stage includes `artifact_registry_model`.
 6. **Metrics & alerting** (§4).
 7. **Demo hardening + docs** (§5): public toggle, READMEs (incl. "Producing the
    models"), architecture update.

@@ -26,6 +26,7 @@ def test_from_dict_uses_defaults_for_optional_keys() -> None:
     assert config.model_remote_name == 'model'
     assert config.model_dir == 'models'
     assert config.model_bucket_name == ''
+    assert config.promotion_tolerance == 0.02
 
 
 def test_from_dict_accepts_optional_overrides() -> None:
@@ -38,6 +39,7 @@ def test_from_dict_accepts_optional_overrides() -> None:
         'model_remote_name': 'my-model',
         'model_dir': 'artifacts',
         'model_bucket_name': 'my-versioned-model',
+        'promotion_tolerance': 0.05,
     }
     config = ModelTrainerConfig.from_dict(data)
     assert config.instance_repo_branch == 'develop'
@@ -47,6 +49,7 @@ def test_from_dict_accepts_optional_overrides() -> None:
     assert config.model_remote_name == 'my-model'
     assert config.model_dir == 'artifacts'
     assert config.model_bucket_name == 'my-versioned-model'
+    assert config.promotion_tolerance == 0.05
 
 
 def test_from_dict_raises_on_missing_required_key() -> None:

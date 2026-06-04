@@ -19,12 +19,13 @@ usage() {
   echo "    build-extraction      — build and push extraction Docker image"
   echo "    build-transformation  — build and push transformation Docker image"
   echo "    build-versioner       — build and push data-versioner Docker image"
+  echo "    build-trainer         — build and push model-trainer Docker image"
   echo "    terraform-extraction  — apply extraction infrastructure (Cloud Run, Workflows, Schedulers)"
   echo "    terraform-transform   — apply transformation infrastructure (Cloud Run, Workflow)"
   echo "    terraform             — apply all infrastructure (full apply)"
   echo ""
   echo "  Shorthand aliases:"
-  echo "    build   = build-extraction,build-transformation,build-versioner"
+  echo "    build   = build-extraction,build-transformation,build-versioner,build-trainer"
   echo "    all     = registry,build,terraform  (the default)"
   echo ""
   echo "Examples:"
@@ -56,8 +57,8 @@ fi
 expand_stages() {
   echo "$1" | tr ',' '\n' | while read -r stage; do
     case "$stage" in
-      all)      echo "registry"; echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "terraform" ;;
-      build)    echo "build-extraction"; echo "build-transformation"; echo "build-versioner" ;;
+      all)      echo "registry"; echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer"; echo "terraform" ;;
+      build)    echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer" ;;
       *)        echo "$stage" ;;
     esac
   done
@@ -91,6 +92,7 @@ resolve_image_urls() {
   IMAGE_URL_EXTRACT=$(terraform output -raw artifact_registry_extractor_url)/data-extraction
   IMAGE_URL_TRANSFORM=$(terraform output -raw artifact_registry_transformer_url)/data-transformation
   IMAGE_URL_VERSION=$(terraform output -raw artifact_registry_versioner_url)/data-versioner
+  IMAGE_URL_MODEL=$(terraform output -raw artifact_registry_model_trainer_url)/model-trainer
   gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 }
 
@@ -102,6 +104,7 @@ if run_stage registry; then
     -target=module.artifact_registry_extract \
     -target=module.artifact_registry_transform \
     -target=module.artifact_registry_version \
+    -target=module.artifact_registry_model \
     -auto-approve
 fi
 
@@ -133,6 +136,16 @@ if run_stage build-versioner; then
   echo "Building: $IMAGE_URL_VERSION:latest"
   docker build -t "$IMAGE_URL_VERSION:latest" --target entrypoint -f ../pv-prospect-data-versioner/Dockerfile ..
   docker push "$IMAGE_URL_VERSION:latest"
+fi
+
+# 2d. Build and push model-trainer image
+if run_stage build-trainer; then
+  echo ""
+  echo "[build-trainer] Building and pushing model-trainer Docker image..."
+  resolve_image_urls
+  echo "Building: $IMAGE_URL_MODEL:latest"
+  docker build -t "$IMAGE_URL_MODEL:latest" --target entrypoint -f ../pv-prospect-model-trainer/Dockerfile ..
+  docker push "$IMAGE_URL_MODEL:latest"
 fi
 
 # 3a. Apply extraction infrastructure

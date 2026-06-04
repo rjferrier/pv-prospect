@@ -8,3 +8,6 @@ model_dir: 'models'
 # Leave empty for local-only promote (no GCS serving-path upload).
 # Set to the versioned-model bucket name for production promote.
 model_bucket_name: ''
+# Maximum allowed degradation below the incumbent model's R² before promotion
+# is rejected (e.g. 0.02 = 2 percentage points).
+promotion_tolerance: 0.02

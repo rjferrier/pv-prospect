@@ -362,14 +362,45 @@ module "cloud_run_version" {
   depends_on = [google_project_service.apis, module.artifact_registry_version]
 }
 
+module "artifact_registry_model" {
+  source        = "./modules/artifact_registry"
+  region        = var.region
+  repository_id = "pv-prospect-model"
+}
+
+module "cloud_run_model_trainer" {
+  source                = "./modules/cloud_run_job"
+  job_name              = "model-trainer"
+  region                = var.region
+  image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/pv-prospect-model/model-trainer"
+  image_tag             = var.model_trainer_image_tag
+  timeout               = "3600s"
+  cpu                   = "2"
+  memory                = "4Gi"
+  service_account_email = google_service_account.pipeline.email
+  env_vars = {
+    GOOGLE_CLOUD_PROJECT = var.project_id
+    LOG_LEVEL            = "INFO"
+    RUNTIME_ENV          = "default"
+  }
+  secret_env_vars = [{
+    name      = "GITHUB_DEPLOY_KEY"
+    secret_id = "github-deploy-key"
+    version   = "latest"
+  }]
+
+  depends_on = [google_project_service.apis, module.artifact_registry_model]
+}
+
 module "version_workflow" {
   source = "./modules/version/workflow"
   region = var.region
 
   service_account_email = google_service_account.pipeline.email
   cloud_run_job_name    = module.cloud_run_version.job_name
+  trainer_job_name      = module.cloud_run_model_trainer.job_name
 
-  depends_on = [google_project_service.apis, module.cloud_run_version]
+  depends_on = [google_project_service.apis, module.cloud_run_version, module.cloud_run_model_trainer]
 }
 
 module "version_scheduler" {
@@ -531,6 +562,16 @@ output "extractor_scheduler_job_name" {
 output "artifact_registry_versioner_url" {
   value       = module.artifact_registry_version.repository_url
   description = "Docker registry URL for data versioner"
+}
+
+output "artifact_registry_model_trainer_url" {
+  value       = module.artifact_registry_model.repository_url
+  description = "Docker registry URL for model trainer"
+}
+
+output "model_trainer_cloud_run_job_name" {
+  value       = module.cloud_run_model_trainer.job_name
+  description = "Model trainer Cloud Run Job name"
 }
 
 output "version_workflow_name" {

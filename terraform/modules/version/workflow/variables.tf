@@ -12,3 +12,8 @@ variable "cloud_run_job_name" {
   type        = string
   description = "Name of the data-versioner Cloud Run Job"
 }
+
+variable "trainer_job_name" {
+  type        = string
+  description = "Name of the model-trainer Cloud Run Job"
+}
