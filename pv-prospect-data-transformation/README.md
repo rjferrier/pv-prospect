@@ -104,6 +104,29 @@ written; independent slices execute in a `ThreadPoolExecutor(max_workers=32)`.
   that system on a later run. The daily path also deletes consumed batches.
 - **Output**: `prepared/pv/{system_id}/pv_{system_id}_{start}_{end}.csv`.
 
+### Post-pipeline steps
+
+Two cleanup steps run as separate Cloud Run tasks **after a barrier on the
+full prepare phase** (all clean + prepare + assemble tasks complete):
+
+#### `consolidate_logs`
+
+Merges the per-task `.jsonl` ledger shards written during the run into a
+single consolidated log file under `tracking/logs/`.
+
+#### `maintain_validation_window`
+
+Reads every PV partition currently in `staged/prepared/pv/`, merges them
+into the rolling 90-day serving artifact at
+`data/served/validation-window/` (writing `window.csv` + `manifest.json`),
+and trims rows older than 90 days before the latest timestamp. The merge
+is idempotent: re-running or catching up a skipped day simply deduplicates
+on `(system_id, time)`.
+
+The step **fails closed** if the artifact has not been seeded — it never
+bootstraps from scratch. See the top-level README's _Seeding the Validation
+Window_ section for the one-time seed procedure.
+
 ### How the stages connect
 
 **Daily transform.** Clean → prepare → assemble run as three **ordered

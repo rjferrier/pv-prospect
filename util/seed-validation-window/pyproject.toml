@@ -1,28 +1,32 @@
 [tool.poetry]
-name = "check-workflow"
+name = "seed-validation-window"
 version = "0.1.0"
-description = "Compare manifests vs ledgers for all workflows on a given date"
+description = "One-time seed for the validation window artifact"
 authors = ["RJ Ferrier <rjferrier@outlook.com>"]
-packages = [{include = "check_workflow.py"}]
+packages = [{include = "seed_validation_window.py"}]
 
 [project]
-name = "check-workflow"
+name = "seed-validation-window"
 version = "0.1.0"
-description = "Compare manifests vs ledgers for all workflows on a given date"
+description = "One-time seed for the validation window artifact"
 authors = [{name = "RJ Ferrier", email = "rjferrier@outlook.com"}]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pandas>=2.0,<3",
+    "google-cloud-storage>=2.0,<3",
+]
 
 [tool.poetry.dependencies]
 python = "^3.12"
+pandas = ">=2.0,<3"
+google-cloud-storage = ">=2.0,<3"
 
 [tool.poetry.scripts]
-check-workflow = "check_workflow:main"
+seed-validation-window = "seed_validation_window:main"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }
 mypy = { version = "^1.18" }
-bandit = { version = "^1.9", extras = ["toml"] }
 
 [build-system]
 requires = ["poetry-core>=2.2.0,<3.0.0"]

@@ -313,14 +313,14 @@ window once from the locally-pulled DVC prepared corpus:
 dvc pull data/prepared/pv/
 
 # In pv-prospect (submodule)
-cd pv-prospect-data-transformation
-poetry run python scripts/seed_validation_window.py \
-  --prepared-dir ../data/prepared \
+cd util/seed-validation-window
+poetry install
+poetry run seed-validation-window \
+  --prepared-dir ../../../data/prepared \
+  --window-dest gs://pv-prospect-staging/data/served/validation-window \
   --days 90
 ```
 
-`seed_validation_window.py` reads the standard config
-(`validation_window_storage` in `config-default.yaml`, pointing at
-`gs://pv-prospect-staging/data/served/validation-window/`) and writes
-`window.csv` + `manifest.json` there. Set `RUNTIME_ENV` and `CONFIG_DIR` as
-needed if running outside the default environment.
+`seed-validation-window` writes `window.csv` + `manifest.json` to the
+specified destination. Use a local path for `--window-dest` to dry-run
+locally before writing to GCS.

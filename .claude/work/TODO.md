@@ -24,7 +24,7 @@ API tasks above; W1's public launch is gated on the vintage-bias decision.
 
 - [ ] [Offline cross-site (LOSO) generalisation eval for the PV model](briefs/cross-site-generalization-eval.md) — honest prospect-site accuracy; the Prediction API's headline claim currently ships unvalidated
 - [ ] [Align OpenMeteo vintage between prepared-weather and prepared-PV corpora](briefs/weather-pv-vintage-alignment.md) — root cause of ~30% yield underestimate in Prediction API
-- [ ] [Restructure `tracking/` prefix to group files by date](briefs/tracking-restructure.md) 
+- [ ] [Restructure `tracking/` prefix to group files by date](briefs/tracking-restructure.md)
 - [ ] [Investigate the data-versioner hang-on-exit](briefs/versioner-hang.md)
 - [ ] [Clarify end-date semantics in backfill cursors and manifests](briefs/end-date-semantics.md)
 - [ ] [Decommission hand-rolled CSV write logs under `tracking/`](briefs/csv-write-logs.md)
@@ -35,3 +35,4 @@ API tasks above; W1's public launch is gated on the vintage-bias decision.
 - [ ] [Generalise Open-Meteo outage recovery into a reusable runbook/script](briefs/outage-recovery.md)
 - [ ] [Extraction failure carry-over registry](briefs/failure-carry-over.md)
 - [ ] [Reduce per-task env footprint in phased manifests](briefs/manifest-env-footprint.md)
+- [ ] [Consolidate operational scripts into util/](briefs/util-scripts-consolidation.md)

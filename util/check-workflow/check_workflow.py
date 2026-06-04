@@ -2,7 +2,7 @@
 
 Usage::
 
-    python -m check_workflow [<date>]
+    poetry run check-workflow [<date>]
 
 <date>
     Run date as ``YYYY-MM-DD`` (default: today UTC).
@@ -458,3 +458,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     analyse_all(args.date)
+
+
+if __name__ == '__main__':
+    main()
