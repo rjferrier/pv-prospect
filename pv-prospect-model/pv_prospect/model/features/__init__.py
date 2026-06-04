@@ -8,6 +8,7 @@ from .pv import (
     augment_features,
     build_pv_features,
     compute_age_years,
+    is_clipped,
     load_prepared_pv_partitions,
     load_site_metadata,
 )
@@ -30,6 +31,7 @@ __all__ = [
     'augment_features',
     'build_pv_features',
     'compute_age_years',
+    'is_clipped',
     'load_prepared_pv_partitions',
     'load_site_metadata',
     'FEATURE_COLUMNS',

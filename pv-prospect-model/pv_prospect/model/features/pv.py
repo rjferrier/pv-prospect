@@ -76,6 +76,17 @@ def attach_site_metadata(pv_df: pd.DataFrame, sites_df: pd.DataFrame) -> pd.Data
     ).drop(columns=['pvoutput_system_id'])
 
 
+def is_clipped(df: pd.DataFrame, margin: float = DEFAULT_CENSORING_MARGIN) -> pd.Series:
+    """Return a boolean Series indicating rows where daily power reached the inverter cap.
+
+    True when ``power_max > inverter_capacity * (1 - margin)``.  The same
+    predicate is used by training (to *drop* clipped rows) and by validation
+    (to *flag* them).
+    """
+    threshold = df['inverter_capacity'] * (1 - margin)
+    return df['power_max'] > threshold
+
+
 def apply_censoring_filter(
     df: pd.DataFrame, margin: float = DEFAULT_CENSORING_MARGIN
 ) -> pd.DataFrame:
@@ -86,8 +97,7 @@ def apply_censoring_filter(
     The 1% default margin absorbs measurement noise around the cap (verified
     against site 82517: the cap is sharp at 6000 W, max observed 6004 W).
     """
-    threshold = df['inverter_capacity'] * (1 - margin)
-    return df[df['power_max'] <= threshold].copy()
+    return df[~is_clipped(df, margin)].copy()
 
 
 def compute_age_years(
