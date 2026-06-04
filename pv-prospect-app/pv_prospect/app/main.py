@@ -1,4 +1,4 @@
-"""FastAPI application: /predict, /healthz, /version."""
+"""FastAPI application: /predict, /healthz, /version, /validate."""
 
 from __future__ import annotations
 
@@ -19,7 +19,9 @@ from pv_prospect.app.store import (
     filesystem_for,
     load_store,
 )
-from pv_prospect.common import build_pv_site_repo, get_config
+from pv_prospect.app.validation import validate_site as _validate_site
+from pv_prospect.app.validation import window_age_fill
+from pv_prospect.common import build_pv_site_repo, get_config, get_pv_site_by_system_id
 from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,18 @@ _VINTAGE_CAVEAT = (
     'systematic underestimate of annual yield due to a weather/PV corpus '
     'vintage mismatch (different OpenMeteo reanalysis snapshots). '
     'Fix tracked in briefs/weather-pv-vintage-alignment.md.'
+)
+
+_VALIDATION_IN_SAMPLE_CAVEAT = (
+    'Validation metrics are in-sample: the window sites and dates overlap with '
+    'the training corpus.  A low error rate reflects model fit on known data, '
+    'not out-of-sample generalisation to new sites or future years.'
+)
+
+_VALIDATION_AGE_FILL_CAVEAT = (
+    'Sites 61272 and 79336 have no installation_date in pv_sites.csv.  '
+    'Their age_years feature is imputed from the window-global median of '
+    'known sites — a best-effort approximation of the training fill.'
 )
 
 
@@ -115,6 +129,39 @@ class VersionResponse(BaseModel):
     pv_critical_metric_r2: float
 
 
+class SiteSummary(BaseModel):
+    system_id: int
+    window_start: datetime.date
+    window_end: datetime.date
+
+
+class ValidateSitesResponse(BaseModel):
+    sites: list[SiteSummary]
+
+
+class SeriesPointModel(BaseModel):
+    date: datetime.date
+    predicted_kwh: float
+    actual_kwh: float
+    predicted_cf: float
+    actual_cf: float
+    clipped: bool
+
+
+class ErrorModel(BaseModel):
+    mape: float | None
+    power_space_r2: float | None
+
+
+class ValidateSiteResponse(BaseModel):
+    system_id: int
+    series: list[SeriesPointModel]
+    error: ErrorModel
+    model_version: str
+    window_updated_at: str
+    caveats: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -185,4 +232,74 @@ def predict(request: PredictRequest) -> PredictResponse:
             'Age degradation: age_years=0 (new install) is a slight extrapolation for most models.',
             _VINTAGE_CAVEAT,
         ],
+    )
+
+
+@app.get('/validate/sites', response_model=ValidateSitesResponse)
+def validate_sites() -> ValidateSitesResponse:
+    if _window_cache is None:
+        raise HTTPException(status_code=503, detail='Validation window not loaded')
+    window = _window_cache.current()
+    if window is None:
+        raise HTTPException(status_code=503, detail='Validation window not loaded')
+    sites = [
+        SiteSummary(
+            system_id=sid,
+            window_start=window.windows[sid]['time'].min().date(),
+            window_end=window.windows[sid]['time'].max().date(),
+        )
+        for sid in window.system_ids
+    ]
+    return ValidateSitesResponse(sites=sites)
+
+
+@app.get('/validate/{system_id}', response_model=ValidateSiteResponse)
+def validate_site(system_id: int) -> ValidateSiteResponse:
+    if _store is None or _window_cache is None:
+        raise HTTPException(status_code=503, detail='Service not ready')
+    window = _window_cache.current()
+    if window is None:
+        raise HTTPException(status_code=503, detail='Validation window not loaded')
+    site_df = window.for_site(system_id)
+    if site_df is None:
+        raise HTTPException(
+            status_code=404, detail=f'Site {system_id} not in validation window'
+        )
+    try:
+        pv_site = get_pv_site_by_system_id(system_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail=f'Site {system_id} not found in site registry'
+        ) from exc
+
+    install_dates = {}
+    for sid in window.system_ids:
+        try:
+            install_dates[sid] = get_pv_site_by_system_id(sid).installation_date
+        except KeyError:
+            install_dates[sid] = None
+
+    age_fill = window_age_fill(window.windows, install_dates)
+    result = _validate_site(site_df, pv_site, _store.pv, age_fill)
+
+    return ValidateSiteResponse(
+        system_id=system_id,
+        series=[
+            SeriesPointModel(
+                date=pt.date,
+                predicted_kwh=pt.predicted_kwh,
+                actual_kwh=pt.actual_kwh,
+                predicted_cf=pt.predicted_cf,
+                actual_cf=pt.actual_cf,
+                clipped=pt.clipped,
+            )
+            for pt in result.series
+        ],
+        error=ErrorModel(
+            mape=result.error.mape,
+            power_space_r2=result.error.power_space_r2,
+        ),
+        model_version=_store.pv_version,
+        window_updated_at=window.updated_at,
+        caveats=[_VALIDATION_IN_SAMPLE_CAVEAT, _VALIDATION_AGE_FILL_CAVEAT],
     )

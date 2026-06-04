@@ -12,9 +12,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from pv_prospect.app.poa import reconstruct_daily_mean_poa
-from pv_prospect.model import predict_capacity_factor, predict_weather
+from pv_prospect.model import (
+    clamped_power_pred,
+    predict_capacity_factor,
+    predict_weather,
+)
 from pv_prospect.model.domain import ModelArtifact, WeatherModelArtifact
-from pv_prospect.model.evaluation import clamped_power_pred
 
 # UK bounding box — models were trained exclusively on UK sites.
 _UK_LAT_MIN, _UK_LAT_MAX = 49.5, 61.0
@@ -26,9 +29,33 @@ class OutsideUKDomainError(ValueError):
 
 
 @dataclass
+class RunPvModelResult:
+    capacity_factor: np.ndarray  # raw model output, pre-clamp
+    clamped_power_w: np.ndarray  # delivered power, post inverter clamp
+
+
+@dataclass
 class YieldResult:
     expected_annual_kwh: float
     monthly_kwh: list[float]
+
+
+def run_pv_model(
+    pv_artifact: ModelArtifact,
+    feature_df: pd.DataFrame,
+    panel_capacity_w: np.ndarray,
+    inverter_capacity_w: np.ndarray,
+) -> RunPvModelResult:
+    """Run the PV model and apply the inverter clamp.
+
+    Single shared inference path for both /predict and /validate.  Returns
+    both the raw capacity-factor output (pre-clamp) and the delivered power
+    (post-clamp) so callers can expose whichever they need.
+    """
+    cf = predict_capacity_factor(pv_artifact, feature_df)
+    return RunPvModelResult(
+        cf, clamped_power_pred(cf, panel_capacity_w, inverter_capacity_w)
+    )
 
 
 def check_uk_domain(latitude: float, longitude: float) -> None:
@@ -106,13 +133,13 @@ def predict_yield(
                 'age_known': [1] * len(days),
             }
         )
-        cf = predict_capacity_factor(pv_artifact, pv_rows)
-        power_w = clamped_power_pred(
-            cf,
+        pv_result = run_pv_model(
+            pv_artifact,
+            pv_rows,
             np.full(len(days), panels_capacity_w),
             np.full(len(days), inverter_capacity_w),
         )
-        monthly_kwh.append(float((power_w * 24 / 1000).sum()))
+        monthly_kwh.append(float((pv_result.clamped_power_w * 24 / 1000).sum()))
 
     return YieldResult(
         expected_annual_kwh=sum(monthly_kwh),
