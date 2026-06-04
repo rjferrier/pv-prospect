@@ -10,6 +10,7 @@ database Staging {
   database "Raw" as StagingRaw
   database "Cleaned" as StagingCleaned
   database "Prepared" as StagingPrepared
+  database "Served" as StagingServed
 }
 
 database "Versioned Raw Data" as VersionedRaw
@@ -43,10 +44,10 @@ PredictionApi <- PredictionApi : calculate_POA
 PredictionApi --> PvModel : predicted\nenergy \nyield = \ncall_model(\nPOA, \ntemperature)
 
 ' Roadmap flows (not yet implemented):
-User --> ValidationApi #lightgray
-ValidationApi --> PvModel #lightgray
-ValidationApi --> InMemoryData #lightgray
-InMemoryData <--- DataVersioner #lightgray
+User -[#lightgray]-> ValidationApi
+ValidationApi -[#lightgray]-> PvModel
+ValidationApi -[#lightgray]-> InMemoryData
+InMemoryData -[#lightgray]-> StagingServed : A2: load\nvalidation\nwindow
 
 ThirdPartyAPIs <-- DataExtractor : E2: call
 
@@ -58,7 +59,11 @@ DataTransformer --> StagingRaw : C2: get
 DataTransformer --> StagingCleaned : C3: put\nP1: get
 DataTransformer <- DataTransformer : P2: calculate_POA
 DataTransformer --> StagingPrepared : P3: put
+DataTransformer --> StagingServed : P4: maintain\nvalidation\nwindow
+StagingResources -[hidden]> StagingRaw
+StagingRaw -[hidden]> StagingCleaned
 StagingCleaned -[hidden]> StagingPrepared
+StagingPrepared -[hidden]> StagingServed
 
 component "Data Transformer" as DataTransformer
 

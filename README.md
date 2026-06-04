@@ -101,8 +101,22 @@ path, since git tags own versioning — so each weekly versioning run *adds* `.d
 files rather than overwriting one, keeping the whole corpus retrievable with a
 single `git checkout <tag> && dvc pull`. The daily transform fans `prepare_pv` out
 across dates as micro-batch CSVs in `prepared-batches/`, then an assembly step
-merges them into the partition files. Implemented in
-`pv-prospect-data-transformation`.
+merges them into the partition files. After all prepare steps succeed, a final
+`maintain_validation_window` step maintains a **rolling 90-day validation window**
+artifact at `data/served/validation-window/` in the staging bucket:
+
+* `window.csv` — all prepared PV rows for the last 90 days across every known site,
+  with `system_id` prepended as the first column.
+* `manifest.json` — updated timestamp, window bounds, and per-site row counts.
+
+The window is a derived, regenerable serving cache separate from the DVC feature
+store. The cutoff is data-relative (`max(time) − 90 days`) so a temporarily-offline
+site is not immediately dropped. The `data/served/` prefix lies outside the weekly
+clean's blast radius. No new IAM is needed — the pipeline SA already holds
+`objectAdmin` on the staging bucket. The artifact must be seeded once before the
+workflow step can run (see
+[Seeding the Validation Window](#seeding-the-validation-window)).
+Implemented in `pv-prospect-data-transformation`.
 
 ### A — App Data Loading
 
@@ -164,7 +178,9 @@ Workflows on a daily or weekly basis:
   failure rolls back the day cleanly (tomorrow re-plans the same window).
 * **Data Transformation (`pv-prospect-transform`)**: Runs at **05:30 UTC**.
   Orchestrates the data cleaning and preparation steps to generate the prepared
-  datasets for all data extracted earlier in the day.
+  datasets for all data extracted earlier in the day. On success, runs
+  `maintain_validation_window` (see P above) and `consolidate_logs` as
+  post-pipeline cleanup steps.
 * **PV-Sites Transformation Backfill (`pv-prospect-daily-transform-pv-sites-backfill`)**:
   Runs at **06:00 UTC**. Unlike the other pipelines, this one has no Cloud
   Workflow — Cloud Scheduler invokes the `data-transformation` Cloud Run Job
@@ -284,3 +300,27 @@ re-transform after a feature-spec change), follow
 [`pv-prospect-data-transformation/doc/runbooks/replay-window.md`](pv-prospect-data-transformation/doc/runbooks/replay-window.md):
 marker rewind alone is filtered out by the cross-run resume scan, so the
 offending consolidated ledger has to leave the scan root as well.
+
+### Seeding the Validation Window
+
+The `maintain_validation_window` workflow step is fail-closed: it raises if the
+artifact does not already exist. Before enabling the daily workflow step, seed the
+window once from the locally-pulled DVC prepared corpus:
+
+```bash
+# In pv-prospect-instance — pull only the recent PV partitions.
+# Adjust the date threshold to suit; 90 days back from today is sufficient.
+dvc pull data/prepared/pv/
+
+# In pv-prospect (submodule)
+cd pv-prospect-data-transformation
+poetry run python scripts/seed_validation_window.py \
+  --prepared-dir ../data/prepared \
+  --days 90
+```
+
+`seed_validation_window.py` reads the standard config
+(`validation_window_storage` in `config-default.yaml`, pointing at
+`gs://pv-prospect-staging/data/served/validation-window/`) and writes
+`window.csv` + `manifest.json` there. Set `RUNTIME_ENV` and `CONFIG_DIR` as
+needed if running outside the default environment.
