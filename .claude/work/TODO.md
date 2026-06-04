@@ -1,7 +1,28 @@
 # TODO
 
+## Next
+
+Build the Validation API + In-Memory Data roadmap nodes (`doc/architecture.puml`).
+The Validation API shows, per known PV site, how the deployed PV model tracks real
+recent output (within-site, last 90 days) — the easy case. It does **not** test
+generalisation to unseen prospect sites; that is parked separately (see Later).
+Ordered by dependency:
+
+- [ ] [1 — Validation window producer: transformer step + one-time seed](briefs/validation-window-producer.md)
+- [ ] [2 — App in-memory validation store: startup load + reload](briefs/validation-inmemory-store.md)
+- [ ] [3 — Validation API endpoint (`/validate`)](briefs/validation-api.md)
+- [ ] [4 — Validation serving wiring, diagram, finalisation](briefs/validation-serving-docs.md)
+
+The **website** fronts both serving surfaces (`User → PredictionApi` /
+`User → ValidationApi`). Served from the existing app — no separate frontend, no
+build step. W1 (prediction) is unblocked; W2 (validation) follows the Validation
+API tasks above; W1's public launch is gated on the vintage-bias decision.
+
+- [ ] [Website: map prediction + known-site validation UI](briefs/website.md)
+
 ## Later
 
+- [ ] [Offline cross-site (LOSO) generalisation eval for the PV model](briefs/cross-site-generalization-eval.md) — honest prospect-site accuracy; the Prediction API's headline claim currently ships unvalidated
 - [ ] [Align OpenMeteo vintage between prepared-weather and prepared-PV corpora](briefs/weather-pv-vintage-alignment.md) — root cause of ~30% yield underestimate in Prediction API
 - [ ] [Restructure `tracking/` prefix to group files by date](briefs/tracking-restructure.md) 
 - [ ] [Investigate the data-versioner hang-on-exit](briefs/versioner-hang.md)
