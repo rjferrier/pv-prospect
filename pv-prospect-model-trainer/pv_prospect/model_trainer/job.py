@@ -1,7 +1,8 @@
 """Cloud Run Job entrypoint for the model trainer.
 
 Reads ``DATA_VERSION`` from the environment (injected by the version Cloud
-Workflow) and runs the full bootstrap → gate → promote pipeline.
+Workflow) and runs the full bootstrap → gate → promote pipeline.  Emits
+training metrics to Cloud Monitoring in both the promoted and rejected branches.
 
 Environment variables
 ---------------------
@@ -11,6 +12,8 @@ DATA_VERSION
 GITHUB_DEPLOY_KEY
     SSH private key for cloning and pushing the instance repo.
     Injected from Secret Manager.
+GOOGLE_CLOUD_PROJECT
+    GCP project ID, used for metric emission.
 RUNTIME_ENV
     Config environment overlay (default ``default``).
 """
@@ -23,6 +26,7 @@ import sys
 
 from pv_prospect.common import configure_logging, get_config
 from pv_prospect.model_trainer.config import ModelTrainerConfig
+from pv_prospect.model_trainer.metrics import emit_training_metrics
 from pv_prospect.model_trainer.resources import get_config_dir
 from pv_prospect.model_trainer.trainer import run_trainer_job
 
@@ -38,10 +42,17 @@ def main() -> None:
     if not deploy_key:
         raise ValueError('GITHUB_DEPLOY_KEY must be set')
 
-    config = get_config(ModelTrainerConfig, base_config_dirs=[get_config_dir()])
-    promoted = run_trainer_job(data_version, config, deploy_key)
+    project_id = os.environ.get('GOOGLE_CLOUD_PROJECT', '')
 
-    if promoted:
+    config = get_config(ModelTrainerConfig, base_config_dirs=[get_config_dir()])
+    outcome = run_trainer_job(data_version, config, deploy_key)
+
+    if project_id:
+        emit_training_metrics(outcome, project_id)
+    else:
+        logger.warning('GOOGLE_CLOUD_PROJECT not set; skipping metric emission')
+
+    if outcome.promoted:
         logger.info('Trainer job complete: model promoted for data-v%s', data_version)
     else:
         logger.info('Trainer job complete: gate rejected, incumbent model unchanged')

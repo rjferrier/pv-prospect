@@ -506,7 +506,14 @@ model keeps serving.
    - Terraform: `artifact_registry` repo `pv-prospect-model`; `cloud_run_job` `model-trainer` (4Gi, 3600s, `GITHUB_DEPLOY_KEY` from Secret Manager); `model_trainer_image_tag` variable; outputs.
    - Version workflow extended: `run_versioner` step wrapped in `try/except` (handles versioner hang bug — see `briefs/versioner-hang.md`); new `run_trainer` step passes `DATA_VERSION` = version_date.
    - `deploy.sh`: `build-trainer` stage added; included in `build` and `all` aliases; `registry` stage includes `artifact_registry_model`.
-6. **Metrics & alerting** (§4).
+6. **Metrics & alerting** (§4) — **DONE**:
+   - `bootstrap.py` `provenance.json` widened: `pv_cf_r2` and `weather_temp_rmse` (from `block_clim_model` temperature entry) added alongside the existing `pv_critical_metric`.
+   - `trainer.py`: `TrainingOutcome(promoted, pv_r2, pv_cf_r2, weather_temp_rmse)` replaces bare `bool` — carries metrics in both pass and reject branches.
+   - `metrics.py`: `emit_training_metrics(outcome, project_id)` — emits 4 custom metrics to Cloud Monitoring (`pv_clamped_power_r2`, `pv_capacity_factor_r2`, `weather_temperature_rmse`, `model_promoted`); deferred import of `google-cloud-monitoring`; silent failure on monitoring errors.
+   - `job.py`: reads `GOOGLE_CLOUD_PROJECT`, calls `emit_training_metrics` after `run_trainer_job` (both branches covered).
+   - `pyproject.toml`: `google-cloud-monitoring>=2.0,<3` added.
+   - Terraform `monitoring.tf`: email notification channel (gated on `alert_notification_email`); `pv_r2_floor` alert (R² < 0.70); `model_rejected` alert (`model_promoted < 1`); service-health alerts noted as TODO pending Phase 7 Service deployment.
+   - `variables.tf`: `alert_notification_email` (empty default = alerts fire silently).
 7. **Demo hardening + docs** (§5): public toggle, READMEs (incl. "Producing the
    models"), architecture update.
 

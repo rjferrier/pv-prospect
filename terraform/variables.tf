@@ -110,6 +110,12 @@ variable "model_trainer_image_tag" {
   description = "Docker image tag for the model trainer container"
 }
 
+variable "alert_notification_email" {
+  type        = string
+  default     = ""
+  description = "Email address for monitoring alert notifications. Leave empty to disable email notifications (alerts still fire, visible in Cloud Monitoring UI)."
+}
+
 variable "versioner_scheduler_cron" {
   type        = string
   default     = "0 23 * * 0"

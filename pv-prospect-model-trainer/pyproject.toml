@@ -18,6 +18,7 @@ dependencies = [
     "pv-prospect-model",
     "pv-prospect-versioning",
     "torch>=2.0.0,<3",
+    "google-cloud-monitoring>=2.0,<3",
 ]
 
 [[tool.poetry.source]]
@@ -32,6 +33,7 @@ pv-prospect-model = {path = "../pv-prospect-model", develop = true}
 pv-prospect-physics = {path = "../pv-prospect-physics", develop = true}
 pv-prospect-versioning = {path = "../pv-prospect-versioning", develop = true}
 torch = {version = "^2.0", source = "pytorch-cpu"}
+google-cloud-monitoring = ">=2.0,<3"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }

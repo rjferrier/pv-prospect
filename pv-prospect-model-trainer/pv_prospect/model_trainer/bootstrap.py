@@ -19,7 +19,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pv_prospect.model.domain import ModelArtifact
+from pv_prospect.model.domain import ModelArtifact, WeatherModelArtifact
 from pv_prospect.model.persistence import save_artifact, save_weather_artifact
 from pv_prospect.model.training.pv import train_pv
 from pv_prospect.model.training.weather import train_weather
@@ -92,7 +92,12 @@ def bootstrap_models(
 
     trained_at = datetime.now(tz=timezone.utc).isoformat()
     _write_provenance_json(
-        output_dir, data_version, data_tag_sha, trained_at, pv_artifact
+        output_dir,
+        data_version,
+        data_tag_sha,
+        trained_at,
+        pv_artifact,
+        weather_artifact,
     )
     _write_current_json(output_dir, data_version, trained_at, pv_artifact)
     logger.info('Bootstrap complete. Store written to %s', output_dir)
@@ -104,14 +109,22 @@ def _write_provenance_json(
     data_tag_sha: str,
     trained_at: str,
     pv_artifact: ModelArtifact,
+    weather_artifact: WeatherModelArtifact,
 ) -> None:
-    """Write provenance.json capturing lineage for the promote step."""
+    """Write provenance.json capturing lineage and training metrics."""
+    weather_temp_rmse = next(
+        m.rmse
+        for m in weather_artifact.eval_report.block_clim_model
+        if m.target == 'temperature'
+    )
     provenance = {
         'data_version': data_version,
         'data_tag_sha': data_tag_sha,
         'trainer_image_tag': 'local',
         'trained_at': trained_at,
         'pv_critical_metric': pv_artifact.eval_report.test_power_space.r2,
+        'pv_cf_r2': pv_artifact.eval_report.test_f_space.r2,
+        'weather_temp_rmse': weather_temp_rmse,
     }
     with open(output_dir / 'provenance.json', 'w') as f:
         json.dump(provenance, f, indent=2)
