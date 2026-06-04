@@ -8,7 +8,6 @@ recent output (within-site, last 90 days) — the easy case. It does **not** tes
 generalisation to unseen prospect sites; that is parked separately (see Later).
 Ordered by dependency:
 
-- [ ] [1 — Validation window producer: transformer step + one-time seed](briefs/validation-window-producer.md)
 - [ ] [2 — App in-memory validation store: startup load + reload](briefs/validation-inmemory-store.md)
 - [ ] [3 — Validation API endpoint (`/validate`)](briefs/validation-api.md)
 - [ ] [4 — Validation serving wiring, diagram, finalisation](briefs/validation-serving-docs.md)
