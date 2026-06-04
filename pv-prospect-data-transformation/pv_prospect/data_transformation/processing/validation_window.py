@@ -121,6 +121,29 @@ def write_window(
     window_fs.write_text(WINDOW_MANIFEST, json.dumps(manifest, indent=2))
 
 
+def seed_validation_window(
+    prepared_fs: FileSystem,
+    window_fs: FileSystem,
+    days: int,
+    now: datetime | None = None,
+) -> None:
+    """Bootstrap the validation window from a locally-pulled prepared corpus.
+
+    Reads all PV partitions from prepared_fs, trims to the last `days` days,
+    and writes the artifact to window_fs. Safe to re-run — it overwrites any
+    existing artifact.
+    """
+    incr = read_prepared_pv(prepared_fs)
+    window = assemble_window([incr], days)
+    manifest = build_manifest(window, days, now)
+    write_window(window_fs, window, manifest)
+    logger.info(
+        'Validation window seeded: %s rows across %d sites',
+        len(window),
+        window['system_id'].nunique() if not window.empty else 0,
+    )
+
+
 class ValidationWindowNotSeededError(RuntimeError):
     pass
 

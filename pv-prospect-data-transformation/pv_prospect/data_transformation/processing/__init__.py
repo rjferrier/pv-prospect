@@ -43,6 +43,7 @@ from .transformation import (
 from .validation_window import (
     ValidationWindowNotSeededError,
     run_maintain_validation_window,
+    seed_validation_window,
 )
 
 __all__ = [
@@ -78,6 +79,7 @@ __all__ = [
     'run_clean_weather',
     'run_maintain_validation_window',
     'run_prepare_pv',
+    'seed_validation_window',
     'ValidationWindowNotSeededError',
     'weather_partition_path',
     'write_csv',
