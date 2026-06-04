@@ -1,13 +1,12 @@
-# Cloud Monitoring: alert policies for model degradation.
+# Cloud Monitoring: alert policies for model degradation and serving health.
 #
-# Two offline degradation signals (fully operational once the model trainer
-# is deployed and running):
+# Offline degradation (model trainer):
 #   1. PV clamped-power R² below absolute floor (0.70) on any training run.
 #   2. Model trainer ran but the new model was rejected by the promotion gate.
 #
-# Service health alerts (Cloud Run 5xx / p95 latency) are listed below as
-# TODO items — they require the pv-prospect-app Cloud Run Service to be
-# deployed first (Phase 7).
+# Serving health (pv-prospect-app Cloud Run Service):
+#   3. 5xx error rate above 1 req/s over 5 min.
+#   4. p95 request latency above 30 s over 5 min.
 
 locals {
   notification_channels = (
@@ -93,30 +92,69 @@ resource "google_monitoring_alert_policy" "model_rejected" {
 }
 
 # ---------------------------------------------------------------------------
-# TODO (Phase 7 — requires pv-prospect-app Cloud Run Service deployment):
-#
-# resource "google_monitoring_alert_policy" "app_5xx_rate" {
-#   display_name = "PV Prospect app: elevated 5xx error rate"
-#   conditions {
-#     condition_threshold {
-#       filter = "metric.type=\"run.googleapis.com/request_count\"
-#                 AND resource.type=\"cloud_run_revision\"
-#                 AND resource.labels.service_name=\"pv-prospect-app\"
-#                 AND metric.labels.response_code_class=\"5xx\""
-#       ...
-#     }
-#   }
-# }
-#
-# resource "google_monitoring_alert_policy" "app_latency_p95" {
-#   display_name = "PV Prospect app: p95 latency high"
-#   conditions {
-#     condition_threshold {
-#       filter = "metric.type=\"run.googleapis.com/request_latencies\"
-#                 AND resource.type=\"cloud_run_revision\"
-#                 AND resource.labels.service_name=\"pv-prospect-app\""
-#       ...
-#     }
-#   }
-# }
+# Serving health: 5xx error rate
 # ---------------------------------------------------------------------------
+
+resource "google_monitoring_alert_policy" "app_5xx_rate" {
+  display_name          = "PV Prospect app: elevated 5xx error rate"
+  combiner              = "OR"
+  notification_channels = local.notification_channels
+
+  conditions {
+    display_name = "5xx request rate > 1 req/s over 5 min"
+    condition_threshold {
+      filter          = "metric.type=\"run.googleapis.com/request_count\" AND resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"pv-prospect-app\" AND metric.labels.response_code_class=\"5xx\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 1
+      duration        = "300s"
+      aggregations {
+        alignment_period     = "300s"
+        per_series_aligner   = "ALIGN_RATE"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["resource.labels.service_name"]
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "86400s"
+  }
+
+  documentation {
+    content   = "The pv-prospect-app Cloud Run Service is returning more than 1 5xx response per second. Check Cloud Run logs for error details."
+    mime_type = "text/markdown"
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Serving health: p95 latency
+# ---------------------------------------------------------------------------
+
+resource "google_monitoring_alert_policy" "app_latency_p95" {
+  display_name          = "PV Prospect app: p95 request latency high"
+  combiner              = "OR"
+  notification_channels = local.notification_channels
+
+  conditions {
+    display_name = "p95 latency > 30 s over 5 min"
+    condition_threshold {
+      filter          = "metric.type=\"run.googleapis.com/request_latencies\" AND resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"pv-prospect-app\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 30000
+      duration        = "300s"
+      aggregations {
+        alignment_period   = "300s"
+        per_series_aligner = "ALIGN_PERCENTILE_95"
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "86400s"
+  }
+
+  documentation {
+    content   = "The pv-prospect-app Cloud Run Service p95 latency exceeded 30 s. With min_instances=0 this may be a cold-start spike; if sustained, check for model-load regressions or scaling issues."
+    mime_type = "text/markdown"
+  }
+}

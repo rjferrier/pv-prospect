@@ -110,6 +110,18 @@ variable "model_trainer_image_tag" {
   description = "Docker image tag for the model trainer container"
 }
 
+variable "app_image_tag" {
+  type        = string
+  default     = "latest"
+  description = "Docker image tag for the pv-prospect-app container"
+}
+
+variable "allow_unauthenticated" {
+  type        = bool
+  default     = false
+  description = "Allow unauthenticated (public) access to the pv-prospect-app Cloud Run Service. false = IAM auth required (private testing); true = public demo."
+}
+
 variable "alert_notification_email" {
   type        = string
   default     = ""

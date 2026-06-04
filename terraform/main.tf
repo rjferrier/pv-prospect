@@ -415,6 +415,51 @@ module "version_scheduler" {
 }
 
 # ---------------------------------------------------------------------------
+# Prediction API — pv-prospect-app Cloud Run Service
+# ---------------------------------------------------------------------------
+
+# Dedicated SA for the serving app: objectViewer on the model bucket only.
+resource "google_service_account" "app" {
+  account_id   = "pv-prospect-app"
+  display_name = "PV Prospect App"
+  description  = "Used by the pv-prospect-app Cloud Run Service to read model artifacts"
+}
+
+resource "google_storage_bucket_iam_member" "app_versioned_model_reader" {
+  bucket = module.storage.versioned_model_bucket_name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.app.email}"
+}
+
+module "artifact_registry_app" {
+  source        = "./modules/artifact_registry"
+  region        = var.region
+  repository_id = "pv-prospect-app"
+}
+
+module "cloud_run_app" {
+  source                = "./modules/cloud_run_service"
+  service_name          = "pv-prospect-app"
+  region                = var.region
+  image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/pv-prospect-app/pv-prospect-app"
+  image_tag             = var.app_image_tag
+  cpu                   = "2"
+  memory                = "4Gi"
+  min_instance_count    = 0
+  max_instance_count    = 2
+  allow_unauthenticated = var.allow_unauthenticated
+  service_account_email = google_service_account.app.email
+  env_vars = {
+    GOOGLE_CLOUD_PROJECT = var.project_id
+    LOG_LEVEL            = "INFO"
+    RUNTIME_ENV          = "default"
+    STORE_DIR            = "gs://${module.storage.versioned_model_bucket_name}"
+  }
+
+  depends_on = [google_project_service.apis, module.artifact_registry_app]
+}
+
+# ---------------------------------------------------------------------------
 # GitHub Actions — Workload Identity Federation
 # ---------------------------------------------------------------------------
 
@@ -572,6 +617,16 @@ output "artifact_registry_model_trainer_url" {
 output "model_trainer_cloud_run_job_name" {
   value       = module.cloud_run_model_trainer.job_name
   description = "Model trainer Cloud Run Job name"
+}
+
+output "artifact_registry_app_url" {
+  value       = module.artifact_registry_app.repository_url
+  description = "Docker registry URL for pv-prospect-app"
+}
+
+output "app_service_url" {
+  value       = module.cloud_run_app.service_url
+  description = "URL of the pv-prospect-app Cloud Run Service"
 }
 
 output "version_workflow_name" {

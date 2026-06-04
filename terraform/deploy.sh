@@ -20,12 +20,13 @@ usage() {
   echo "    build-transformation  — build and push transformation Docker image"
   echo "    build-versioner       — build and push data-versioner Docker image"
   echo "    build-trainer         — build and push model-trainer Docker image"
+  echo "    build-app             — build and push pv-prospect-app Docker image"
   echo "    terraform-extraction  — apply extraction infrastructure (Cloud Run, Workflows, Schedulers)"
   echo "    terraform-transform   — apply transformation infrastructure (Cloud Run, Workflow)"
   echo "    terraform             — apply all infrastructure (full apply)"
   echo ""
   echo "  Shorthand aliases:"
-  echo "    build   = build-extraction,build-transformation,build-versioner,build-trainer"
+  echo "    build   = build-extraction,build-transformation,build-versioner,build-trainer,build-app"
   echo "    all     = registry,build,terraform  (the default)"
   echo ""
   echo "Examples:"
@@ -57,8 +58,8 @@ fi
 expand_stages() {
   echo "$1" | tr ',' '\n' | while read -r stage; do
     case "$stage" in
-      all)      echo "registry"; echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer"; echo "terraform" ;;
-      build)    echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer" ;;
+      all)      echo "registry"; echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer"; echo "build-app"; echo "terraform" ;;
+      build)    echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer"; echo "build-app" ;;
       *)        echo "$stage" ;;
     esac
   done
@@ -93,6 +94,7 @@ resolve_image_urls() {
   IMAGE_URL_TRANSFORM=$(terraform output -raw artifact_registry_transformer_url)/data-transformation
   IMAGE_URL_VERSION=$(terraform output -raw artifact_registry_versioner_url)/data-versioner
   IMAGE_URL_MODEL=$(terraform output -raw artifact_registry_model_trainer_url)/model-trainer
+  IMAGE_URL_APP=$(terraform output -raw artifact_registry_app_url)/pv-prospect-app
   gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 }
 
@@ -105,6 +107,7 @@ if run_stage registry; then
     -target=module.artifact_registry_transform \
     -target=module.artifact_registry_version \
     -target=module.artifact_registry_model \
+    -target=module.artifact_registry_app \
     -auto-approve
 fi
 
@@ -146,6 +149,16 @@ if run_stage build-trainer; then
   echo "Building: $IMAGE_URL_MODEL:latest"
   docker build -t "$IMAGE_URL_MODEL:latest" --target entrypoint -f ../pv-prospect-model-trainer/Dockerfile ..
   docker push "$IMAGE_URL_MODEL:latest"
+fi
+
+# 2e. Build and push pv-prospect-app image
+if run_stage build-app; then
+  echo ""
+  echo "[build-app] Building and pushing pv-prospect-app Docker image..."
+  resolve_image_urls
+  echo "Building: $IMAGE_URL_APP:latest"
+  docker build -t "$IMAGE_URL_APP:latest" --target entrypoint -f ../pv-prospect-app/Dockerfile ..
+  docker push "$IMAGE_URL_APP:latest"
 fi
 
 # 3a. Apply extraction infrastructure

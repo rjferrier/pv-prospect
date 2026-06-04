@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict
 
@@ -12,4 +13,7 @@ class AppConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'AppConfig':
-        return cls(store_dir=data['store_dir'])
+        # STORE_DIR env var overrides the YAML config — used by the Cloud Run
+        # Service to point at the GCS model bucket without rebundling config.
+        store_dir = os.environ.get('STORE_DIR') or data['store_dir']
+        return cls(store_dir=store_dir)
