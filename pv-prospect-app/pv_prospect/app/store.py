@@ -19,9 +19,19 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
+import threading
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
+from typing import Any
 
+import pandas as pd
+from pv_prospect.etl.storage import (
+    AnyStorageConfig,
+    FileSystem,
+    get_filesystem,
+    parse_storage_config,
+)
 from pv_prospect.model.domain import ModelArtifact, WeatherModelArtifact
 from pv_prospect.model.persistence import load_artifact, load_weather_artifact
 
@@ -33,6 +43,110 @@ _ARTIFACT_FILES = (
     'training_config.json',
     'eval_report.json',
 )
+
+# Serving contract: artifact filenames and column names written by the producer.
+# Deliberately duplicated here — the app must not depend on pv-prospect-data-transformation.
+WINDOW_CSV = 'window.csv'
+WINDOW_MANIFEST = 'manifest.json'
+WINDOW_COLUMNS = (
+    'system_id',
+    'time',
+    'temperature',
+    'plane_of_array_irradiance',
+    'power',
+    'power_max',
+)
+
+
+def storage_config_for(location: str) -> AnyStorageConfig:
+    """Resolve a location string to a storage config.
+
+    ``location`` is either a ``gs://<bucket>[/<prefix>]`` URI or a local path.
+    """
+    if location.startswith('gs://'):
+        bucket, _, prefix = location.removeprefix('gs://').partition('/')
+        return parse_storage_config(
+            {'backend': 'gcs', 'bucket_name': bucket, 'prefix': prefix}
+        )
+    return parse_storage_config({'backend': 'local', 'prefix': location})
+
+
+def filesystem_for(location: str) -> FileSystem:
+    return get_filesystem(storage_config_for(location))
+
+
+@dataclass
+class ValidationWindowStore:
+    windows: dict[int, pd.DataFrame]
+    manifest: dict[str, Any]
+
+    @property
+    def updated_at(self) -> str:
+        return str(self.manifest['updated_at'])
+
+    @property
+    def system_ids(self) -> list[int]:
+        return list(self.windows.keys())
+
+    def for_site(self, system_id: int) -> pd.DataFrame | None:
+        return self.windows.get(system_id)
+
+
+def parse_window(csv_text: str) -> dict[int, pd.DataFrame]:
+    df = pd.read_csv(StringIO(csv_text), parse_dates=['time'])
+    return {
+        int(system_id): frame.reset_index(drop=True)
+        for system_id, frame in df.groupby('system_id')
+    }
+
+
+def load_validation_window(fs: FileSystem) -> ValidationWindowStore:
+    manifest = json.loads(fs.read_text(WINDOW_MANIFEST))
+    windows = parse_window(fs.read_text(WINDOW_CSV))
+    return ValidationWindowStore(windows=windows, manifest=manifest)
+
+
+class ValidationWindowCache:
+    """Per-request freshness coordinator for the validation window artifact.
+
+    ``load()`` is called at startup; ``current()`` is called per-request and
+    reloads if the manifest ``updated_at`` has changed since the last load.
+    Both are thread-safe: the lock is held only around the reference swap,
+    never around I/O or parsing.
+    """
+
+    def __init__(self, fs: FileSystem) -> None:
+        self._fs = fs
+        self._lock = threading.Lock()
+        self._current: ValidationWindowStore | None = None
+
+    def load(self) -> None:
+        store = load_validation_window(self._fs)
+        with self._lock:
+            self._current = store
+
+    def current(self) -> ValidationWindowStore | None:
+        if self._current is None:
+            try:
+                self.load()
+            except Exception:
+                logger.warning('Validation window not available', exc_info=True)
+            return self._current
+        try:
+            manifest = json.loads(self._fs.read_text(WINDOW_MANIFEST))
+            if manifest.get('updated_at') != self._current.updated_at:
+                try:
+                    self.load()
+                except Exception:
+                    logger.warning(
+                        'Validation window reload failed; using stale copy',
+                        exc_info=True,
+                    )
+        except Exception:
+            logger.warning(
+                'Manifest freshness check failed; using current copy', exc_info=True
+            )
+        return self._current
 
 
 @dataclass

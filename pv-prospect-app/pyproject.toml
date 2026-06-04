@@ -15,11 +15,13 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pv-prospect-common",
+    "pv-prospect-etl",
     "pv-prospect-model",
     "pv-prospect-physics",
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",
     "httpx>=0.27,<1",
+    "pandas>=2.0,<3",
     "torch>=2.0.0,<3",
     "google-cloud-storage>=2.0,<3",
 ]
@@ -32,8 +34,10 @@ priority = "explicit"
 [tool.poetry.dependencies]
 python = "^3.12"
 pv-prospect-common = {path = "../pv-prospect-common", develop = true}
+pv-prospect-etl = {path = "../pv-prospect-etl", develop = true}
 pv-prospect-model = {path = "../pv-prospect-model", develop = true}
 pv-prospect-physics = {path = "../pv-prospect-physics", develop = true}
+pandas = ">=2.0,<3"
 fastapi = ">=0.115,<1"
 uvicorn = {version = ">=0.30,<1", extras = ["standard"]}
 httpx = ">=0.27,<1"

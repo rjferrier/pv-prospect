@@ -1,3 +1,6 @@
 # Path to the promoted-artifact store written by pv-prospect-model-trainer bootstrap.
 # Override in config-local.yaml with the path from your local bootstrap run.
 store_dir: '/tmp/pv-prospect-models'
+# Local-dev defaults; override via VALIDATION_WINDOW_DIR / RESOURCES_DIR env vars in prod.
+validation_window_dir: '/tmp/pv-prospect-validation-window'
+resources_dir: 'resources'

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import logging
 from contextlib import asynccontextmanager
+from io import StringIO
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException
@@ -12,13 +13,19 @@ from pv_prospect.app.chain import OutsideUKDomainError, check_uk_domain, predict
 from pv_prospect.app.config import AppConfig
 from pv_prospect.app.elevation import get_grid_cell_elevation
 from pv_prospect.app.resources import get_config_dir
-from pv_prospect.app.store import ModelStore, load_store
-from pv_prospect.common import get_config
+from pv_prospect.app.store import (
+    ModelStore,
+    ValidationWindowCache,
+    filesystem_for,
+    load_store,
+)
+from pv_prospect.common import build_pv_site_repo, get_config
 from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
 _store: ModelStore | None = None
+_window_cache: ValidationWindowCache | None = None
 
 _VINTAGE_CAVEAT = (
     'Known bias: the trained artifacts (data-v2026-05-31) carry a ~30% '
@@ -30,7 +37,7 @@ _VINTAGE_CAVEAT = (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    global _store
+    global _store, _window_cache
     config = get_config(AppConfig, base_config_dirs=[get_config_dir()])
     logger.info('Loading model store from %s', config.store_dir)
     _store = load_store(config.store_dir)
@@ -40,8 +47,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _store.pv_critical_metric,
         _store.weather_version,
     )
+    _window_cache = ValidationWindowCache(filesystem_for(config.validation_window_dir))
+    try:
+        _window_cache.load()
+        logger.info('Validation window loaded from %s', config.validation_window_dir)
+    except Exception:
+        logger.warning(
+            'Validation window load failed at startup (will retry on first request)',
+            exc_info=True,
+        )
+    try:
+        resources_fs = filesystem_for(config.resources_dir)
+        build_pv_site_repo(StringIO(resources_fs.read_text('pv_sites.csv')))
+        logger.info('PV site repo built from %s', config.resources_dir)
+    except Exception:
+        logger.warning('PV site repo load failed at startup', exc_info=True)
     yield
     _store = None
+    _window_cache = None
 
 
 app = FastAPI(
