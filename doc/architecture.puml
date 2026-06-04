@@ -2,15 +2,20 @@
 
 !include theme.puml
 
+skinparam nodesep 60
+skinparam ranksep 90
+skinparam rankdir TB
 
 collections "Third Party APIs" as ThirdPartyAPIs
 
 database Staging {
-  database "Resources" as StagingResources
-  database "Raw" as StagingRaw
-  database "Cleaned" as StagingCleaned
-  database "Prepared" as StagingPrepared
-  database "Served" as StagingServed
+'  database "Resources" as StagingResources
+'  database "Data" as StagingData {
+    database "Raw" as StagingRaw
+    database "Cleaned" as StagingCleaned
+    database "Prepared" as StagingPrepared
+    database "Served" as StagingServed
+'  }
 }
 
 database "Versioned Raw Data" as VersionedRaw
@@ -25,59 +30,43 @@ component "Data Transformer" as DataTransformer
 component "Data Versioner" as DataVersioner
 database "Project Instance Repo" as ProjectInstanceRepo #transparent
 
-component "PV Prospect App" as PvProspectApp {
-  component "Prediction API" as PredictionApi
-  component "Weather Model" as WeatherModel
-  component "PV Model" as PvModel
-  ' Roadmap (not yet implemented):
-  component "Validation API <<roadmap>>" as ValidationApi
-  component "In-Memory Data <<roadmap>>" as InMemoryData
-}
-
-actor User
+component "PV Prospect App" as PvProspectApp
 
 
-User --> PredictionApi : lat, lon, period
+'DataExtractor -[hidden]> DataTransformer
 
-PredictionApi --> WeatherModel : DNI, DHI, \ntemperature = \ncall_model(\nlat, lon, \nday, year)
-PredictionApi <- PredictionApi : calculate_POA
-PredictionApi --> PvModel : predicted\nenergy \nyield = \ncall_model(\nPOA, \ntemperature)
-
-' Roadmap flows (not yet implemented):
-User -[#lightgray]-> ValidationApi
-ValidationApi -[#lightgray]-> PvModel
-ValidationApi -[#lightgray]-> InMemoryData
-InMemoryData -[#lightgray]-> StagingServed : A2: load\nvalidation\nwindow
-
-ThirdPartyAPIs <-- DataExtractor : E2: call
-
-StagingResources <-- DataExtractor: E1: get
-DataExtractor --> StagingRaw : E3: put
-
-DataTransformer --> StagingResources : C1: get
-DataTransformer --> StagingRaw : C2: get
-DataTransformer --> StagingCleaned : C3: put\nP1: get
-DataTransformer <- DataTransformer : P2: calculate_POA
-DataTransformer --> StagingPrepared : P3: put
-DataTransformer --> StagingServed : P4: maintain\nvalidation\nwindow
-StagingResources -[hidden]> StagingRaw
-StagingRaw -[hidden]> StagingCleaned
+'StagingResources -[hidden]> StagingRaw
 StagingCleaned -[hidden]> StagingPrepared
+StagingRaw -[hidden]> StagingCleaned
 StagingPrepared -[hidden]> StagingServed
 
-component "Data Transformer" as DataTransformer
+
+'PvProspectApp --> StagingResources : A0: get
+PvProspectApp --> VersionedModel : A1: get
+PvProspectApp --> StagingServed : A2: get
+
+
+'DataExtractor ---> StagingResources : E0: get
+ThirdPartyAPIs <- DataExtractor : E1: call
+DataExtractor --> StagingRaw : E2: put
+
+'DataTransformer --> StagingResources : C1: get
+DataTransformer --> StagingRaw : C1: get
+DataTransformer --> StagingCleaned : C2: put\nP1: get
+
+DataTransformer <- DataTransformer : P2: calculate_POA
+DataTransformer --> StagingPrepared : P3: put
+DataTransformer --> StagingServed : P4: put
 
 StagingRaw <-- DataVersioner : V1: get
-VersionedRaw <- DataVersioner : V2: push (using DVC)
+VersionedRaw <- DataVersioner : V2: push (dvc)
 
 StagingPrepared <-- DataVersioner : V3: get
-VersionedFeature <-- DataVersioner : V4: push (using DVC)
+VersionedFeature <-- DataVersioner : V4: push (dvc)
 DataVersioner -> ProjectInstanceRepo : V5: tag data-v<date>
 
 VersionedFeature <-- ModelTrainer : M1: pull (dvc)
-VersionedModel <-- ModelTrainer : M2: push promoted\nartifacts (DVC +\nplain serving path)
+VersionedModel <-- ModelTrainer : M2: push (dvc)
 ProjectInstanceRepo <- ModelTrainer : M3: tag model-v<date>
-
-PvProspectApp ---> VersionedModel : A1: load promoted\nartifacts at startup
 
 @enduml

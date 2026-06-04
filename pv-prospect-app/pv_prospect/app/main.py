@@ -127,6 +127,8 @@ class VersionResponse(BaseModel):
     pv_model_version: str
     weather_model_version: str
     pv_critical_metric_r2: float
+    window_loaded: bool
+    window_updated_at: str | None
 
 
 class SiteSummary(BaseModel):
@@ -178,10 +180,15 @@ def healthz() -> dict[str, str]:
 def version() -> VersionResponse:
     if _store is None:
         raise HTTPException(status_code=503, detail='Models not loaded')
+    window_loaded, window_updated_at = (
+        _window_cache.snapshot if _window_cache is not None else (False, None)
+    )
     return VersionResponse(
         pv_model_version=_store.pv_version,
         weather_model_version=_store.weather_version,
         pv_critical_metric_r2=_store.pv_critical_metric,
+        window_loaded=window_loaded,
+        window_updated_at=window_updated_at,
     )
 
 

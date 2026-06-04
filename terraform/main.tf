@@ -431,6 +431,16 @@ resource "google_storage_bucket_iam_member" "app_versioned_model_reader" {
   member = "serviceAccount:${google_service_account.app.email}"
 }
 
+# The app SA reads the validation window artifact and site resources (pv_sites.csv)
+# from the staging bucket.  Bucket-level grant is consistent with the other bindings
+# in this config; the app only issues object GETs so read-only is minimal-privilege
+# for the read use case.
+resource "google_storage_bucket_iam_member" "app_staging_reader" {
+  bucket = module.storage.staging_bucket_name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.app.email}"
+}
+
 module "artifact_registry_app" {
   source        = "./modules/artifact_registry"
   region        = var.region
@@ -450,10 +460,12 @@ module "cloud_run_app" {
   allow_unauthenticated = var.allow_unauthenticated
   service_account_email = google_service_account.app.email
   env_vars = {
-    GOOGLE_CLOUD_PROJECT = var.project_id
-    LOG_LEVEL            = "INFO"
-    RUNTIME_ENV          = "default"
-    STORE_DIR            = "gs://${module.storage.versioned_model_bucket_name}"
+    GOOGLE_CLOUD_PROJECT  = var.project_id
+    LOG_LEVEL             = "INFO"
+    RUNTIME_ENV           = "default"
+    STORE_DIR             = "gs://${module.storage.versioned_model_bucket_name}"
+    VALIDATION_WINDOW_DIR = "gs://${module.storage.staging_bucket_name}/data/served/validation-window"
+    RESOURCES_DIR         = "gs://${module.storage.staging_bucket_name}/resources"
   }
 
   depends_on = [google_project_service.apis, module.artifact_registry_app]

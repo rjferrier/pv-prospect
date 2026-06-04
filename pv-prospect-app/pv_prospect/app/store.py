@@ -120,6 +120,18 @@ class ValidationWindowCache:
         self._lock = threading.Lock()
         self._current: ValidationWindowStore | None = None
 
+    @property
+    def snapshot(self) -> tuple[bool, str | None]:
+        """Return (loaded, updated_at) from the last successful load.
+
+        Does NOT trigger a freshness check or reload — safe to call on a
+        status endpoint without incurring a GCS round-trip per request.
+        """
+        current = self._current
+        if current is None:
+            return False, None
+        return True, current.updated_at
+
     def load(self) -> None:
         store = load_validation_window(self._fs)
         with self._lock:

@@ -26,9 +26,11 @@ variable (e.g. `STORE_DIR=gs://pv-prospect-versioned-model` in production).
 ## Endpoints
 
 ```
-POST /predict   → energy-yield estimate for a UK PV site
-GET  /healthz   → 200 once models are loaded
-GET  /version   → loaded model versions + critical metric
+POST /predict              → energy-yield estimate for a UK PV site
+GET  /healthz              → 200 once models are loaded
+GET  /version              → loaded model versions + critical metric + window status
+GET  /validate/sites       → list known sites and their window date ranges
+GET  /validate/{system_id} → per-day predicted vs actual power for a known site
 ```
 
 ### Example request (local / public demo)
@@ -61,11 +63,27 @@ curl -X POST https://<service-url>/predict \
   }'
 ```
 
+### Validation example (local)
+
+```bash
+curl http://localhost:8000/validate/sites
+
+curl http://localhost:8000/validate/89665
+```
+
+> **Caveat:** `/validate` measures in-sample fit — the window sites and dates
+> overlap with the training corpus. A low error rate confirms the model has
+> learned the known sites; it does **not** test generalisation to new prospect
+> sites. Cross-site generalisation is tracked separately in
+> `briefs/cross-site-generalization-eval.md`.
+
 ## Configuration
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `store_dir` | `/tmp/pv-prospect-models` | Artifact store path. Override with `STORE_DIR` env var (e.g. `gs://pv-prospect-versioned-model` in production). Local path for dev; `gs://` URI for Cloud Run. |
+| `store_dir` | `/tmp/pv-prospect-models` | Model artifact store. Override with `STORE_DIR` env var (e.g. `gs://pv-prospect-versioned-model` in production). |
+| `validation_window_dir` | `/tmp/pv-prospect-validation-window` | Validation window artifact directory. Override with `VALIDATION_WINDOW_DIR` env var. |
+| `resources_dir` | `resources` | Directory containing `pv_sites.csv`. Override with `RESOURCES_DIR` env var (e.g. `gs://<staging-bucket>/resources` in production). |
 
 ## Known limitation
 

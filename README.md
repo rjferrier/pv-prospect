@@ -120,11 +120,37 @@ Implemented in `pv-prospect-data-transformation`.
 
 ### A — App Data Loading
 
-At startup, `pv-prospect-app` downloads the promoted model artifacts from the
-model store (`gs://pv-prospect-versioned-model/promoted/` in production, or a
-local directory for development) and loads them into memory. The store is written
-by the model trainer's promote step (see M below). See `pv-prospect-app` for the
-`/predict`, `/healthz`, and `/version` endpoints.
+![App diagram](doc/app.png)
+
+At startup, `pv-prospect-app`:
+
+1. Downloads the promoted model artifacts from the model store
+   (`gs://pv-prospect-versioned-model/promoted/` in production, or a local directory
+   for development) and loads them into memory. The store is written by the model
+   trainer's promote step (see M below). A failed model load is fatal — without models
+   there is nothing to serve.
+2. Loads the rolling 90-day validation window from
+   `gs://<staging-bucket>/data/served/validation-window/` (see P above). A failed
+   window load is non-fatal: `/predict` continues serving; `/validate/*` returns 503
+   until the cache self-heals on the next request.
+3. Builds the in-memory PV-site registry from
+   `gs://<staging-bucket>/resources/pv_sites.csv`. Also non-fatal.
+
+Per-request freshness: before each `/validate/{system_id}` call, the app compares
+the in-memory manifest's `updated_at` against the live manifest on GCS. If the
+producer has written a fresher window since startup, the app reloads it on the spot.
+The check reads only the small manifest file, so unchanged requests pay no I/O cost.
+
+At request time, `/predict` takes a location (latitude and longitude) and a period:
+
+1. The **weather model** predicts a time series of DNI, DHI, and temperature from location and time.
+2. POA irradiance is computed from the irradiance components and the user-supplied panel geometry (shared `pv-prospect-physics` package — same computation as used during preparation).
+3. The **PV model** estimates capacity factor from POA and temperature, yielding predicted energy output.
+
+`/validate/{system_id}` runs the PV model over the validation window for the specified site and returns predicted vs. actual power output.
+
+See `pv-prospect-app` for the `/predict`, `/healthz`, `/version`, `/validate/sites`,
+and `/validate/{system_id}` endpoints.
 
 ### V — Data Versioning
 

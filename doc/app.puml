@@ -1,0 +1,23 @@
+@startuml
+
+!include theme.puml
+
+component "PV Prospect App" as PvProspectApp {
+  component "Prediction API" as PredictionApi
+  component "Weather Model" as WeatherModel
+  component "PV Model" as PvModel
+  component "Validation API" as ValidationApi
+}
+
+actor User
+
+User --> PredictionApi : lat, lon, \nperiod
+
+PredictionApi --> WeatherModel : DNI, DHI, \ntemperature = \ncall_model(\nlat, lon, \nday, year)
+PredictionApi <- PredictionApi : calculate_POA
+PredictionApi --> PvModel : predicted\nenergy \nyield = \ncall_model(\nPOA, \ntemperature)
+
+User --> ValidationApi
+ValidationApi --> PvModel
+
+@enduml
