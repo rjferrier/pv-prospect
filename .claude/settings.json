@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Edit(.claude/work)",
+      "Edit(.claude/work/**)",
       "Bash(terraform validate:*)",
       "Bash(gsutil ls:*)"
     ],
