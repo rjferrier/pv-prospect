@@ -40,6 +40,10 @@ from .transformation import (
     TRANSFORMATIONS_NEEDING_PV_SITE,
     Transformation,
 )
+from .validation_window import (
+    ValidationWindowNotSeededError,
+    run_maintain_validation_window,
+)
 
 __all__ = [
     'ALL_TRANSFORMATIONS',
@@ -72,7 +76,9 @@ __all__ = [
     'read_metadata',
     'run_clean_pv',
     'run_clean_weather',
+    'run_maintain_validation_window',
     'run_prepare_pv',
+    'ValidationWindowNotSeededError',
     'weather_partition_path',
     'write_csv',
     'write_metadata',

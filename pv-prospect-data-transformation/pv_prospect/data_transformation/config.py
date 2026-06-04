@@ -22,6 +22,8 @@ class DataTransformationConfig:
     cursors_storage: AnyStorageConfig | None = None
     ledger_storage: AnyStorageConfig | None = None
     log_storage: AnyStorageConfig | None = None
+    validation_window_storage: AnyStorageConfig | None = None
+    validation_window_days: int = 90
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DataTransformationConfig':
@@ -45,6 +47,10 @@ class DataTransformationConfig:
             cursors_storage=_optional_storage(data, 'cursors_storage'),
             ledger_storage=_optional_storage(data, 'ledger_storage'),
             log_storage=_optional_storage(data, 'log_storage'),
+            validation_window_storage=_optional_storage(
+                data, 'validation_window_storage'
+            ),
+            validation_window_days=data.get('validation_window_days', 90),
         )
 
 

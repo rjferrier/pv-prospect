@@ -83,6 +83,7 @@ from pv_prospect.data_transformation.processing import (
     SliceOutcome,
     Transformation,
     TransformInput,
+    ValidationWindowNotSeededError,
     assemble_prepared_pv,
     build_transform_phases,
     plan_slices,
@@ -90,6 +91,7 @@ from pv_prospect.data_transformation.processing import (
     produce_weather_slice,
     run_clean_pv,
     run_clean_weather,
+    run_maintain_validation_window,
     run_prepare_pv,
     save_marker,
     workflow_name_for,
@@ -117,6 +119,7 @@ from pv_prospect.etl import (
 )
 from pv_prospect.etl import get_config_dir as get_etl_config_dir
 from pv_prospect.etl.storage import (
+    AnyStorageConfig,
     FileSystem,
     LedgerCollector,
     LogCollector,
@@ -167,7 +170,7 @@ def apply_prefix_overrides(
     prepared = os.environ.get('PREPARED_PREFIX_OVERRIDE')
     cursors = os.environ.get('CURSORS_PREFIX_OVERRIDE')
     ledger = os.environ.get('LEDGER_PREFIX_OVERRIDE')
-    updates: dict[str, object] = {}
+    updates: dict[str, AnyStorageConfig] = {}
     if prepared:
         updates['staged_prepared_data_storage'] = replace(
             config.staged_prepared_data_storage, prefix=prepared
@@ -225,6 +228,25 @@ def main() -> None:
             run_date,
             os.environ.get('RUN_LABEL', ''),
         )
+        return
+    elif job_type == 'maintain_validation_window':
+        if config.validation_window_storage is None:
+            raise WorkflowTerminatingError(
+                'validation_window_storage is required for this JOB_TYPE'
+                ' but not configured'
+            )
+        prepared_fs = get_filesystem(config.staged_prepared_data_storage)
+        window_fs = get_filesystem(config.validation_window_storage)
+        try:
+            run_maintain_validation_window(
+                prepared_fs, window_fs, config.validation_window_days
+            )
+        except ValidationWindowNotSeededError:
+            logger.error(
+                'Validation window has not been seeded. '
+                'Run seed_validation_window before enabling this job.'
+            )
+            raise
         return
 
     # Per-task path: one Cloud Run task per transform unit. This shape is

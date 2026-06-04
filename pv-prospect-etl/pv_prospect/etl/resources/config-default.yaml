@@ -29,6 +29,11 @@ staged_prepared_data_storage:
   bucket_name: 'pv-prospect-staging'
   prefix: 'data/prepared'
 
+validation_window_storage:
+  backend: 'gcs'
+  bucket_name: 'pv-prospect-staging'
+  prefix: 'data/served/validation-window'
+
 manifests_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-staging'
