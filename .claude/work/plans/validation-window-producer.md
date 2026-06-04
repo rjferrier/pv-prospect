@@ -20,7 +20,7 @@ Two constraints fix the shape of the solution:
   increment; the older ~83 days of a 90-day window are in the versioned feature store,
   which neither the app nor the daily transformer reads.
 
-So the artifact is a **durable, regenerable serving cache** at a GCS serving prefix,
+So the artifact is a **durable, regenerable serving cache** at a GCS served prefix,
 **seeded once** from history and **maintained forward** daily by the transformer.
 Settled decisions: GCS object (not a DB, not loose CSVs); seed once from the feature
 store; window = 90 days; producer = transformer (not versioner/trainer — only the
@@ -28,12 +28,13 @@ transformer runs daily and owns prepared data).
 
 ## 2. Artifact format (the contract for tasks 2–4)
 
-Location: `gs://<bucket_prefix>-staging/serving/validation-window/` — the staging
+Location: `gs://<bucket_prefix>-staging/data/served/validation-window/` — the staging
 bucket, which the pipeline SA already owns (`objectAdmin`) and which the weekly clean
-never touches (it only clears `cleaned/` + `prepared/`).
+never touches (it clears only the `cleaned/` + `prepared/` prefixes, each through its
+own scoped filesystem; `data/served/` is a separate prefix).
 
 ```
-serving/validation-window/
+data/served/validation-window/
     window.csv       # all sites, last 90 days
     manifest.json    # bounds + freshness signal
 ```
@@ -122,35 +123,66 @@ also takes the existing `prepared_fs`.
 
 ## 4. Component B — one-time seed (bootstrap)
 
-The operator's launch setup already does `git submodule update --init && dvc pull`
-(instance-repo CLAUDE.md), so the full prepared corpus is present locally at
-`data/prepared/pv/**`. The seed therefore needs **no programmatic clone or DVC and no
-`pv-prospect-versioning` dependency** — it:
+The operator's launch setup checks out the instance repo and pulls the DVC-tracked
+data (instance-repo CLAUDE.md), so the prepared PV corpus is present locally under
+`data/prepared/pv/<system_id>/pv_<system_id>_<start>_<end>.csv`. The seed needs **no
+programmatic clone, no DVC, and no `pv-prospect-versioning` dependency** — it:
 
-1. reads local `data/prepared/pv/**` (last 90 days per site),
+1. reads the local partition files matching `pv/*/pv_*.csv` (NOT the stray per-site
+   `pv/<system_id>.csv` aggregates, which carry a different, `power_max`-less schema),
+   keeping the last 90 days per site,
 2. builds the artifact via the **same** `assemble_window` / `write_window` helpers as
    the daily step (guarantees byte-identical schema), and
-3. uploads `window.csv` + `manifest.json` to the serving prefix.
+3. uploads `window.csv` + `manifest.json` to the served prefix.
 
 Ship it as a small one-shot — `scripts/seed_validation_window.py` (or a
 `seed_validation_window` console entry) in `pv-prospect-data-transformation` — taking
 `--prepared-dir` and `--window-storage`. Run once at launch; not wired into the daily
-image's hot path, so DVC stays off it.
+image's hot path, so DVC stays off it. The seed reads **whatever partitions are
+present** and is correct under a full pull (the trim drops the rest), so DVC selection
+is a decoupled, optional optimisation on the *pull* step — not part of its contract.
 
-*(Fallback if you ever want it unattended: reuse `clone_instance_repo` + `dvc_pull`
-from `pv-prospect-versioning` behind an optional extra. Not needed for launch.)*
+### 4.1 Targeted DVC pull (instance-repo, optional)
+
+A full `dvc pull` fetches the entire multi-year PV history **plus** the ~150-partition
+weather corpus, raw, and models — none of which the seed needs. DVC lives wholly in
+the instance repo (`.dvc/config`, remotes, the `data/` tree), so this is an
+**instance-repo, operator-side, seed-time-only** concern; the submodule seed and the
+daily step (which reads `staging/prepared`, no DVC) are untouched.
+
+- **Path scope — the main win.** Pull only `data/prepared/pv/`. Prepared-PV rows
+  already carry `temperature` / `plane_of_array_irradiance`, so weather, raw, and
+  models are irrelevant to the validation window.
+- **Date scope — refinement.** Each partition's `.dvc` filename encodes its range
+  (`pv_<id>_<start>_<end>.csv`, `end` exclusive), and the committed `.dvc` files are
+  present after checkout **before any data is pulled** — so targets are computed with
+  zero fetch: take the **global** `max_end` across all `pv/*/pv_*.csv.dvc`, then
+  `dvc pull` only partitions with `end >= max_end − 90d`. Global (not per-site)
+  `max_end` keeps the pulled set a superset of the seed's `max(time) − 90d` trim — it
+  over-pulls at most one boundary partition per site, which the trim discards. On these
+  tiny daily CSVs the date filter saves little beyond the path scope; it earns its keep
+  mainly for a lean / CI / container seed, less so for a full local checkout that pulls
+  the corpus for other reasons anyway.
+
+Land it as a thin instance-repo wrapper — compute the targets, `dvc pull <targets>`,
+then invoke the submodule's DVC-free seed — documented in the instance-repo CLAUDE.md
+"Initial Setup". The submodule keeps no DVC knowledge.
+
+*(Fallback if you ever want the pull unattended inside the seed: reuse
+`clone_instance_repo` + `dvc_pull` from `pv-prospect-versioning` behind an optional
+extra. Rejected for launch — it reintroduces the DVC coupling this design removes.)*
 
 ## 5. Config & infra changes
 
 - **Transform config** (`DataTransformationConfig`): add
   `validation_window_storage: AnyStorageConfig` and `validation_window_days: int = 90`.
-  Wire into `config-default.yaml` (the `serving/validation-window/` prefix on staging)
-  and `config-local.yaml` (a local dir).
+  Wire into `config-default.yaml` (the `data/served/validation-window/` prefix on
+  staging) and `config-local.yaml` (a local dir).
 - **Workflow** (`modules/transform/workflow`): add the
   `maintain_validation_window` step gated on the full prepare-phase barrier (after all
   prepare fan-out tasks complete, alongside `consolidate_logs`).
 - **IAM:** producer needs **none** (pipeline SA already `objectAdmin` on staging). The
-  app-SA *read* grant on `serving/validation-window/` is part of task 4
+  app-SA *read* grant on `data/served/validation-window/` is part of task 4
   ([validation-serving-docs.md](../briefs/validation-serving-docs.md)), not here.
 
 ## 6. Code placement & reuse
@@ -186,10 +218,11 @@ from `pv-prospect-versioning` behind an optional extra. Not needed for launch.)*
 
 ## 8. Decisions resolved / residual choices
 
-Resolved: storage = GCS object on staging serving prefix; window in staging (no
-producer IAM); seed from the local pulled corpus (no DVC dep); trim cutoff
-data-relative; read-all-current-staging for self-healing; fail-closed if unseeded;
-separate `job_type`.
+Resolved: storage = GCS object on the staging `data/served/` prefix; window in staging
+(no producer IAM); seed from the local pulled corpus (no DVC dep), with an optional
+instance-repo targeted pull scoping to recent `data/prepared/pv/` partitions; trim
+cutoff data-relative; read-all-current-staging for self-healing; fail-closed if
+unseeded; separate `job_type`.
 
 Residual (low-stakes, decide at implementation): CSV vs Parquet (default CSV);
 exact `manifest.json` field names; whether the seed is a script or a console entry.
@@ -203,5 +236,6 @@ exact `manifest.json` field names; whether the seed is a script or a console ent
 3. Config fields + YAML; integration test over `LocalStorage`.
 4. `seed_validation_window` one-shot + its test.
 5. Workflow step (terraform `modules/transform/workflow`).
-6. Manual: run the seed once against the real serving prefix; confirm the next daily
-   run advances the window. (App-side load is task 2.)
+6. Manual: do the targeted `dvc pull` (instance-repo wrapper, §4.1), run the seed once
+   against the real `data/served/` prefix, and confirm the next daily run advances the
+   window. (App-side load is task 2.)

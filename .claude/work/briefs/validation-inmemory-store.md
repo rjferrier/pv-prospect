@@ -14,7 +14,7 @@ into that memory at startup and keeps it fresh — the consumer half of the
 ## What
 
 1. **Startup load (A2).** Mirror the model store's `load_store`: a config-driven
-   read (local dir in dev, `gs://…/serving/validation-window/` in prod, via the
+   read (local dir in dev, `gs://…/data/served/validation-window/` in prod, via the
    `pv-prospect-etl` storage the app already uses) of `window.csv` into an app-local
    in-memory repository keyed `system_id → DataFrame`. Keep it beside the model-store
    load in `store.py`, **not** in `pv-prospect-common` (those are domain singletons;
@@ -41,5 +41,5 @@ into that memory at startup and keeps it fresh — the consumer half of the
 `pv-prospect-app` (`store.py`: window loader + repo + generation-checked reload;
 `config.py`: `validation_window_dir` env mirroring `STORE_DIR`; startup site-repo
 build). Reuse `pv-prospect-etl` storage + `build_pv_site_repo`. The app-SA read grant
-on the serving prefix lives in
+on the served prefix lives in
 [validation-serving-docs.md](validation-serving-docs.md).

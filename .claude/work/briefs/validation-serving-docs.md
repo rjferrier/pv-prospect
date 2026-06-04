@@ -19,7 +19,7 @@ the greyed roadmap nodes in `doc/architecture.puml` to built.
   the Service memory limit holds the window (90 days × ~10 sites is small, but check).
 
 - **Terraform.** The app SA gains object read on the staging bucket's
-  `serving/validation-window/` prefix (the producer needs none — the pipeline SA
+  `data/served/validation-window/` prefix (the producer needs none — the pipeline SA
   already has `objectAdmin` on staging). Add `validation_window_storage` /
   `validation_window_dir` to the transform + app configs.
 
@@ -41,7 +41,7 @@ the greyed roadmap nodes in `doc/architecture.puml` to built.
 
 - **Docs (finalisation, per `documenting.md`).** README flow-key row (**Val — model
   validation against actuals**); document `/validate` in `pv-prospect-app/README.md`
-  with a `curl` example; note the window serving prefix + `validation_window_days`
+  with a `curl` example; note the window served prefix + `validation_window_days`
   wherever the model store is documented.
 
 ## Scope
