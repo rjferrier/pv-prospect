@@ -168,13 +168,43 @@ resource "google_workflows_workflow" "data_transformation" {
                         - continue_phase:
                             assign:
                               - _dummy: true
+
+                # After the prepare-phase barrier, update the rolling
+                # validation window. Runs only when all phases succeed;
+                # a failure here is caught by the outer except so
+                # consolidate_logs always runs.
+                - maintain_validation_window:
+                    call: googleapis.run.v2.projects.locations.jobs.run
+                    args:
+                      name: $${"projects/" + project_id + "/locations/" + region + "/jobs/" + job_name}
+                      body:
+                        overrides:
+                          containerOverrides:
+                            - env:
+                                - name: JOB_TYPE
+                                  value: maintain_validation_window
+                                - name: RUN_DATE
+                                  value: $${run_date}
+                    result: maintain_window_op
+
+                - wait_maintain_window_op:
+                    call: wait_for_operation
+                    args:
+                      operation_name: $${maintain_window_op.name}
+                    result: maintain_window_op_done
+
+                - wait_maintain_window:
+                    call: await_job
+                    args:
+                      execution_name: $${maintain_window_op_done.response.name}
+
             except:
               as: workflow_err
               steps:
                 - log_workflow_error:
                     call: sys.log
                     args:
-                      data: '$${"Workflow encountered an error - proceeding to log consolidation. Error: " + json.encode_to_string(workflow_err)}'
+                      data: '$${"Workflow encountered an error - proceeding to post-pipeline steps. Error: " + json.encode_to_string(workflow_err)}'
                       severity: "ERROR"
 
         - consolidate_logs:
