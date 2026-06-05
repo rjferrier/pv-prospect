@@ -6,8 +6,9 @@ A public website fronting the platform's two serving surfaces:
 
 - **Prediction / speculation** — pick a UK point on a map, supply panel
   parameters, see a speculative annual energy-yield estimate (`POST /predict`).
-- **Validation** — pick one of the 10 known PV sites, see how the deployed PV
-  model tracks real output over the recent 90-day window (Validation API).
+- **Validation** — pick one of the known PV sites (listed dynamically by the
+  Validation API), see how the deployed PV model tracks real output over the
+  recent ~90-day window (Validation API).
 
 These are the user-facing `User → PredictionApi` / `User → ValidationApi` flows in
 `doc/architecture.puml`.
@@ -26,11 +27,17 @@ for the full design and phasing (W0 substrate → W1 prediction → W2 validatio
 
 ## Blockers / dependencies
 
-- **W2** depends on the Validation API (TODO `## Next` tasks 1–4:
-  `validation-window-producer`, `validation-inmemory-store`, `validation-api`,
-  `validation-serving-docs`).
-- **W1** is otherwise unblocked (`/predict` exists), but its **public launch is
-  gated** on the ~30% vintage-bias decision — show an unmissable caveat or fix it
-  first (brief `weather-pv-vintage-alignment`).
+- **W2 is now unblocked** — the Validation API shipped (`/validate/sites`,
+  `/validate/{system_id}`) with a window producer (one-time seed +
+  daily `maintain_validation_window`). The plan recommends **leading with W2**:
+  it bypasses the weather model, so it is insulated from the vintage bias and is
+  the strongest credibility artifact.
+- **W1** is buildable now (`/predict` exists), but its **public launch is gated**
+  on shipping the vintage fix (decision: fix-first — `weather-pv-vintage-alignment`).
+  W1 may be exercised privately (IAM auth) before then; W2 is the only public
+  surface until the fix lands.
+- **Public launch (either section) forces an auth flip**: the service is private
+  today (`allow_unauthenticated = false`); serving the site from it makes
+  `/predict` world-callable. `max_instances=2` caps the cost.
 
 Plan: `plans/website.md`.
