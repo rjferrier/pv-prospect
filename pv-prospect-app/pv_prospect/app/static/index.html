@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PV Prospect</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        crossorigin="">
+  <link rel="stylesheet"
+        href="https://unpkg.com/uplot@1.6.31/dist/uPlot.min.css"
+        crossorigin="">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>PV Prospect</h1>
+      <p class="tagline">UK photovoltaic yield modelling</p>
+    </div>
+  </header>
+
+  <nav class="tab-bar" role="tablist">
+    <button class="tab-btn active" role="tab"
+            aria-selected="true" aria-controls="panel-validation"
+            id="tab-validation">
+      Validation
+    </button>
+    <button class="tab-btn" role="tab"
+            aria-selected="false" aria-controls="panel-prediction"
+            id="tab-prediction">
+      Prediction
+    </button>
+  </nav>
+
+  <main>
+    <section id="panel-validation" class="panel active"
+             role="tabpanel" aria-labelledby="tab-validation">
+      <!-- W2: validation section -->
+    </section>
+
+    <section id="panel-prediction" class="panel"
+             role="tabpanel" aria-labelledby="tab-prediction" hidden>
+      <!-- W1: prediction section -->
+    </section>
+  </main>
+
+  <footer>
+    <div id="footer-version" class="version-info"></div>
+    <a href="/docs" class="api-link">Developer API &#x2197;</a>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          crossorigin=""></script>
+  <script src="https://unpkg.com/uplot@1.6.31/dist/uPlot.iife.min.js"
+          crossorigin=""></script>
+  <script src="/static/api.js"></script>
+  <script src="/static/map.js"></script>
+  <script src="/static/chart.js"></script>
+  <script>
+    /* Tab switching */
+    document.querySelectorAll('.tab-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.tab-btn').forEach(function(t) {
+          t.classList.remove('active');
+          t.setAttribute('aria-selected', 'false');
+        });
+        document.querySelectorAll('.panel').forEach(function(p) {
+          p.classList.remove('active');
+          p.hidden = true;
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        var target = document.getElementById(btn.getAttribute('aria-controls'));
+        if (target) { target.classList.add('active'); target.hidden = false; }
+      });
+    });
+
+    /* Footer: model version from /version */
+    var versionEl = document.getElementById('footer-version');
+    callApi('GET', '/version').then(function(v) {
+      var parts = [
+        'PV model: ' + v.pv_model_version,
+        'R²=' + v.pv_critical_metric_r2.toFixed(3),
+        'Weather: ' + v.weather_model_version,
+      ];
+      if (v.window_loaded && v.window_updated_at) {
+        parts.push('Window: ' + v.window_updated_at);
+      }
+      versionEl.textContent = parts.join(' · ');
+    }).catch(function(e) {
+      versionEl.textContent = e.type === 'warming' ? 'Models warming up…' : '';
+    });
+  </script>
+</body>
+</html>

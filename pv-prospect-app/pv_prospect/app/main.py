@@ -5,10 +5,14 @@ from __future__ import annotations
 import datetime
 import logging
 from contextlib import asynccontextmanager
+from importlib.resources import files
 from io import StringIO
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pv_prospect.app.chain import OutsideUKDomainError, check_uk_domain, predict_yield
 from pv_prospect.app.config import AppConfig
 from pv_prospect.app.elevation import get_grid_cell_elevation
@@ -28,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 _store: ModelStore | None = None
 _window_cache: ValidationWindowCache | None = None
+_static_dir = Path(str(files('pv_prospect.app').joinpath('static')))
 
 _VINTAGE_CAVEAT = (
     'Known bias: the trained artifacts (data-v2026-05-31) carry a ~30% '
@@ -87,6 +92,7 @@ app = FastAPI(
     version='0.1.0',
     lifespan=lifespan,
 )
+app.mount('/static', StaticFiles(directory=_static_dir), name='static')
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +182,11 @@ _502 = {502: {'model': _ErrorDetail, 'description': 'Elevation lookup failed'}}
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.get('/', include_in_schema=False)
+def index() -> FileResponse:
+    return FileResponse(_static_dir / 'index.html')
 
 
 @app.get('/healthz', responses=_503)
