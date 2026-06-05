@@ -23,7 +23,7 @@ dependencies = [
     "httpx>=0.27,<1",
     "pandas>=2.0,<3",
     "torch>=2.0.0,<3",
-    "google-cloud-storage>=2.0,<3",
+    "google-cloud-storage>=3.0,<4",
 ]
 
 [[tool.poetry.source]]
@@ -42,7 +42,7 @@ fastapi = ">=0.115,<1"
 uvicorn = {version = ">=0.30,<1", extras = ["standard"]}
 httpx = ">=0.27,<1"
 torch = {version = "^2.0", source = "pytorch-cpu"}
-google-cloud-storage = ">=2.0,<3"
+google-cloud-storage = ">=3.0,<4"
 
 [tool.poetry.group.dev.dependencies]
 ruff = { version = "^0.13" }

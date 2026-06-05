@@ -18,7 +18,7 @@ dependencies = [
     "google-api-python-client>=2.184.0,<3",
     "google-auth-httplib2==0.2.0",
     "google-auth-oauthlib>=1.2.2,<2",
-    "google-cloud-storage>=2.18,<3",
+    "google-cloud-storage>=3.0,<4",
     "importlib_resources>=6.5.2,<7",
     "celery>=5.5.3,<6",
     "flower>=2.0.1,<3",
