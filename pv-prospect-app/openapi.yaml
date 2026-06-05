@@ -1,0 +1,396 @@
+openapi: 3.1.0
+info:
+  title: PV Prospect Prediction API
+  description: Climatological energy-yield estimates for UK PV installations.
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      summary: Healthz
+      operationId: healthz_healthz_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Healthz Healthz Get
+        '503':
+          description: Service not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
+  /version:
+    get:
+      summary: Version
+      operationId: version_version_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+        '503':
+          description: Service not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
+  /predict:
+    post:
+      summary: Predict
+      operationId: predict_predict_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PredictRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictResponse'
+        '503':
+          description: Service not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
+        '502':
+          description: Elevation lookup failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /validate/sites:
+    get:
+      summary: Validate Sites
+      operationId: validate_sites_validate_sites_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateSitesResponse'
+        '503':
+          description: Service not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
+  /validate/{system_id}:
+    get:
+      summary: Validate Site
+      operationId: validate_site_validate__system_id__get
+      parameters:
+      - name: system_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: System Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateSiteResponse'
+        '503':
+          description: Service not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    ErrorModel:
+      properties:
+        mape:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Mape
+        power_space_r2:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Power Space R2
+      type: object
+      required:
+      - mape
+      - power_space_r2
+      title: ErrorModel
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    PredictRequest:
+      properties:
+        latitude:
+          type: number
+          maximum: 61.0
+          minimum: 49.5
+          title: Latitude
+          description: Site latitude (UK only)
+        longitude:
+          type: number
+          maximum: 2.0
+          minimum: -9.0
+          title: Longitude
+          description: Site longitude (UK only)
+        start_date:
+          type: string
+          format: date
+          title: Start Date
+        end_date:
+          type: string
+          format: date
+          title: End Date
+        panels_capacity_w:
+          type: number
+          exclusiveMinimum: 0.0
+          title: Panels Capacity W
+        azimuth_deg:
+          type: integer
+          exclusiveMaximum: 360.0
+          minimum: 0.0
+          title: Azimuth Deg
+        tilt_deg:
+          type: integer
+          maximum: 90.0
+          minimum: 0.0
+          title: Tilt Deg
+        inverter_capacity_w:
+          anyOf:
+          - type: number
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Inverter Capacity W
+        install_age_years:
+          type: number
+          minimum: 0.0
+          title: Install Age Years
+          default: 0.0
+      type: object
+      required:
+      - latitude
+      - longitude
+      - start_date
+      - end_date
+      - panels_capacity_w
+      - azimuth_deg
+      - tilt_deg
+      title: PredictRequest
+    PredictResponse:
+      properties:
+        expected_annual_kwh:
+          type: number
+          title: Expected Annual Kwh
+        monthly_kwh:
+          items:
+            type: number
+          type: array
+          title: Monthly Kwh
+        assumptions:
+          additionalProperties: true
+          type: object
+          title: Assumptions
+        caveats:
+          items:
+            type: string
+          type: array
+          title: Caveats
+      type: object
+      required:
+      - expected_annual_kwh
+      - monthly_kwh
+      - assumptions
+      - caveats
+      title: PredictResponse
+    SeriesPointModel:
+      properties:
+        date:
+          type: string
+          format: date
+          title: Date
+        predicted_kwh:
+          type: number
+          title: Predicted Kwh
+        actual_kwh:
+          type: number
+          title: Actual Kwh
+        predicted_cf:
+          type: number
+          title: Predicted Cf
+        actual_cf:
+          type: number
+          title: Actual Cf
+        clipped:
+          type: boolean
+          title: Clipped
+      type: object
+      required:
+      - date
+      - predicted_kwh
+      - actual_kwh
+      - predicted_cf
+      - actual_cf
+      - clipped
+      title: SeriesPointModel
+    SiteSummary:
+      properties:
+        system_id:
+          type: integer
+          title: System Id
+        window_start:
+          type: string
+          format: date
+          title: Window Start
+        window_end:
+          type: string
+          format: date
+          title: Window End
+      type: object
+      required:
+      - system_id
+      - window_start
+      - window_end
+      title: SiteSummary
+    ValidateSiteResponse:
+      properties:
+        system_id:
+          type: integer
+          title: System Id
+        series:
+          items:
+            $ref: '#/components/schemas/SeriesPointModel'
+          type: array
+          title: Series
+        error:
+          $ref: '#/components/schemas/ErrorModel'
+        model_version:
+          type: string
+          title: Model Version
+        window_updated_at:
+          type: string
+          title: Window Updated At
+        caveats:
+          items:
+            type: string
+          type: array
+          title: Caveats
+      type: object
+      required:
+      - system_id
+      - series
+      - error
+      - model_version
+      - window_updated_at
+      - caveats
+      title: ValidateSiteResponse
+    ValidateSitesResponse:
+      properties:
+        sites:
+          items:
+            $ref: '#/components/schemas/SiteSummary'
+          type: array
+          title: Sites
+      type: object
+      required:
+      - sites
+      title: ValidateSitesResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    VersionResponse:
+      properties:
+        pv_model_version:
+          type: string
+          title: Pv Model Version
+        weather_model_version:
+          type: string
+          title: Weather Model Version
+        pv_critical_metric_r2:
+          type: number
+          title: Pv Critical Metric R2
+        window_loaded:
+          type: boolean
+          title: Window Loaded
+        window_updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Window Updated At
+      type: object
+      required:
+      - pv_model_version
+      - weather_model_version
+      - pv_critical_metric_r2
+      - window_loaded
+      - window_updated_at
+      title: VersionResponse
+    _ErrorDetail:
+      properties:
+        detail:
+          type: string
+          title: Detail
+      type: object
+      required:
+      - detail
+      title: _ErrorDetail

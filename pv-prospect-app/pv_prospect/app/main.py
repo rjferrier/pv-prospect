@@ -164,19 +164,28 @@ class ValidateSiteResponse(BaseModel):
     caveats: list[str]
 
 
+class _ErrorDetail(BaseModel):
+    detail: str
+
+
+_503 = {503: {'model': _ErrorDetail, 'description': 'Service not ready'}}
+_404 = {404: {'model': _ErrorDetail, 'description': 'Site not found'}}
+_502 = {502: {'model': _ErrorDetail, 'description': 'Elevation lookup failed'}}
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 
-@app.get('/healthz')
+@app.get('/healthz', responses=_503)
 def healthz() -> dict[str, str]:
     if _store is None:
         raise HTTPException(status_code=503, detail='Models not loaded')
     return {'status': 'ok'}
 
 
-@app.get('/version', response_model=VersionResponse)
+@app.get('/version', response_model=VersionResponse, responses=_503)
 def version() -> VersionResponse:
     if _store is None:
         raise HTTPException(status_code=503, detail='Models not loaded')
@@ -192,7 +201,7 @@ def version() -> VersionResponse:
     )
 
 
-@app.post('/predict', response_model=PredictResponse)
+@app.post('/predict', response_model=PredictResponse, responses={**_503, **_502})
 def predict(request: PredictRequest) -> PredictResponse:
     if _store is None:
         raise HTTPException(status_code=503, detail='Models not loaded')
@@ -242,7 +251,7 @@ def predict(request: PredictRequest) -> PredictResponse:
     )
 
 
-@app.get('/validate/sites', response_model=ValidateSitesResponse)
+@app.get('/validate/sites', response_model=ValidateSitesResponse, responses=_503)
 def validate_sites() -> ValidateSitesResponse:
     if _window_cache is None:
         raise HTTPException(status_code=503, detail='Validation window not loaded')
@@ -260,7 +269,11 @@ def validate_sites() -> ValidateSitesResponse:
     return ValidateSitesResponse(sites=sites)
 
 
-@app.get('/validate/{system_id}', response_model=ValidateSiteResponse)
+@app.get(
+    '/validate/{system_id}',
+    response_model=ValidateSiteResponse,
+    responses={**_503, **_404},
+)
 def validate_site(system_id: int) -> ValidateSiteResponse:
     if _store is None or _window_cache is None:
         raise HTTPException(status_code=503, detail='Service not ready')
