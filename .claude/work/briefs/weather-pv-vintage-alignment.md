@@ -1,11 +1,14 @@
 # Align OpenMeteo vintage between prepared-weather and prepared-PV corpora
 
-> **Update (yield-space evidence):** this diagnosis is revised. A large part of
-> the gap below is a daytime-vs-24h aggregation in `prepare_pv` (PVOutput drops
-> night rows) that **cancels in yield**, and the ~30 % was only ever a POA-space
-> MAPE, never measured as annual kWh. **Measure yield before acting on the
-> vintage framing** — see the plan's "Update — yield-space evidence" section and
-> `pv-prospect-app/scripts/measure_yield.py`.
+> **Update — read the plan first; this diagnosis is unverified.** The ~30 %
+> below was only ever a **POA-space** MAPE asserted to propagate to yield; it was
+> never measured as predicted-vs-actual annual kWh. A large part of the gap is a
+> daytime-vs-24h aggregation in `prepare_pv` (PVOutput drops night rows), which
+> *cancels* for a linear chain but **not** through the real nonlinear model + the
+> non-cancelling temperature feature — so the true yield error could be ≈0, an
+> under-, *or an over-*estimate. **Measure yield (Gate A) before acting on the
+> vintage framing or the table below** — see the plan's "Where to start" section
+> and `pv-prospect-app/scripts/measure_yield.py`. Treat the table as POA-space.
 
 ## Problem
 

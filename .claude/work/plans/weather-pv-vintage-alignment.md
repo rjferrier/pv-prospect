@@ -1,77 +1,109 @@
 # Plan: Align OpenMeteo vintage between prepared-weather and prepared-PV corpora
 
 > Companion to `briefs/weather-pv-vintage-alignment.md`. The brief states the
-> symptom (MAPE 32.7 % end-to-end, ~30 % yield underestimate); this plan pins
-> the root cause and sequences the fix. **Hard prerequisite for the website's
-> W1 public launch** (decision: fix-first).
+> original symptom (a POA-space MAPE of 32.7 %, asserted to be a ~30 % yield
+> underestimate). **That yield figure has never actually been measured** — this
+> plan resequences the work around measuring it first. It touches the website's
+> W1 public-launch gate (currently "fix-first"), but whether W1 is really blocked
+> is itself one of the things Gate A decides.
 
-## Update — yield-space evidence (revises the diagnosis and Phase 0)
+## Where to start — the gated sequence (read this first)
 
-A model-free investigation with real PV-side data for 89665 (on-site cleaned
-weather + PVOutput, 2026-06-09; scripts in
-`pv-prospect-instance/data-exploration/irradiance/poa_attribution/`) adds two
-facts the Hop-1/Hop-2 framing below does not capture:
+The decision-critical unknown is **not** which fix (Option A/B/C) to apply. It
+is whether the deployed `/predict` chain actually mis-estimates real annual
+generation — and in which direction. Every fix below is a candidate whose
+justification depends on that answer, so the work is **two gates, not a menu**.
 
-1. **A third component the split misses — daytime-vs-24h aggregation.** PVOutput
-   has no night rows, so `prepare_pv`'s inner join restricts the daily
-   POA/temperature/power to *daytime* hours. The corpus daily POA is therefore
-   **daytime-weighted** (89665/06-09: 270 vs a 24h mean of 214 W/m², +26 %),
-   worst on the **first day of each 2-day window**; `reconstruct_daily_mean_poa`
-   is 24h. So much of "Hop 2" (corpus-PV-POA vs weather-corpus POA) is this
-   aggregation, **not** cross-vintage drift — and the Phase-0 POA-space MAPE
-   below cannot separate the two.
-2. **It cancels in yield.** POA and the CF target inflate by the same daily
-   factor, so a ~linear CF–POA model learns the right slope and `energy =
-   power × 24` restores the truth (shown: true daily energy 35.52 kWh = perfect-
-   model API 35.52 kWh). So the POA-space MAPE **overstates** the yield error,
-   and the documented ~30 % was never measured as predicted-vs-actual annual kWh.
+### Gate A — yield truth (do first; decides whether there is a problem at all)
 
-**Revised gate — measure in YIELD space, not POA hops.** Run
-`pv-prospect-app/scripts/measure_yield.py` (`/predict` end-to-end vs each site's
-*true* annual generation) **first**:
-- predict ≈ actual → no material yield bias; the ~30 % was a POA-space artifact;
-  Option A re-backfill will not move yield (justify it, if at all, on the
-  train/serve-consistency argument below — not vintage).
-- predict materially low → it is weather-model irradiance (Hop 1), which Option A
-  does **not** fix — exactly the plan's "Hop 1 dominant" branch.
+Run `pv-prospect-app/scripts/measure_yield.py`: the real `/predict` chain
+end-to-end (weather model → POA → PV model → energy) vs each site's **true**
+annual generation. This single number has never been measured; the documented
+"~30 %" was a POA-space MAPE *asserted* to propagate to yield, not a
+predicted-vs-actual kWh.
 
-The Phase-0 POA-hop measurement is still useful for *attribution*, but it is
-confounded by (1); treat it as diagnostic colour, with yield as the decision
-metric. **Option A's train/serve-consistency rationale stands on its own**
-(a spatial-source argument, independent of (1)/(2)) — gate it on yield too.
+**The outcome is genuinely unknown, including its sign — do not assume it.**
+The +26 % daytime-vs-24h aggregation (see *Background* below) provably cancels
+for a *linear* CF–POA chain — with a perfect model, `energy = power × 24`
+recovers the truth (demonstrated on 89665/06-09: 35.52 kWh = 35.52 kWh). But the
+real PV model is a **nonlinear, clipped MLP**, and the **temperature feature
+does not cancel** (the daytime-mean temperature the corpus trains on is not the
+24h-mean temperature, and it does not scale by the POA factor). So the real
+residual could be ≈0, an under-estimate, *or an over-estimate*. The whole point
+of Gate A is that the cancellation argument cannot predict it — measure it.
 
-**Separate hygiene item (yield-neutral) — the 24h convention.** Decouple
-`prepare_pv`'s POA/temperature from PV-power coverage (compute over the full 24h
-weather day; energy-based target). Removes the daytime-weighting footgun, the
-edge/interior corpus inconsistency, and the temperature-feature train/serve
-mismatch (PV trains on daytime-warm temp, serves ~24h). Needs a PV-corpus
-re-transform + PV-model retrain (weather untouched) — **fold into any Option-A
-re-backfill** rather than doing standalone. It will *not* move yields (it
-cancels); do it for correctness, not the ~30 %. Also fix the now-false "<1 %
-self-consistent" note in `app/poa.py`.
+- **predict ≈ actual** → no material yield bias. The ~30 % was a POA-space
+  artifact; correct the caveat and unblock W1 (see *Cleanup*). Option A/B
+  re-backfill is then **not** justified on yield grounds — only, if at all, on
+  the train/serve-consistency argument, which stands on its own.
+- **predict materially off** → a real bias exists; go to Gate B to attribute it.
 
-## ⏳ Open decision (pending — do not start Phase 1 until resolved)
+**Gate A is not runnable as-is — fixing that is the literal next action** (see
+*Running Gate A*).
 
-The fix *mechanism* is not yet chosen. Options, in recommended order:
+### Gate B — attribution (only if Gate A shows a real bias)
 
-1. **Phase 0 first, lean A** *(recommended)* — run the Hop-1/Hop-2 measurement
-   below, then proceed with Option A (unify the weather source) **if Hop 2
-   dominates**. De-risks the re-backfill; matches train/serve.
-2. **Commit to A now** — skip the measurement gate, go straight to unifying the
-   source + re-backfill + retrain. Faster to start, but risks a re-backfill that
-   never clears the smoke test if Hop 1 dominates.
-3. **Option B instead** — keep on-site weather; stamp OpenMeteo `generation_time`
-   and reject vintage-mismatched days. Preserves exact-site POA but perpetuates
-   train/serve skew and can leave gaps.
+The POA-hop decomposition (this was the old "Phase 0"; full method below). Split
+the measured gap into its two independent hops:
+- **Hop 1 — weather-model irradiance error** (predicted DNI/DHI vs the corpus it
+  trained on). Option A does **not** fix this.
+- **Hop 2 — cross-vintage / spatial drift** (PV corpus vs weather corpus). The
+  only hop the vintage fix removes.
 
-**Also undecided:** whether to start Phase 0 now (needs prepared-corpus access —
-DVC pull / GCS / local sample) or leave this plan as a record for later.
+Runnable now on already-pulled prepared data, **but confounded by the +26 %
+aggregation** — read it as attribution colour, not a clean gate.
+- Hop 1 dominant → weather-model work / keep caveat; re-sequence before W1.
+- Hop 2 dominant → Option A (fold the 24h-convention hygiene in) + Option C gate.
 
-Until this is resolved the plan stands as analysis only; no code/infra changes
-have been made. The documented ~30 % caveat (poa.py / main.py) remains in place
-and W1's public launch stays blocked.
+### Contingent — do not action until the gates resolve
 
-## Root cause (confirmed in code)
+The "~30 % underestimate / fix-first / W1-blocked" language in `TODO.md`,
+`app/poa.py`, and `main.py:35` is **downstream of Gate A**; leave it until
+measured. The 24h-convention hygiene item is yield-neutral by construction —
+fold it into any Option-A re-backfill; don't do it standalone for the ~30 %.
+
+## Running Gate A (prerequisites + the next action)
+
+Gate A cannot run today, and `measure_yield.py` had a correctness gap that the
+prep must close:
+
+1. **Model store** — `models/` is empty. Pull the trained artifacts
+   (`data-v2026-05-31`, named in `main.py`'s caveat) from
+   `gs://pv-prospect-versioned-model`, or point `--store-dir` at them.
+2. **True actuals — the long pole.** True generation lives **only in raw
+   PVOutput's `energy` column** (cumulative Wh within a day; the day's last
+   reading is its total — e.g. 89665/06-09 ends at 35519 Wh = 35.5 kWh).
+   Cleaned/prepared corpora **drop night rows and strip `energy`** (cleaned is
+   just `time,power`), so they cannot yield true kWh. `measure_yield.py` now
+   reads actuals from raw `energy` (daily max → annual sum); it previously
+   integrated cleaned power, which cannot see the truth. A year of raw PVOutput
+   across the validation sites is needed (`gs://pv-prospect-versioned-raw`); the
+   user hand-fetched a single site-day into `.tmp`, so acquiring this corpus is
+   the gating step.
+3. **Run** — `cd pv-prospect-app && poetry run python scripts/measure_yield.py
+   --store-dir <store> --pv-sites-csv resources/pv_sites.csv
+   --actuals-dir <raw-pvoutput-dir> --start <D0> --end <D1>`. Single-year
+   actuals are weather-noisy; trust the cross-site aggregate, not any one site.
+
+**Open practical question for the user:** how to source a year of raw PVOutput
+actuals across sites — `dvc pull` of `versioned-raw`, a fresh extraction run, or
+PVOutput's own daily-energy export? This choice gates Gate A.
+
+## Background — the aggregation that confounds POA-space
+
+Model-free investigation with real 89665 data (2026-06-09; scripts in
+`pv-prospect-instance/data-exploration/irradiance/poa_attribution/`). PVOutput
+has no night rows, so `prepare_pv`'s inner join restricts each daily
+POA/temperature/power to **daytime** hours, while `prepare_weather` (and
+`reconstruct_daily_mean_poa`) average over the full 24 h. The corpus daily POA
+is therefore **daytime-weighted and inflated** (89665/06-09: 270 vs a 24 h mean
+of 214 W/m², +26 %), worst on the **first day of each 2-day window**. This is a
+*third* component the Hop-1/Hop-2 split does not separate: much of "Hop 2" is
+this aggregation, not cross-vintage drift — which is exactly why Gate B's
+POA-space numbers are confounded, and why the decision metric is Gate A's yield,
+not a POA hop.
+
+## Root cause of the vintage drift (confirmed in code)
 
 Two *separate* OpenMeteo extractions feed the two corpora, and they never share
 a vintage:
@@ -95,7 +127,7 @@ jobs*. The only ways to genuinely share a vintage are to **unify the weather
 source** (Option A) or to keep two sources but **stamp + gate** the vintage
 (Option B).
 
-## Phase 0 — decompose the gap before paying for a re-backfill (decision gate)
+## Gate B method — decompose the gap (POA-hop; only if Gate A shows a bias)
 
 The end-to-end error is the sum of two independent hops:
 
@@ -106,10 +138,9 @@ The end-to-end error is the sum of two independent hops:
 - **Hop 2 — cross-vintage/spatial drift**: weather corpus vs PV corpus. This is
   the only hop the vintage fix removes.
 
-Option A drives **Hop 2 → ~0** but does **nothing for Hop 1**. If Hop 1 alone
-exceeds the ~15 % smoke-test threshold, the test still fails and W1 stays blocked
-— *after* a multi-day re-backfill + retrain. So measure first; it is cheap and
-uses only existing corpus data:
+Option A drives **Hop 2 → ~0** but does **nothing for Hop 1**. Method (uses only
+already-pulled corpus data — runnable now, but read with the +26 % aggregation
+confound from *Background* in mind):
 
 1. For site 89665's nearest grid point, compute `POA_wxcorpus` by pushing the
    **weather-corpus** DNI/DHI through the same POA math (`prepare_pv`'s
@@ -117,18 +148,20 @@ uses only existing corpus data:
    `direct_normal_irradiance`/`diffuse_radiation` per `WEATHER_COLUMNS`).
 2. **Hop 2** = MAPE(`POA_wxcorpus` vs corpus PV POA), per month (Feb/Oct/May).
 3. **Hop 1** = MAPE(reconstructed POA vs `POA_wxcorpus`).
-4. Check Hop 1 ⊕ Hop 2 reconcile to the table's 32.7 %.
+4. Check Hop 1 ⊕ Hop 2 reconcile to the brief table's 32.7 %.
 
-**Decision:**
-- Hop 2 dominant → Option A is justified; proceed.
-- Hop 1 dominant → Option A is still correct but **not sufficient**; say so
-  plainly and re-sequence (weather-model improvement, or keep the documented
-  caveat) ahead of W1 rather than spending the re-backfill first.
+**Attribution → fix:**
+- Hop 2 dominant → Option A is justified; proceed to the fix menu.
+- Hop 1 dominant → Option A is **not sufficient**; say so plainly and re-sequence
+  (weather-model improvement, or keep the documented caveat) ahead of W1 rather
+  than spending the re-backfill first.
 
 (The supporting weather-model MAPE that the now-deleted `productionise-models`
-plan once held is *not* in README/doc — Phase 0 regenerates it.)
+plan once held is *not* in README/doc — Gate B regenerates it.)
 
-## Phase 1 — Primary fix, Option A: one weather source feeds both corpora (recommended)
+## Fix menu (contingent on the gates)
+
+### If Gate B → Hop 2: Option A — one weather source feeds both corpora (recommended)
 
 Make the PV corpus's POA derive from the **grid weather corpus** (nearest grid
 point), eliminating the separate on-site weather extraction.
@@ -139,11 +172,12 @@ point), eliminating the separate on-site weather extraction.
   grid-resolution, *model-predicted* weather (the weather net interpolates the
   grid climatology to the site — `chain.py:108`). Training its POA from grid
   weather matches that; training from exact-site weather is precisely the
-  train/serve skew that B preserves.
+  train/serve skew that B preserves. **This rationale is independent of the
+  yield/vintage question** — it holds even if Gate A shows no bias.
 - Removes a whole extraction job, its OpenMeteo budget, and a cursor.
 - One modeling cost: grid-approximated POA paired with power generated under
   exact-site irradiance (mild label noise). The right trade, given the above —
-  0.2° ≈ ≤ 11 km, far below the vintage effect Phase 0 is measuring.
+  0.2° ≈ ≤ 11 km, far below the vintage effect Gate B is measuring.
 
 **Cross-component scope** (flagged up front per the consistency rule):
 1. **Transformation** — `produce_pv_slice` / `run_prepare_pv` source weather from
@@ -162,7 +196,7 @@ point), eliminating the separate on-site weather extraction.
    `util/pv_prospect/util/backfill_prepared_corpora_20260524.py` (marker rewind +
    supersede old ledgers + trigger workflows).
 
-## Phase 2 — Secondary fix, Option C: trainer validation gate (complementary)
+### Regardless of A/B: Option C — trainer validation gate (complementary)
 
 After training, before promotion: compute the weather model's DNI/DHI MAPE vs
 the corpus on held-out (location, month) cells; log it as a metric; **block
@@ -170,14 +204,26 @@ promotion above a configured threshold** (e.g. 20 %). This does not fix Hop 1 bu
 makes it *visible* — a silently-degraded weather model fails the gate instead of
 shipping. Do this regardless of the A/B choice.
 
-## Phase 3 — Cleanup + unblock W1
+### 24h-convention hygiene (yield-neutral; fold into any re-backfill)
 
-Once the smoke-test MAPE < 15 %:
-- Remove the ~30 % caveat in `pv-prospect-app/.../poa.py` docstring and the
-  `/predict` response caveat in `main.py:35`.
+Decouple `prepare_pv`'s POA/temperature from PV-power coverage (compute over the
+full 24h weather day; energy-based target). Removes the daytime-weighting
+footgun, the edge/interior corpus inconsistency, and the temperature-feature
+train/serve mismatch (PV trains on daytime-warm temp, serves ~24h). Needs a
+PV-corpus re-transform + PV-model retrain (weather untouched). It will **not**
+move yields where the chain is linear (it cancels) — but note that the
+temperature non-cancellation (Gate A, above) is a real reason to do it for
+correctness, not just tidiness. Also fix the now-false "<1 % self-consistent"
+note in `app/poa.py`.
+
+### Cleanup + unblock W1 (contingent on Gate A)
+
+Once Gate A is resolved and (if a fix was needed) the smoke-test MAPE < 15 %:
+- Correct/remove the ~30 % caveat in `pv-prospect-app/.../poa.py` docstring and
+  the `/predict` response caveat in `main.py:35`.
 - Flip the TODO note and unblock the website's W1 public launch.
 
-## Alternative — Option B (fallback, only if exact-site fidelity proves material)
+### Alternative — Option B (fallback, only if exact-site fidelity proves material)
 
 Keep on-site weather but force same vintage: capture OpenMeteo `generation_time`
 (not currently captured — add to `_metadata_from_response`, `openmeteo.py:325`),
@@ -185,16 +231,18 @@ stamp it into the raw metadata sidecar, and have `prepare_pv` reject/skip a day
 whose on-site-weather vintage differs from the grid-weather vintage for that date
 by more than one week. **Partial mitigation**: keeps two jobs, can leave gaps
 where vintages cannot be reconciled, preserves exact-site POA but *perpetuates*
-the train/serve skew A removes. Pick only if Phase 0 shows A's grid approximation
+the train/serve skew A removes. Pick only if Gate B shows A's grid approximation
 is itself material (unlikely).
 
 ## Sequencing
 
 ```
-Phase 0 (measure, ~hours) ──▶ decision
-   ├─ Hop 2 dominant ──▶ Phase 1 (A: transform + extraction + orchestration,
-   │                              re-backfill, retrain)  +  Phase 2 (C: gate)
-   │                          └─▶ Phase 3 (cleanup, unblock W1)
-   └─ Hop 1 dominant ──▶ A still correct but insufficient; sequence weather-model
-                          work / keep caveat before W1
+Gate A — measure_yield.py (prereq: store + raw actuals) ──▶ decision
+   ├─ predict ≈ actual ──▶ no yield bias: correct caveat, unblock W1.
+   │                        Option A only on the train/serve argument, if at all.
+   └─ predict materially off ──▶ Gate B (POA-hop attribution, confound-aware)
+         ├─ Hop 2 dominant ──▶ Option A (+ fold 24h hygiene) + Option C gate
+         │                        └─▶ Cleanup, unblock W1
+         └─ Hop 1 dominant ──▶ A insufficient; weather-model work / keep caveat
+                                before W1
 ```

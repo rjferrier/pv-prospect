@@ -11,8 +11,8 @@ IMPORTANT -- compare against TRUE generation, not the corpus ``power x 24``.
 The prepared-PV corpus / validation window expose ``actual_kwh = power x 24``,
 where ``power`` is the *daytime-weighted* daily mean (PVOutput night rows are
 dropped, so it is inflated ~+26%; see FINDINGS.md). Using that as "actual"
-would understate the API's true error. Here "actual" is the energy *integrated*
-from PVOutput power (or PVOutput's own daily energy totals) -- real kWh.
+would understate the API's true error. Here "actual" is PVOutput's own daily
+energy total (the cumulative ``energy`` column's end-of-day value) -- real kWh.
 
 Why this is the right yardstick: with a perfect model + perfect weather the
 chain provably recovers true daily energy (the daytime-weighting cancels in the
@@ -24,9 +24,10 @@ secondary), not the aggregation convention and not vintage.
 PREREQUISITES (cannot run without these -- not in the instance repo by default):
   * Trained artifacts in the model store. Set ``STORE_DIR`` (local dir or
     ``gs://pv-prospect-versioned-model``); ``load_store`` reads PV + weather.
-  * A directory of per-site ACTUAL PVOutput data covering the comparison window,
-    one CSV per site with at least ``time,power`` (cleaned-PV format) OR a
-    precomputed actuals CSV ``system_id,actual_annual_kwh``.
+  * Per-site ACTUAL generation covering the window. Either a directory of RAW
+    PVOutput CSVs named ``<system_id>.csv`` (``date,time,energy,...``; true kWh
+    comes from the cumulative ``energy`` column -- cleaned/prepared have it
+    stripped), OR a precomputed CSV ``system_id,actual_annual_kwh``.
   * Run in the app's env:  ``cd pv-prospect-app && poetry run python
     scripts/measure_yield.py --help``
 
@@ -102,19 +103,33 @@ def predicted_annual_kwh(row: dict, store, start: dt.date, end: dt.date) -> floa
     return total
 
 
-def actual_annual_kwh_from_power(site_csv: Path, start: dt.date, end: dt.date) -> float:
-    """TRUE generation: integrate PVOutput power over [start, end] -> kWh.
+def actual_annual_kwh_from_raw_energy(site_csv: Path, start: dt.date, end: dt.date) -> float:
+    """TRUE generation from raw PVOutput's ``energy`` column (cumulative Wh/day).
 
-    Expects a cleaned-PV CSV (``time,power``) at native cadence. Night/gaps
-    contribute 0. This is real energy, NOT the corpus ``power x 24``.
+    Raw PVOutput ``energy`` resets each day and accumulates within it, so the
+    day's LAST (== max) non-blank reading is that day's total generation
+    (e.g. 89665/06-09 ends at 35519 Wh = 35.5 kWh). Sum those daily totals over
+    [start, end].
+
+    This is the ONLY faithful source of true kWh. Cleaned/prepared corpora drop
+    night rows and strip ``energy``, and the corpus ``power x 24`` is the
+    inflated daytime-weighted mean -- neither is the truth (see FINDINGS.md).
+    Expects a raw PVOutput CSV (``date,time,energy,...``); concatenate the
+    per-day raw files for a site into one CSV before passing them here.
     """
-    df = pd.read_csv(site_csv, parse_dates=['time']).sort_values('time')
-    mask = (df['time'].dt.date >= start) & (df['time'].dt.date <= end)
-    df = df[mask].reset_index(drop=True)
+    df = pd.read_csv(site_csv)
+    if 'energy' not in df.columns or 'date' not in df.columns:
+        raise ValueError(f'{site_csv}: not a raw PVOutput file (need date,energy)')
+    df = df[df['energy'].notna()]
     if df.empty:
         return float('nan')
-    dt_h = df['time'].diff().dt.total_seconds().div(3600).fillna(0.0).clip(upper=0.5)
-    return float((df['power'] * dt_h).sum()) / 1000.0
+    day = pd.to_datetime(df['date'].astype(int).astype(str), format='%Y%m%d').dt.date
+    df = df.assign(_day=day)
+    df = df[(df['_day'] >= start) & (df['_day'] <= end)]
+    if df.empty:
+        return float('nan')
+    daily_wh = df.groupby('_day')['energy'].max()  # cumulative => max is the daily total
+    return float(daily_wh.sum()) / 1000.0
 
 
 def main() -> None:
@@ -123,7 +138,8 @@ def main() -> None:
                     help='Model store (local dir or gs:// URI) for load_store')
     ap.add_argument('--pv-sites-csv', required=True, type=Path)
     ap.add_argument('--actuals-dir', type=Path,
-                    help='Dir of per-site cleaned-PV CSVs named <system_id>.csv')
+                    help='Dir of per-site RAW PVOutput CSVs named <system_id>.csv '
+                         '(date,time,energy,... -- NOT cleaned/prepared)')
     ap.add_argument('--actuals-csv', type=Path,
                     help='Alt: precomputed CSV system_id,actual_annual_kwh')
     ap.add_argument('--start', required=True, type=dt.date.fromisoformat)
@@ -146,7 +162,7 @@ def main() -> None:
     for sid, row in sorted(sites.items()):
         try:
             actual = (precomputed.get(sid) if precomputed else
-                      actual_annual_kwh_from_power(
+                      actual_annual_kwh_from_raw_energy(
                           args.actuals_dir / f'{sid}.csv', args.start, args.end))
         except FileNotFoundError:
             continue
