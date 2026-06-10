@@ -1,14 +1,27 @@
 # Align OpenMeteo vintage between prepared-weather and prepared-PV corpora
 
-> **Update — read the plan first; this diagnosis is unverified.** The ~30 %
-> below was only ever a **POA-space** MAPE asserted to propagate to yield; it was
-> never measured as predicted-vs-actual annual kWh. A large part of the gap is a
-> daytime-vs-24h aggregation in `prepare_pv` (PVOutput drops night rows), which
-> *cancels* for a linear chain but **not** through the real nonlinear model + the
-> non-cancelling temperature feature — so the true yield error could be ≈0, an
-> under-, *or an over-*estimate. **Measure yield (Gate A) before acting on the
-> vintage framing or the table below** — see the plan's "Where to start" section
-> and `pv-prospect-app/scripts/measure_yield.py`. Treat the table as POA-space.
+> **Update (Gate A measured 2026-06-10 — read the plan, not the body below).**
+> The yield error has now been measured end-to-end (predicted vs true annual kWh,
+> 10 sites). Verdict: a **+100 % OVERESTIMATE** (mean pred/actual 2.0), the
+> *opposite* sign to the ~30 % underestimate this brief asserts. The daytime-vs-24h
+> aggregation is **ruled out** (it cancels — POA and power share the daytime
+> window). Root cause is a **PV-model calibration failure**: it over-predicts
+> capacity factor in the low-POA region it is *served*, because it *trains* on
+> daytime-mean POA but is served the 24 h-mean POA (a train/serve POA-basis
+> mismatch — which keeps this brief's alignment theme alive, in corrected form).
+> The ~30 % figure and the POA-space table below are **superseded**; see the
+> plan (now restructured as a full investigation report — Context → Hypotheses →
+> Method → Results → Conclusions → Recommendations). **Gate B (run 2026-06-11) split the ~2×:
+> ~89 % is the PV model (it over-predicts by ~83 % even when fed the true site
+> POA), ~11 % a small same-signed weather-path (~8 %).** A direct served-vs-true
+> probe (June, the dominant month) shows that weather-path is temperature-led
+> (served ~2.4 °C cooler than the actual June 24 h-mean, which lifts the PV
+> model's CF) — the weather model actually serves irradiance slightly *low* (POA
+> ~4 % low in June), **corroborating** this brief's "weather under-predicts
+> irradiance" instinct, which simply does not produce an underestimate. (Winter
+> months were not separately verified, so "temperature-led" is a June-anchored
+> lean.) So the fix is PV-model-side; vintage/grid alignment is a second-order
+> rider, not the cure.
 
 ## Problem
 

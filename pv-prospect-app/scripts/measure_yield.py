@@ -31,10 +31,10 @@ PREREQUISITES (cannot run without these -- not in the instance repo by default):
   * Run in the app's env:  ``cd pv-prospect-app && poetry run python
     scripts/measure_yield.py --help``
 
-STATUS: untested -- pending the artifacts above. Faithful to the production
-chain (imports the real ``predict_yield``); the only approximations are flagged
-inline (multi-panel area-weighting; single-year actuals are weather-noisy, so
-trust the cross-site aggregate, not individual sites).
+Faithful to the production chain (imports the real ``predict_yield``); the only
+approximations are flagged inline (multi-panel area-weighting; single-year
+actuals are weather-noisy, so trust the cross-site aggregate, not individual
+sites).
 """
 
 from __future__ import annotations
@@ -42,13 +42,18 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import io
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 from pv_prospect.app.chain import predict_yield
 from pv_prospect.app.elevation import get_grid_cell_elevation
-from pv_prospect.app.store import load_store
+from pv_prospect.app.store import filesystem_for, load_store
+
+if TYPE_CHECKING:
+    from pv_prospect.etl.storage import FileSystem
 
 
 def _panel_geometries(row: dict) -> list[tuple[int, int, float]]:
@@ -132,6 +137,37 @@ def actual_annual_kwh_from_raw_energy(site_csv: Path, start: dt.date, end: dt.da
     return float(daily_wh.sum()) / 1000.0
 
 
+def actual_annual_kwh_from_gcs(
+    fs: 'FileSystem', site_id: int, start: dt.date, end: dt.date
+) -> float:
+    """True generation from daily raw PVOutput files in GCS.
+
+    ``fs`` must be rooted at the PVOutput raw prefix (e.g.
+    ``gs://pv-prospect-staging/data/raw/timeseries/pvoutput/``).
+    Lists files under ``<site_id>/pvoutput_<site_id>_<YYYYMMDD>.csv``,
+    filters to [start, end], and sums daily totals from the cumulative
+    ``energy`` column. Makes one GCS read per in-window day -- expect a
+    few minutes for a full year across all sites.
+    """
+    entries = fs.list_files(str(site_id), pattern='pvoutput_*.csv')
+    daily_totals: dict[dt.date, float] = {}
+    for entry in entries:
+        date_str = entry.name.rsplit('_', 1)[-1].replace('.csv', '')
+        try:
+            day = dt.date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+        except ValueError:
+            continue
+        if not (start <= day <= end):
+            continue
+        df = pd.read_csv(io.StringIO(fs.read_text(entry.path)))
+        df = df[df['energy'].notna()]
+        if not df.empty:
+            daily_totals[day] = float(df['energy'].max())
+    if not daily_totals:
+        return float('nan')
+    return sum(daily_totals.values()) / 1000.0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--store-dir', required=True,
@@ -140,6 +176,9 @@ def main() -> None:
     ap.add_argument('--actuals-dir', type=Path,
                     help='Dir of per-site RAW PVOutput CSVs named <system_id>.csv '
                          '(date,time,energy,... -- NOT cleaned/prepared)')
+    ap.add_argument('--actuals-gcs-prefix',
+                    help='GCS prefix for raw PVOutput per-day files, e.g. '
+                         'gs://pv-prospect-staging/data/raw/timeseries/pvoutput/')
     ap.add_argument('--actuals-csv', type=Path,
                     help='Alt: precomputed CSV system_id,actual_annual_kwh')
     ap.add_argument('--start', required=True, type=dt.date.fromisoformat)
@@ -150,20 +189,27 @@ def main() -> None:
     print(f'Loaded PV={store.pv_version} weather={store.weather_version}\n')
     sites = load_sites(args.pv_sites_csv)
 
-    precomputed = {}
+    precomputed: dict[int, float] = {}
     if args.actuals_csv:
         with open(args.actuals_csv) as fh:
             for r in csv.DictReader(fh):
                 precomputed[int(r['system_id'])] = float(r['actual_annual_kwh'])
+
+    gcs_fs = filesystem_for(args.actuals_gcs_prefix) if args.actuals_gcs_prefix else None
 
     print(f"{'site':>7} {'predicted':>10} {'actual':>10} {'pred/act':>9}")
     print('-' * 40)
     ratios = []
     for sid, row in sorted(sites.items()):
         try:
-            actual = (precomputed.get(sid) if precomputed else
-                      actual_annual_kwh_from_raw_energy(
-                          args.actuals_dir / f'{sid}.csv', args.start, args.end))
+            if precomputed:
+                actual: float | None = precomputed.get(sid)
+            elif gcs_fs is not None:
+                actual = actual_annual_kwh_from_gcs(gcs_fs, sid, args.start, args.end)
+                print(f'{sid:>7}  actuals read', flush=True)
+            else:
+                actual = actual_annual_kwh_from_raw_energy(
+                    args.actuals_dir / f'{sid}.csv', args.start, args.end)
         except FileNotFoundError:
             continue
         if actual is None or np.isnan(actual) or actual <= 0:

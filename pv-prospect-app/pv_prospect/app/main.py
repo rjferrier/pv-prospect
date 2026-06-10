@@ -35,9 +35,13 @@ _window_cache: ValidationWindowCache | None = None
 _static_dir = Path(str(files('pv_prospect.app').joinpath('static')))
 
 _VINTAGE_CAVEAT = (
-    'Known bias: the trained artifacts (data-v2026-05-31) carry a ~30% '
-    'systematic underestimate of annual yield due to a weather/PV corpus '
-    'vintage mismatch (different OpenMeteo reanalysis snapshots). '
+    'Known bias: the trained artifacts (model-v2026-06-10) carry a '
+    'systematic overestimate of annual yield, measured at approximately '
+    '+100% across 10 validation sites (mean pred/actual ratio 2.0, '
+    'year 2025-06-09 to 2026-06-08). Root cause under investigation; '
+    'a PV-model calibration issue (the model over-predicts capacity '
+    'factor at the low irradiance levels typical of UK climatological '
+    'means, where its training data is sparse). '
     'Fix tracked in briefs/weather-pv-vintage-alignment.md.'
 )
 
