@@ -5,6 +5,51 @@
 > the root cause and sequences the fix. **Hard prerequisite for the website's
 > W1 public launch** (decision: fix-first).
 
+## Update — yield-space evidence (revises the diagnosis and Phase 0)
+
+A model-free investigation with real PV-side data for 89665 (on-site cleaned
+weather + PVOutput, 2026-06-09; scripts in
+`pv-prospect-instance/data-exploration/irradiance/poa_attribution/`) adds two
+facts the Hop-1/Hop-2 framing below does not capture:
+
+1. **A third component the split misses — daytime-vs-24h aggregation.** PVOutput
+   has no night rows, so `prepare_pv`'s inner join restricts the daily
+   POA/temperature/power to *daytime* hours. The corpus daily POA is therefore
+   **daytime-weighted** (89665/06-09: 270 vs a 24h mean of 214 W/m², +26 %),
+   worst on the **first day of each 2-day window**; `reconstruct_daily_mean_poa`
+   is 24h. So much of "Hop 2" (corpus-PV-POA vs weather-corpus POA) is this
+   aggregation, **not** cross-vintage drift — and the Phase-0 POA-space MAPE
+   below cannot separate the two.
+2. **It cancels in yield.** POA and the CF target inflate by the same daily
+   factor, so a ~linear CF–POA model learns the right slope and `energy =
+   power × 24` restores the truth (shown: true daily energy 35.52 kWh = perfect-
+   model API 35.52 kWh). So the POA-space MAPE **overstates** the yield error,
+   and the documented ~30 % was never measured as predicted-vs-actual annual kWh.
+
+**Revised gate — measure in YIELD space, not POA hops.** Run
+`pv-prospect-app/scripts/measure_yield.py` (`/predict` end-to-end vs each site's
+*true* annual generation) **first**:
+- predict ≈ actual → no material yield bias; the ~30 % was a POA-space artifact;
+  Option A re-backfill will not move yield (justify it, if at all, on the
+  train/serve-consistency argument below — not vintage).
+- predict materially low → it is weather-model irradiance (Hop 1), which Option A
+  does **not** fix — exactly the plan's "Hop 1 dominant" branch.
+
+The Phase-0 POA-hop measurement is still useful for *attribution*, but it is
+confounded by (1); treat it as diagnostic colour, with yield as the decision
+metric. **Option A's train/serve-consistency rationale stands on its own**
+(a spatial-source argument, independent of (1)/(2)) — gate it on yield too.
+
+**Separate hygiene item (yield-neutral) — the 24h convention.** Decouple
+`prepare_pv`'s POA/temperature from PV-power coverage (compute over the full 24h
+weather day; energy-based target). Removes the daytime-weighting footgun, the
+edge/interior corpus inconsistency, and the temperature-feature train/serve
+mismatch (PV trains on daytime-warm temp, serves ~24h). Needs a PV-corpus
+re-transform + PV-model retrain (weather untouched) — **fold into any Option-A
+re-backfill** rather than doing standalone. It will *not* move yields (it
+cancels); do it for correctness, not the ~30 %. Also fix the now-false "<1 %
+self-consistent" note in `app/poa.py`.
+
 ## ⏳ Open decision (pending — do not start Phase 1 until resolved)
 
 The fix *mechanism* is not yet chosen. Options, in recommended order:
