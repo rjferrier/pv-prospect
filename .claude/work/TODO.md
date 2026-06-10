@@ -14,6 +14,7 @@ launch waits on the vintage fix** (decision: fix-first → see "Later").
 
 - [ ] [Offline cross-site (LOSO) generalisation eval for the PV model](briefs/cross-site-generalization-eval.md) — honest prospect-site accuracy; the Prediction API's headline claim currently ships unvalidated
 - [ ] [Align OpenMeteo vintage between prepared-weather and prepared-PV corpora](briefs/weather-pv-vintage-alignment.md) — root cause of ~30% yield underestimate in Prediction API; **hard prerequisite for the website's W1 public launch** (decision: fix-first)
+- [ ] [Version raw extracted data alongside prepared data in the weekly versioning run](briefs/version-raw-data.md)
 - [ ] [Restructure `tracking/` prefix to group files by date](briefs/tracking-restructure.md)
 - [ ] [Investigate the data-versioner hang-on-exit](briefs/versioner-hang.md)
 - [ ] [Clarify end-date semantics in backfill cursors and manifests](briefs/end-date-semantics.md)
