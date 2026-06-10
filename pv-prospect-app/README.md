@@ -5,7 +5,14 @@ reconstruction → PV model to produce climatological annual/monthly yield estim
 
 ## Quick start (local dev)
 
-Produce artifacts first with `pv-prospect-model-trainer`:
+`/predict` needs only the model artifacts. The validation endpoints
+(`/validate/*`) additionally need the PV-site registry and the rolling
+validation window — see [Validation inputs](#validation-inputs-local) below.
+
+### Model artifacts (required for `/predict`)
+
+Produce the artifacts first with `pv-prospect-model-trainer` (the default config
+points `store_dir` at the bootstrap output):
 
 ```bash
 python -m pv_prospect.model_trainer bootstrap \
@@ -13,15 +20,49 @@ python -m pv_prospect.model_trainer bootstrap \
     --output-dir /tmp/pv-prospect-models
 ```
 
-Then start the API (the default config points `store_dir` at `/tmp/pv-prospect-models`):
+Then start the API:
 
 ```bash
 poetry install
 poetry run uvicorn pv_prospect.app.main:app --reload
 ```
 
-The `store_dir` config value can be overridden via the `STORE_DIR` environment
-variable (e.g. `STORE_DIR=gs://pv-prospect-versioned-model` in production).
+`/predict` and `/healthz` work as soon as the models load. The `store_dir` value
+can be overridden via the `STORE_DIR` env var (e.g.
+`STORE_DIR=gs://pv-prospect-versioned-model` in production).
+
+### Validation inputs (local)
+
+`/validate/*` additionally reads two inputs that are **not** bundled with this
+repo:
+
+- **`pv_sites.csv`** — the PV-site registry, read from `resources_dir` (default
+  `resources/`, empty in a fresh checkout). It originates in the
+  `pv-prospect-instance` repo, mirrored to `gs://pv-prospect-staging/resources/`.
+- **the validation window** (`window.csv` + `manifest.json`), read from
+  `validation_window_dir` (default `/tmp/pv-prospect-validation-window`, also
+  empty). It is a derived cache at
+  `gs://pv-prospect-staging/data/served/validation-window/`.
+
+Without them, startup logs two non-fatal warnings, `/predict` keeps serving, and
+`/validate/*` returns 503. The simplest way to supply both — mirroring production
+— is to point their env vars at the staging bucket (requires read access; run
+`gcloud auth application-default login` once):
+
+```bash
+RESOURCES_DIR=gs://pv-prospect-staging/resources \
+VALIDATION_WINDOW_DIR=gs://pv-prospect-staging/data/served/validation-window \
+poetry run uvicorn pv_prospect.app.main:app --reload
+```
+
+To work offline, point `RESOURCES_DIR` at your local `pv-prospect-instance`
+checkout (`.../pv-prospect-instance/data/static`) and seed the validation window
+to a local directory (see
+[Seeding the Validation Window](../README.md#seeding-the-validation-window)),
+then point `VALIDATION_WINDOW_DIR` at it.
+
+> Do **not** copy `pv_sites.csv` into `pv-prospect-app/resources/`: that path is
+> not gitignored, and the registry belongs in the instance repo, not this one.
 
 ## Endpoints
 
