@@ -1,18 +1,17 @@
 """POA reconstruction: monthly-mean 24h-mean DNI/DHI → daily-mean POA.
 
 The weather model outputs monthly-mean daily DNI/DHI (24h-mean, night zeros
-included). The PV model expects the daily-mean-of-hourly POA that prepare_pv
-computed. This module bridges the two by reconstructing an intraday irradiance
-profile and averaging the resulting hourly POA.
+included). The PV model trains on the 24 h-mean POA that prepare_pv now
+computes, so this reconstruction is self-consistent with the training corpus.
 
 Method: use pvlib clear-sky as the hourly *shape* for DNI and DHI, scale each
 independently so its 24h-mean equals the weather model's monthly-mean output,
 then compute hourly POA with compute_poa_irradiance and average over all 24h.
 
-This gives <1% error against self-consistent OpenMeteo data. The API carries a
-known ~30% systematic underestimate against the current (data-v2026-05-31)
-trained artifacts due to a weather/PV corpus vintage mismatch
-(see briefs/pv-yield-overestimate.md). The POA math itself is correct.
+The API carries a known ~30% systematic underestimate against the current
+(data-v2026-05-31) trained artifacts, which were built on the old daytime-mean
+POA convention and have not yet been retrained on the 24 h-mean corpus
+(see briefs/pv-yield-overestimate.md).
 """
 
 from __future__ import annotations

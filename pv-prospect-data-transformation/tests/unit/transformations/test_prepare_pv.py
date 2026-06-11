@@ -6,7 +6,9 @@ import numpy as np
 import pandas as pd
 import pytest
 from pv_prospect.common.domain import Location, PanelGeometry, PVSite, Shading, System
+from pv_prospect.data_transformation.helpers import downsample_by_days
 from pv_prospect.data_transformation.transformations import prepare_pv
+from pv_prospect.physics import compute_poa_irradiance
 
 
 def _make_pv_site(
@@ -63,6 +65,24 @@ def _make_matching_pv_df(weather_df):
         {
             'time': weather_df['time'],
             'power': np.clip(rng.normal(2000, 500, n), 0, None),
+        }
+    )
+
+
+def _make_daytime_only_pv_df(
+    weather_df: pd.DataFrame,
+    daytime_start_hour: int = 6,
+    daytime_end_hour: int = 18,
+    constant_power: float = 2000.0,
+) -> pd.DataFrame:
+    """Create PV output only during daylight hours with constant power."""
+    times = pd.to_datetime(weather_df['time'])
+    daytime_mask = (times.dt.hour >= daytime_start_hour) & (times.dt.hour < daytime_end_hour)
+    daytime_times = weather_df.loc[daytime_mask, 'time']
+    return pd.DataFrame(
+        {
+            'time': daytime_times.values,
+            'power': [constant_power] * int(daytime_mask.sum()),
         }
     )
 
@@ -313,3 +333,78 @@ def test_multi_panel_poa_differs_from_single_panel(weather_df, pv_df):
         result_single['plane_of_array_irradiance'].values,
         result_multi['plane_of_array_irradiance'].values,
     )
+
+
+# --- 24 h-mean convention ---
+
+
+def test_poa_is_24h_mean_from_full_weather(pv_site: PVSite) -> None:
+    """POA is the time-weighted 24 h mean of the full weather frame, not just
+    the daytime hours where PV readings exist.
+
+    The old code inner-joined weather with PV before downsampling, so the daily
+    mean only covered daytime hours. The new code runs downsample_by_days on
+    the full weather frame before the PV join.
+    """
+    weather_df = _make_hourly_weather_df(n_hours=24)
+    pv_df = _make_daytime_only_pv_df(weather_df)
+
+    result = prepare_pv(
+        weather_df,
+        pv_df,
+        pv_site,
+        keep_columns=('plane_of_array_irradiance',),
+        timescale_days=1,
+    )
+
+    assert len(result) == 1
+
+    # Expected: downsample_by_days on the full weather frame (same operation prepare_pv now uses)
+    wdf = weather_df.copy()
+    wdf['time'] = pd.to_datetime(wdf['time'])
+    times = pd.DatetimeIndex(wdf['time'] - pd.Timedelta('30min'))
+    poa = compute_poa_irradiance(
+        times,
+        wdf['direct_normal_irradiance'].values,
+        wdf['diffuse_radiation'].values,
+        pv_site.location,
+        pv_site.panel_geometries[0],
+    )
+    wdf['plane_of_array_irradiance'] = poa
+    expected_agg = downsample_by_days(wdf[['time', 'plane_of_array_irradiance']], 1)
+    expected_poa = float(expected_agg['plane_of_array_irradiance'].iloc[0])
+
+    # Verify the expected value is less than the daytime-only average (night zeros drag it down)
+    daytime_mask = wdf['time'].dt.hour.between(6, 17)
+    assert expected_poa < float(poa[daytime_mask].mean())
+
+    assert abs(result['plane_of_array_irradiance'].iloc[0] - expected_poa) < 1e-6
+
+
+def test_power_is_24h_mean_energy_basis(pv_site: PVSite) -> None:
+    """Power is the energy-based 24 h mean: total_Wh / 24 h, not the daytime mean.
+
+    With constant daytime power P over N daytime hours, the 24 h mean is
+    P × N / 24. For 12 daytime hours at 2000 W the result is 1000 W, not 2000 W.
+    """
+    weather_df = _make_hourly_weather_df(n_hours=24)
+    constant_power_w = 2000.0
+    daytime_hours = 12  # hours 06:00–17:00 inclusive (hour >= 6 and hour < 18)
+    pv_df = _make_daytime_only_pv_df(
+        weather_df,
+        daytime_start_hour=6,
+        daytime_end_hour=18,
+        constant_power=constant_power_w,
+    )
+
+    result = prepare_pv(
+        weather_df,
+        pv_df,
+        pv_site,
+        keep_columns=('power',),
+        timescale_days=1,
+    )
+
+    assert len(result) == 1
+    expected_power_w = constant_power_w * daytime_hours / 24  # = 1000 W
+    assert abs(result['power'].iloc[0] - expected_power_w) < 1e-6

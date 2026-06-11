@@ -25,21 +25,30 @@ def prepare_pv(
     Join cleaned weather and PV-output data, calculate POA irradiance, and
     select the final feature set for PV-model training.
 
+    POA irradiance and temperature are computed over the **full 24 h** weather
+    day, decoupled from PV-power coverage. When ``timescale_days`` is set, the
+    daily mean covers all hours — matching the 24 h-mean convention used by
+    ``reconstruct_daily_mean_poa`` at inference. Power is likewise computed on
+    an energy basis (total W·h / 24 h), so capacity factor aligns with the
+    integration step in ``chain.py`` (CF × capacity × 24 h).
+
+    For ``timescale_days=None`` (no aggregation), POA is computed per weather
+    timestamp and PV is inner-joined onto weather cadence (daytime rows only),
+    matching the original hourly behaviour.
+
     The ``power_max`` column, when requested, is the maximum of the
     native-cadence ``pv_df['power']`` over each output row's period. It is
-    derived *before* PV is time-weighted-averaged onto weather cadence —
-    otherwise sub-hour clipping is smeared out and the column would
-    systematically under-report the true peak. Downstream model training uses
-    it as a censoring flag: a row whose ``power_max`` reaches the inverter
-    capacity has a biased daily-mean ``power`` and must be excluded.
+    derived before any time-averaging so sub-hour clipping events survive into
+    the censoring flag. Downstream model training uses it to identify rows
+    where ``power`` is a biased low estimate due to inverter clipping.
 
     Args:
         weather_df: Cleaned weather DataFrame (output of clean_weather).
         pv_df: Cleaned PV-output DataFrame (output of clean_pv).
         pv_site: PVSite containing location and panel geometries.
         keep_columns: Column names to retain alongside 'time'.
-        timescale_days: If set, downsample to this many days using
-            time-weighted averaging. None keeps original resolution.
+        timescale_days: If set, aggregate to this many days using the 24 h
+            convention. None keeps original resolution.
 
     Returns:
         Prepared DataFrame with 'time' and the specified columns.
@@ -50,32 +59,87 @@ def prepare_pv(
     pv_df = pv_df.copy()
     pv_df['time'] = pd.to_datetime(pv_df['time'])
 
-    # Align PV-output times to weather times and inner-join
-    pvo_reduced = reduce_rows(pv_df[['time', 'power']], weather_df['time'])
-    joined = weather_df.join(pvo_reduced.set_index('time'), on='time', how='inner')
+    # Compute POA for all weather hours (including night zeros)
+    weather_df['plane_of_array_irradiance'] = _calculate_poa_irradiance(weather_df, pv_site)
 
-    # Calculate POA irradiance
-    joined['plane_of_array_irradiance'] = _calculate_poa_irradiance(joined, pv_site)
+    if timescale_days is not None and timescale_days > 0:
+        # Aggregate weather over the full 24 h day, decoupled from PV coverage
+        weather_feature_cols = ['time'] + [
+            c
+            for c in keep_columns
+            if c not in ('power', 'power_max') and c in weather_df.columns
+        ]
+        weather_agg = downsample_by_days(weather_df[weather_feature_cols], timescale_days)
 
-    # Select columns (excluding power_max — that's merged in post-downsample
-    # from the native-cadence pv_df)
-    join_columns = [col for col in keep_columns if col != 'power_max']
-    columns_to_keep = ['time'] + [col for col in join_columns if col in joined.columns]
-    result = joined[columns_to_keep].copy()
+        if weather_agg.empty:
+            return pd.DataFrame(columns=['time'] + list(keep_columns))
 
-    # Downsample if requested
-    if timescale_days is not None and timescale_days > 0 and not result.empty:
-        result = downsample_by_days(result, timescale_days)
+        # Energy-based 24 h-mean power: total W·s in period / period seconds
+        power_agg = _compute_24h_mean_power(pv_df, weather_agg['time'], timescale_days)
 
-    # Merge in native-cadence per-period max (computed from pv_df before reduce,
-    # so it captures sub-hour peaks that the time-weighted average would hide).
+        # Inner-join: keep only periods where PV data exists
+        result = weather_agg.merge(power_agg, on='time', how='inner')
+    else:
+        # No aggregation: inner-join PV power onto weather cadence (daytime rows)
+        pvo_reduced = reduce_rows(pv_df[['time', 'power']], weather_df['time'])
+        result = weather_df.join(pvo_reduced.set_index('time'), on='time', how='inner')
+
+    # Merge in native-cadence per-period max (computed from pv_df before any
+    # time-averaging so sub-hour clipping events survive into the flag)
     if 'power_max' in keep_columns and not result.empty:
         result['power_max'] = _lookup_period_max(result['time'], pv_df, timescale_days)
 
-    # Drop rows with any NaN
-    result = result.dropna()
+    # Select and order final columns
+    final_cols = ['time'] + [c for c in keep_columns if c in result.columns]
+    result = result[final_cols].copy()
 
-    return result
+    return result.dropna()
+
+
+def _compute_24h_mean_power(
+    pv_df: pd.DataFrame,
+    period_starts: pd.Series,
+    timescale_days: int,
+) -> pd.DataFrame:
+    """
+    Return 24 h-mean power for each period: total W·s in period / period seconds.
+
+    Uses the right-labelled interval convention (same as ``reduce_rows``): for
+    each PV reading the interval begins at the previous reading, or is inferred
+    from the next reading for the first in a period. Night hours implicitly
+    contribute 0 W·h. Returns a DataFrame with ``'time'`` and ``'power'``.
+    """
+    period_s = float(timescale_days * 24 * 3600)
+    period_delta = pd.Timedelta(days=timescale_days)
+
+    pv = pv_df[['time', 'power']].copy()
+    pv = pv.sort_values('time').reset_index(drop=True)
+
+    rows: list[dict] = []
+    for t_start in period_starts:
+        t_end = t_start + period_delta
+        mask = (pv['time'] > t_start) & (pv['time'] <= t_end)
+        chunk = pv[mask].reset_index(drop=True)
+        n = len(chunk)
+        if n < 2:
+            continue
+
+        times = chunk['time'].values
+        powers = chunk['power'].values
+
+        total_ws = 0.0
+        for i in range(n):
+            if i == 0:
+                dt = (times[1] - times[0]) / np.timedelta64(1, 's')
+            else:
+                dt = (times[i] - times[i - 1]) / np.timedelta64(1, 's')
+            total_ws += float(powers[i]) * dt
+
+        rows.append({'time': t_start, 'power': total_ws / period_s})
+
+    if not rows:
+        return pd.DataFrame(columns=['time', 'power'])
+    return pd.DataFrame(rows)
 
 
 def _lookup_period_max(
