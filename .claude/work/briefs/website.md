@@ -30,10 +30,12 @@ for the full design and phasing (W0 substrate → W1 prediction → W2 validatio
 - **W2 is now unblocked** — the Validation API shipped (`/validate/sites`,
   `/validate/{system_id}`) with a window producer (one-time seed +
   daily `maintain_validation_window`). The plan recommends **leading with W2**:
-  it bypasses the weather model, so it is insulated from the vintage bias and is
-  the strongest credibility artifact.
+  it feeds the PV model the in-distribution corpus POA (and bypasses the weather
+  model), so it is insulated from the yield bias and is the strongest credibility
+  artifact.
 - **W1** is buildable now (`/predict` exists), but its **public launch is gated**
-  on shipping the vintage fix (decision: fix-first — `weather-pv-vintage-alignment`).
+  on shipping the PV yield-overestimate fix (decision: fix-first —
+  `pv-train-on-served-poa`).
   W1 may be exercised privately (IAM auth) before then; W2 is the only public
   surface until the fix lands.
 - **Public launch (either section) forces an auth flip**: the service is private

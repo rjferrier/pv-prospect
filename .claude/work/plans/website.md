@@ -119,9 +119,9 @@ the in-box-outside-polygon 422 is unavoidable and must degrade gracefully.
 ## Phasing
 
 Recommended order: **W0 → W2 → W1-behind-gate**. W2 (validation) is honest,
-insulated from the vintage bias, fully unblocked, and the strongest credibility
+insulated from the yield bias, fully unblocked, and the strongest credibility
 artifact — lead with it. W1 (prediction) is buildable in parallel but its
-*public launch* is gated on the vintage decision, so it lands behind that gate.
+*public launch* is gated on the yield-fix decision, so it lands behind that gate.
 
 ### W0 — Skeleton + serving substrate (cross-cutting)
 - Static-file serving on the app; page shell + layout + shared CSS.
@@ -161,7 +161,7 @@ artifact — lead with it. W1 (prediction) is buildable in parallel but its
   torch-backed `/predict` world-callable. `max_instances=2` caps the blast radius
   to degraded-service, not a runaway bill; no auth for a demo. Make this an
   explicit, reviewed step.
-- **Vintage fix shipped** — `weather-pv-vintage-alignment` is a hard prerequisite
+- **Yield fix shipped** — `pv-train-on-served-poa` is a hard prerequisite
   for W1's *public* exposure (decision: fix-first). W1 may ship privately before.
 - **Cloud Run health-check + 5xx alert** re-checked if `/healthz` is redefined.
 
@@ -179,21 +179,23 @@ the dual-source 422 distinction). Specifics deferred to per-phase speccing.
 ## Decisions to resolve
 
 ### Resolved
-- **Vintage bias — RESOLVED: fix vintage first, then launch W1 publicly.**
-  `POST /predict` knowingly emits ~30%-low annual yields until the
-  vintage-alignment fix (`weather-pv-vintage-alignment`). The product call is to
+- **Yield bias — RESOLVED: fix it first, then launch W1 publicly.**
+  `POST /predict` knowingly over-estimates annual yield by ~2× (mean pred/actual
+  2.0) until the yield fix (`pv-train-on-served-poa`). The product call is to
   **sequence that fix before W1's public launch** and present clean numbers,
   rather than launch behind a prominent caveat. Consequences:
   - W0 and W2 proceed now; **W2 is the only public surface until the fix lands.**
   - W1 may be *built* now (and exercised privately behind IAM auth) but **stays
-    out of the public site until `weather-pv-vintage-alignment` ships.**
-  - The vintage fix is therefore a **W1 public-launch prerequisite**, not just a
+    out of the public site until `pv-train-on-served-poa` ships.**
+  - The yield fix is therefore a **W1 public-launch prerequisite**, not just a
     "Later" item — track it as a hard dependency of W1 exposure.
   - The in-payload `caveats[]` are still rendered (defence in depth), but they are
     no longer the launch mechanism for the headline number.
-  - The asymmetry holds: Validation bypasses the weather model (real corpus
-    weather → PV model → vs actual), so it is **insulated** from the vintage bias
-    and is **not** vintage-caveated (only its own honest in-sample/age-fill
+  - The asymmetry holds: Validation feeds the PV model the in-distribution corpus
+    (daytime) POA it trained on — where the model is ≈accurate — and bypasses the
+    weather model (real corpus weather → PV model → vs actual), so it is
+    **insulated** from *both* the dominant PV-model yield bias and the weather-path,
+    and is **not** caveated for it (only its own honest in-sample/age-fill
     caveats). The side-by-side ("model tracks reality here, speculative-and-
     caveated there") remains a credibility asset.
 
@@ -218,7 +220,7 @@ deploy target; the portable assets make this a low-cost later move.
 ## Sequencing summary
 
 - W0 first (substrate, unblocks both).
-- **W2 next** — unblocked, honest, the only public surface until the vintage fix.
-- W1 in parallel/after; built now, but **public exposure waits on the vintage
+- **W2 next** — unblocked, honest, the only public surface until the yield fix.
+- W1 in parallel/after; built now, but **public exposure waits on the yield
   fix** (decision: fix-first). Exercise W1 privately (IAM auth) in the meantime.
-- Auth flip + vintage fix are W1 public-launch tasks, not build-time blockers.
+- Auth flip + yield fix are W1 public-launch tasks, not build-time blockers.

@@ -132,4 +132,4 @@ The first trained artifacts (`data-v2026-05-31`) carry a ~30 % systematic
 underestimate of annual yield due to a data-vintage mismatch between the
 prepared-weather and prepared-PV corpora (different OpenMeteo reanalysis
 snapshots). This is documented in every `/predict` response under `caveats` and
-tracked for resolution in `briefs/weather-pv-vintage-alignment.md`.
+tracked for resolution in `briefs/pv-yield-overestimate.md`.

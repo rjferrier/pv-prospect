@@ -12,7 +12,7 @@ then compute hourly POA with compute_poa_irradiance and average over all 24h.
 This gives <1% error against self-consistent OpenMeteo data. The API carries a
 known ~30% systematic underestimate against the current (data-v2026-05-31)
 trained artifacts due to a weather/PV corpus vintage mismatch
-(see briefs/weather-pv-vintage-alignment.md). The POA math itself is correct.
+(see briefs/pv-yield-overestimate.md). The POA math itself is correct.
 """
 
 from __future__ import annotations

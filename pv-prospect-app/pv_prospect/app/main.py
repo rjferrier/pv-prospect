@@ -42,7 +42,7 @@ _VINTAGE_CAVEAT = (
     'a PV-model calibration issue (the model over-predicts capacity '
     'factor at the low irradiance levels typical of UK climatological '
     'means, where its training data is sparse). '
-    'Fix tracked in briefs/weather-pv-vintage-alignment.md.'
+    'Fix tracked in briefs/pv-yield-overestimate.md.'
 )
 
 _VALIDATION_IN_SAMPLE_CAVEAT = (

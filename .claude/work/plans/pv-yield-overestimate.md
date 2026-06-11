@@ -1,6 +1,6 @@
 # Diagnose the PV yield overestimate (formerly: align OpenMeteo vintage)
 
-> **Companion to `briefs/weather-pv-vintage-alignment.md`.** The brief states the
+> **Companion to `briefs/pv-yield-overestimate.md`.** The brief states the
 > original symptom — a POA-space MAPE of 32.7 %, *asserted* to be a ~30 % yield
 > **under**-estimate — and proposed fixing it by aligning the OpenMeteo
 > vintage/grid between the two corpora. This document supersedes that framing: the
@@ -301,30 +301,33 @@ The meta-lesson: **measure the components; don't infer the mechanism from the ne
 
 ## 6. Recommendations
 
-The fix is **PV-model-side**. Candidates 1–3 remove the dominant ~83 %; the
-weather-side work (Option A + Option C) is a second-order ~8 % rider, justified on its
-own train/serve-consistency merits but **not** as the cure for the 2×.
+The fix is **PV-model-side**. The primary fix (now extracted to its own task, below)
+removes the dominant ~83 %; the weather-side work (Option A + Option C) is a
+second-order ~8 % rider, justified on its own train/serve-consistency merits but
+**not** as the cure for the 2×.
 
-### Primary — align the PV model's serve basis with its train basis (pick one; needs a design pass)
+### Primary fix — EXTRACTED to its own task
 
-1. **Train on the served basis.** Retrain the PV model on the *same* POA convention
-   it is served (24 h-mean, including low-POA / night-zero samples) so the served range
-   is in-distribution. Touches `pv-prospect-data-transformation` (`prepare_pv`'s
-   POA/target convention) + a PV-model retrain. This is the *24h-convention hygiene*
-   item, **promoted from yield-neutral tidy-up to primary candidate**. (It also removes
-   the temperature-feature train/serve mismatch and lets us fix the now-false "< 1 %
-   self-consistent" note in `app/poa.py`.)
-2. **Serve on the trained basis.** At inference, feed the daytime-mean POA (the
-   model's trained region, where the curve is ≈ unbiased) and integrate over daylight
-   hours instead of ×24. Touches `pv-prospect-app`'s chain only
-   (`reconstruct_daily_mean_poa` / energy integration) — **no retrain**. Lowest blast
-   radius; cheapest to trial.
-3. **Recalibrate the low-POA response.** Zero-force the intercept *and* correct the
-   concave low-POA over-prediction (augment low-POA samples / constrain curvature) —
-   not the intercept alone. Touches `pv-prospect-model` training.
+The dominant ~83 % is removed by **training the PV model on the served (24 h-mean)
+POA basis**, so inference is no longer evaluated in an under-trained low-POA region.
+This is now a standalone task (TODO → *Next*):
+**`briefs/pv-train-on-served-poa.md`** / **`plans/pv-train-on-served-poa.md`**. It is
+the *24h-convention hygiene* item — **promoted from yield-neutral tidy-up to the
+primary fix** by Gate A/B — and also removes the temperature-feature train/serve
+mismatch and the now-false "< 1 % self-consistent" note in `app/poa.py`.
 
-**Next action:** a design pass over candidates 1–3 to choose between them (2 is the
-cheapest to trial; 1 is the most principled). They are not all needed.
+### Alternatives to the primary fix (retained; pursue only if it proves unsuitable)
+
+These reach the same end by a different route than the extracted task:
+
+- **Serve on the trained basis.** At inference, feed the daytime-mean POA (the
+  model's trained region, where the curve is ≈ unbiased) and integrate over daylight
+  hours instead of ×24. Touches `pv-prospect-app`'s chain only
+  (`reconstruct_daily_mean_poa` / energy integration) — **no retrain**. Lowest blast
+  radius; cheapest to trial.
+- **Recalibrate the low-POA response.** Zero-force the intercept *and* correct the
+  concave low-POA over-prediction (augment low-POA samples / constrain curvature) —
+  not the intercept alone. Touches `pv-prospect-model` training.
 
 ### Secondary rider — Option A: one weather source feeds both corpora
 

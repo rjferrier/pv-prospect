@@ -1,6 +1,6 @@
 """Yield-space ground truth: does ``/predict`` match sites' ACTUAL generation?
 
-This is step 1 of the corrected ``weather-pv-vintage-alignment`` brief. The
+This is step 1 of the ``pv-yield-overestimate`` investigation. The
 documented "~30% systematic underestimate" was only ever a POA-space MAPE
 asserted to propagate; it was never measured as predicted-vs-actual annual kWh.
 This script measures it directly, end-to-end (weather model -> POA -> PV model

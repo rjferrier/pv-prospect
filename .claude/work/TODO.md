@@ -6,14 +6,16 @@ The **website** fronts both serving surfaces (`User → PredictionApi` /
 `User → ValidationApi`). Served from the existing app — no separate frontend, no
 build step. Build order **W0 → W2 → W1**. W2 (validation) is unblocked and the
 only public surface for now; W1 (prediction) is buildable now but its **public
-launch waits on the vintage fix** (decision: fix-first → see "Later").
+launch waits on the PV yield-overestimate fix** (decision: fix-first — the
+`pv-train-on-served-poa` task below).
 
 - [ ] [Website: map prediction + known-site validation UI](briefs/website.md)
+- [ ] [Train the PV model on the served (24 h-mean) POA basis](briefs/pv-train-on-served-poa.md) — removes the dominant ~83% of the measured +100% `/predict` yield overestimate (Gate A/B); **W1 public-launch prerequisite**
 
 ## Later
 
 - [ ] [Offline cross-site (LOSO) generalisation eval for the PV model](briefs/cross-site-generalization-eval.md) — honest prospect-site accuracy; the Prediction API's headline claim currently ships unvalidated
-- [ ] [Align OpenMeteo vintage between prepared-weather and prepared-PV corpora](briefs/weather-pv-vintage-alignment.md) — root cause of ~30% yield underestimate in Prediction API; **hard prerequisite for the website's W1 public launch** (decision: fix-first)
+- [ ] [Fix the PV yield overestimate: related riders & cleanup](briefs/pv-yield-overestimate.md) — weather vintage/grid alignment (~8% rider), trainer-validation gate, low-POA recalibration alternative, and caveat cleanup; the primary PV-model fix is split out to **Next** (`pv-train-on-served-poa`)
 - [ ] [Version raw extracted data alongside prepared data in the weekly versioning run](briefs/version-raw-data.md)
 - [ ] [Restructure `tracking/` prefix to group files by date](briefs/tracking-restructure.md)
 - [ ] [Investigate the data-versioner hang-on-exit](briefs/versioner-hang.md)
