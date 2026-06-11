@@ -36,7 +36,40 @@
   <main>
     <section id="panel-validation" class="panel active"
              role="tabpanel" aria-labelledby="tab-validation">
-      <!-- W2: validation section -->
+      <div class="section-intro">
+        <h2>How the model tracks real sites</h2>
+        <p>
+          The deployed PV model is run over the last ~90 days of <em>real</em>
+          weather for each known site and compared against that site's measured
+          output. This path never runs the weather model, so it isolates
+          PV-model accuracy from weather-forecast error.
+        </p>
+      </div>
+
+      <div class="controls">
+        <label for="site-select">Site</label>
+        <select id="site-select" disabled>
+          <option>Loading sites…</option>
+        </select>
+        <label class="toggle">
+          <input type="checkbox" id="cf-toggle"> Show capacity factor
+        </label>
+      </div>
+
+      <div id="validation-status" class="status" hidden></div>
+
+      <div id="validation-result" hidden>
+        <div id="validation-metrics" class="metrics"></div>
+        <div id="validation-chart" class="chart"></div>
+        <p class="chart-note">
+          Lines compare predicted vs actual daily energy. Red markers flag
+          <strong>clipped</strong> (inverter-limited) days — these are excluded
+          from the error metrics above, since the lost headroom is informative,
+          not model error.
+        </p>
+        <ul id="validation-caveats" class="caveats"></ul>
+        <p id="validation-meta" class="meta"></p>
+      </div>
     </section>
 
     <section id="panel-prediction" class="panel"
@@ -57,6 +90,7 @@
   <script src="/static/api.js"></script>
   <script src="/static/map.js"></script>
   <script src="/static/chart.js"></script>
+  <script src="/static/validation.js"></script>
   <script>
     /* Tab switching */
     document.querySelectorAll('.tab-btn').forEach(function(btn) {
