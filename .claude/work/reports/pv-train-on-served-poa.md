@@ -5,6 +5,18 @@
 > **outcome** — most of which is a change to the **data corpus** (`data-v2026-06-12`)
 > and a measurement, neither of which the code diff reveals. Executed 2026-06-12.
 
+> **⚠ Correction (2026-06-12, later the same day).** §5–6's original conclusion — that the
+> retrain "hit a structural **Jensen ceiling**" — is **WITHDRAWN**. A follow-up measurement
+> decomposed the residual properly (vs the *correctly DVC-pulled* corpus + true GCS actuals):
+> the corpus **target is correct** (`corpus/true 1.01`), Jensen is only ~1.04 and POA
+> reconstruction ~1.02, and the +51 % residual is dominated by the **`age_years` train/serve
+> convention** (served `age=0` vs the aged value used in training, **×1.33**) — *not* Jensen and
+> *not* a serve-side POA lever. That age effect is itself unvalidated (likely a partial 10-site
+> fixed-effect, not real degradation). See the revised §5–6 and memory
+> `pv-retrain-residual-age-convention`. *(An earlier pass briefly mis-concluded "corpus inflated
+> 1.57×" by reading stale pre-rebuild `.csv` leftovers whose md5 ≠ their `.dvc`; always confirm
+> `dvc status`/md5 before trusting on-disk DVC outputs.)*
+
 ## Contents
 
 1. Summary
@@ -29,13 +41,17 @@ basis (24 h-mean POA). The large, non-self-documented work was everything downst
   && dvc pull` now yields new-basis data **and only** new-basis data.
 - **Retrained the PV model** on the new corpus and measured **Gate A**. The yield
   overestimate **halved** (mean predicted/actual **2.011 → 1.515**) but did **not**
-  reach ≈ 1 — it hit a structural *Jensen ceiling* that retraining cannot cross.
-- **Did not promote** the new model (it still overestimates ~51 %; also the user's
-  explicit instruction). Artifact retained at `models/gate-a-store-2026-06-12/`.
+  reach ≈ 1. *(Original claim: a structural Jensen ceiling. **Withdrawn** — see the Correction
+  banner. The residual is the `age_years` train/serve convention; the corpus and retrain are
+  sound.)*
+- **Did not promote** the new model (it still overestimates ~51 % *as measured against aged
+  sites at served age 0*; also the user's explicit instruction). Artifact retained at
+  `models/gate-a-store-2026-06-12/`.
 
-Bottom line: the corpus fix is fully delivered and durable; the retrain is a genuine
-**partial** fix; closing the remaining bias needs the *serve-side* lever, not more PV
-training.
+Bottom line: the corpus fix is fully delivered and durable, and the corpus **target is correct**
+(`corpus/true 1.01`). The remaining Gate A overestimate is **not** a PV-curve / serve-side-POA
+problem — it is dominated by the **age feature** (served `age=0` vs aged sites), whose validity
+is itself the real open question (§6).
 
 ## 2. The data-pipeline reality (corrected model — the load-bearing learning)
 
@@ -130,32 +146,59 @@ PV model:
 | 89665 | 1.462 | 1.150 | 1.10 |
 | **mean** | **2.011** | **1.515** | **1.40** |
 
-\*new pred/act ÷ that site's Gate B weather-path factor; isolates the PV model.
+\*new pred/act ÷ that site's Gate B weather-path factor; isolates the PV model. **This column
+is SUPERSEDED** — see the corrected decomposition below.
 
-**Interpretation — the fix worked and hit a structural ceiling.** Overestimate halved
-(+101 % → +51.5 %); PV-intrinsic fell 1.83 → 1.40. It does *not* reach ≈ 1 because Gate
-B's PV-intrinsic feeds a **monthly-mean** POA through the concave PV MLP, baking in a
-daily → monthly **Jensen gap** that retraining the *daily* 24 h-mean fit cannot remove.
-Most sites bottom out at a uniform ~1.3–1.45 floor (89665 nearly fixed at 1.10; 61272
-the lone residual outlier at 1.99). This is exactly the residual the plan's risk note
-predicted: an in-distribution low-POA fit *shrinks but does not fully remove* the bias.
+**Interpretation — CORRECTED (the original "Jensen ceiling" reading was wrong).** Overestimate
+halved (+101 % → +51.5 %), but a proper decomposition — against the **correctly DVC-pulled**
+corpus and true GCS actuals — shows the residual is **not** Jensen and **not** in the PV/POA
+path. Gate A `chain/true 1.51` factors multiplicatively (geomean, 10 sites; `diag_decompose.py` — diagnostic script, not preserved):
 
-The model was **not promoted** — correct on the merits (a ~51 % overestimate should not
-go live) and per instruction. Artifact + assembled Gate A store retained at
-`models/gate-a-store-2026-06-12/`.
+| corpus/true | model fit | **age_years** | temperature | POA-recon + Jensen |
+|---:|---:|---:|---:|---:|
+| 1.01 | 1.04 | **1.33** | 1.01 | 1.05 |
+
+The corpus **target is correct** (`corpus/true 1.01` vs true generation); Jensen is ~1.04 and POA
+reconstruction ~1.02 (together ~5 %, not the cause). The dominant term is the **`age_years`
+train/serve convention**: training derives age from each site's real `installation_date`
+(panels 4–14 yr old), but the serving chain and `measure_yield.py` pass **`age=0`** (a new
+install). Restoring each site's real age collapses pred/actual **1.49 → ~1.0** for all 8 sites
+that have an install date (`diag_realage.py` — diagnostic script, not preserved). 61272 (no install date) is a genuine model-
+*fit* outlier (B/A = 1.89), not an age effect.
+
+**Caveat — don't over-read the age result.** With only 10 sites `age_years` is near-collinear
+with site identity, so the MLP may be using it as a per-site intercept (memorising each site's
+baseline level), not learning degradation. The implied rate is ~1.4–2.2 %/yr in-distribution and
+*non-monotonic* at low POA (vs physical ~0.5–1 %/yr), and `age=0` is an extrapolation below the
+youngest training site (4 yr). So the "real age → 1.0" check is **near-circular** and does not by
+itself establish the model for new-install yield.
+
+The model was **not promoted** — correct on the merits and per instruction. Artifact + assembled
+Gate A store retained at `models/gate-a-store-2026-06-12/`.
 
 ## 6. Conclusions & open items
 
 - **Delivered & durable**: the corpus is re-based and re-versioned; consumers get a
-  clean, contiguous, new-basis corpus on `dvc pull` at `data-v2026-06-12`.
-- **The primary route is necessary but not sufficient.** It removes the half of the
-  overestimate attributable to the daily train/serve basis mismatch; the daily→monthly
-  Jensen residual remains.
-- **Next lever (open, the user's choice)**: the *serve-side* route — recalibrate the
-  low-POA CF curve, or fix how the chain aggregates POA (monthly-mean through a nonlinear
-  model is the residual's source). Do **not** expect more PV training to help.
-- **Promotion** stays deferred pending that decision.
-- **`61272`** is worth a separate look (residual PV-intrinsic 1.99 vs the ~1.3–1.45 pack).
+  clean, contiguous, new-basis corpus on `dvc pull` at `data-v2026-06-12`. The target is
+  **correct** (`corpus/true 1.01`) — the energy-basis fix landed.
+- **The primary route worked at the corpus level.** It removed the train/serve POA-basis
+  mismatch and the daytime-weighting in the target. Jensen (~1.04) and POA reconstruction
+  (~1.02) are minor; the earlier "daily→monthly Jensen residual" framing is **withdrawn**.
+- **The remaining Gate A overestimate is the `age_years` train/serve convention** (served
+  `age=0` vs aged sites, ×1.33) — *not* a serve-side POA lever. **Recalibrating the low-POA
+  CF curve or changing POA aggregation would each chase ~5 % and mask the real cause; don't.**
+- **Real next lever: validate/fix the age feature** — degradation law vs 10-site fixed-effect.
+  This decides whether the model can predict *new-install* yield at all; likely needs more
+  sites or a constrained ~0.5–1 %/yr degradation prior / explicit site effects. For the
+  **demo** specifically, serving the aged demo sites' real ages → pred/actual ≈ 1.0
+  (legitimate but cosmetic).
+- **Promotion** stays deferred.
+- **`61272`** is a genuine model-*fit* outlier (B/A 1.89; no install date, so age doesn't
+  explain it); `79336` also lacks an install date. Both worth a separate look.
+- Diagnostics + deeper analysis: memory `pv-retrain-residual-age-convention`.
+  Supporting scripts (`diag_{jensen,recon_full,chain_vs_corpus,corpus_true,decompose,realage,agesweep}.py`)
+  were written to `/tmp` during investigation and not preserved; if needed, reconstruct
+  them under `pv-prospect-instance/data-exploration/irradiance/poa_attribution/`.
 
 ## Appendix — operational specifics
 
