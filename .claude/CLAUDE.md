@@ -172,13 +172,25 @@ detailed design sketches if the task requires extended specification before impl
 (e.g., architectural decisions, multi-component refactors, or blocked work with complex
 prerequisites). The plan has the same filename as the task's brief.
 
+When a task completes, its outcome is usually self-documented by the code diff. When it is
+**not** — but the outcome is significant enough to record — write a **report** in
+`.claude/work/reports/` (same filename as the task). The typical trigger is work whose result
+lives **outside the source tree**: a change to the **data corpus** (a re-transform, re-version,
+or new `data-v` tag), an operational/cloud migration, or an investigation whose findings the code
+won't show. The report captures what was done and why, the key results/measurements, the durable
+facts a future reader needs that neither the code nor the commit history reveals, and any
+follow-up the task deliberately left open.
+
 A typical task lifecycle:
 - Start as a brief (what, why, any blockers).
 - Optionally promote to a plan if the scope requires design work.
 - Both can coexist: the brief summarises; the plan specifies.
 - When implementing, work from the brief/plan context.
+- On completion, if the outcome is not fully captured by the code changes (e.g. a data-corpus
+  change), write a report in `.claude/work/reports/` before finalising.
 - Finalise: integrate the relevant content into the project's permanent documentation
-  and delete the task together with its brief and plan.
+  and delete the task together with its brief and plan. A report, by contrast, is a durable
+  record of completed work and is **retained**, not deleted.
 
 In the finalisation step, permanent documentation may include the README, doc/, or
 package-specific docs, following placement rules given in `documenting.md`.
