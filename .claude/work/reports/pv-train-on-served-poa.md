@@ -1,7 +1,7 @@
 # Report: Train the PV model on the served (24 h-mean) POA basis
 
 > Companion to `plans/pv-train-on-served-poa.md` (the design) and
-> `plans/pv-yield-overestimate.md` (the diagnosis). This report records the
+> `reports/weather-pv-vintage-alignment.md` (the diagnosis). This report records the
 > **outcome** — most of which is a change to the **data corpus** (`data-v2026-06-12`)
 > and a measurement, neither of which the code diff reveals. Executed 2026-06-12.
 
