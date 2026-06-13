@@ -91,11 +91,14 @@ alone — exactly the brief's "complements B's physical prior" stance.
 
 ### 1.4 Constraining `r`
 
-Parameterise `r = r_min + (r_max − r_min)·σ(θ)` with `[r_min, r_max] = [0.005, 0.010]`
-(physical ~0.5–1 %/yr), `θ` a free scalar. `r` is then **fitted but always in-band and
-≥ 0** → monotone by construction (acceptance #1). If `θ` pins `r` to a band edge, that is
-informative (the data wants to leave the band — see Phase 0 / §6). A *fixed* `r` (e.g.
-0.7 %/yr, no fit) is the fallback if Phase 0 shows no usable signal.
+**Resolved by Phase 0 → FIX `r` (do not fit `θ`).** Phase 0 found the within-site signal
+robustly negative in *sign* but ~2–5× the physical band in *magnitude* and POA-floor-
+fragile, so a free fit would rail to (or past) the band edge and *worsen* the age=0
+runaway. Phase 1 therefore uses a **fixed scalar** `r = 0.007/yr` (mid-band; physically
+~0.5–1 %/yr), monotone by construction. Keep `r_min/r_max = [0.005, 0.010]` recorded as
+the physical band the fixed value sits in (and as the clamp if a future task re-enables a
+fit). The original fit parameterisation `r = r_min + (r_max−r_min)·σ(θ)` is retained here
+only as the deferred re-enable path; **for this task `r` is a constant.**
 
 ---
 
@@ -126,8 +129,9 @@ temp 1.01 × (POA-recon+Jensen) 1.05`; everything except `age` (**~1.11× combin
 
 Full acceptance:
 
-1. Fitted `r` monotone and in the physical band; the non-monotonic low-POA age behaviour
-   gone (guaranteed by removing age as a free MLP input — §3.2).
+1. `r` fixed in the physical band (Phase 0 → `r = 0.007/yr`), monotone by construction; the
+   non-monotonic low-POA age behaviour gone (guaranteed by removing age as a free MLP
+   input — §3.2).
 2. LOSO aggregate close to the within-site number (**caveat:** a *tightly* band-clamped
    `r` makes "transfer" near-trivially pass — the meaningful test uses the freer
    within-site estimate from Phase 0; see §6).
@@ -163,6 +167,20 @@ Read off the 10 within-site slopes and their CIs. (8 sites have install dates; `
 **Deliverable:** a short findings note (in the same dir, or folded into the eventual
 report) recording the 10 slopes and the fork taken (fit vs fix `r`).
 
+**Outcome (2026-06-13 — `data-exploration/irradiance/poa_attribution/age_identifiability.md`).**
+A **third** outcome, not either row above: the within-site decline is robustly *signed*
+(9–10/10 sites negative, stable across K=2/3 harmonics and parametric-vs-decile POA
+controls — so it is real and not a seasonality leak), but its *magnitude* (~2–5 %/yr,
+POA-floor-sensitive) is **2–5× the physical band and not credible as degradation**
+(contaminated by soiling / a weather-corpus POA vintage drift / a few short noisy censored
+series; clean multiplicative degradation would be irradiance-independent). Decisively, a
+free fit (r ≈ 4 %/yr) would inflate the age=0 prospect by `1/(1−0.04·9) ≈ 1.56×` —
+*worse* than the ×1.33 it removes. **Fork taken: FIX `r`** (prior-only), `r ≈ 0.007/yr`
+(mid-band); the within-site sign agreement is the *check* that the prior's **direction**
+is right, while physics — not this data — supplies the **rate**. Fixing beats
+fitting-then-band-clamping because the data wants ≫ r_max (would just rail θ to the upper
+edge), and fixing lets the value be chosen on physical/product grounds.
+
 ---
 
 ## Phase 1 — Bounded degradation prior (no embedding) — *unblocks W1*
@@ -177,8 +195,10 @@ weather features and `age` separately and return `head(weather) · (1 − r·age
 
 - Keep the existing 4-layer head, now sized to **weather features only**
   (`day_of_year, temperature, plane_of_array_irradiance`).
-- Add `r` as a constrained parameter (§1.4): store `θ` as an `nn.Parameter`; expose `r`
-  via the `r_min + (r_max−r_min)·σ(θ)` map.
+- Add `r` as a **fixed** degradation rate (§1.4, resolved by Phase 0): store it as a
+  non-trainable buffer (`register_buffer('r', torch.tensor(r_fixed))`), **not** an
+  `nn.Parameter` — it must not receive gradients. (The `σ(θ)` learned form is the deferred
+  re-enable path only.)
 - `forward(weather_x, age)` → `self.network(weather_x) * (1.0 - self.r * age)`.
 
 ### 3.2 `features/pv.py` + `splits.py` — age leaves the feature vector
@@ -194,16 +214,18 @@ weather features and `age` separately and return `head(weather) · (1 − r·age
 
 ### 3.3 `domain.py` — config + spec
 
-- `TrainingConfig`: add `r_min: float = 0.005`, `r_max: float = 0.010` (and, if Phase 0
-  says "fix r", a `r_fixed: float | None = None`).
+- `TrainingConfig`: add `r_fixed: float = 0.007` (the Phase-0 value), plus `r_min: float =
+  0.005` / `r_max: float = 0.010` recorded as the physical band the value sits in.
 - `FeatureSpec`: continuous features drop to the 3 weather features; add the degradation
-  parameters needed to reconstruct the net (`r_min`, `r_max`, and the learned `r` /
-  `θ`). The age column is structural, not a scaled feature.
+  parameter needed to reconstruct the net (the fixed `r`; keep `r_min/r_max` for
+  provenance). The age column is structural, not a scaled feature.
 
 ### 3.4 `training/pv.py` + `training/loop.py` — fit `r` jointly
 
 - Pass `age` tensors alongside the scaled weather tensors into the loop; the loss is
-  unchanged MSE on CF. `r`'s `θ` is in `model.parameters()`, so Adam fits it jointly.
+  unchanged MSE on CF. `r` is a fixed buffer (not in the optimiser's parameter set), so
+  only the weather-head weights are fitted — the head learns the population CF response
+  *given* the imposed degradation factor.
 - `inference.py::_run_pv_forward` must supply `age` to `forward` (read the `age_years`
   column from the df, unscaled).
 
@@ -226,17 +248,31 @@ non-increasing in `age`; `age=0` returns exactly the head output; round-trip pre
 
 - Retrain locally on `data-v2026-06-12` (CPU torch, production-parity defaults — the
   exact recipe is in `reports/pv-train-on-served-poa.md` Appendix).
+- **Check the promotion-gate R² *here*, not at Phase 3 (the binding risk).** The gate is
+  `pv.critical_metric` = within-site temporal-holdout **power-space R²**, 2 pp tolerance —
+  and that holdout is the *same 10 aged sites*, the regime where age-as-site-proxy *helped*.
+  Phase 0 showed age was tracking ~2–5 %/yr of genuine per-site temporal variance; replacing
+  it with a near-constant `(1−0.007·age)` factor **with the embedding deferred** removes the
+  head's only handle on that variance, so a >2 pp R² drop is plausible. Measure
+  `test_power_space` R² at this retrain and compare to the incumbent. **First thing to check:
+  do the weather features (POA/temp/doy — POA already encodes site location/orientation) hold
+  enough of the per-site level to keep R² in tolerance?**
+  - **If R² holds** (within 2 pp): proceed — Phase 1 unblocks W1.
+  - **If R² drops >2 pp:** that is the **embedding trip-wire firing early** (site-shaped
+    residual surfacing before LOSO) — route to *reconsider the deferred embedding*, **not**
+    to fiddling `r` (Phase 0 fixed `r` for sound reasons; the miss is a site-level issue).
 - Run **Gate A** two ways with `measure_yield.py` (same window 2025-06-09 → 2026-06-08,
   same store layout as the report):
   - **real ages** (diagnostic) → expect ≈ 1.11 (age neutralised; non-age residual persists — §2);
   - **`age=0`** (the served prospect condition) → expect ≈ 1.15–1.20 (≈ 1.11 × 1.06).
-- Compare the fitted `r` against Phase 0's free within-site estimate (sanity, not gate).
+- Compare the imposed `r` against Phase 0's within-site estimate (sanity, not gate).
 
 **W1 is unblockable on Phase 1 alone if:** `r` is monotone and in-band, the `age=0`
-runaway is gone, and Gate A is materially improved (1.515 → ~1.15–1.20) with the residual
-attributable to the known non-age factors (§2). Do **not** gate on an absolute ≈ 1.0, and
-do **not** treat the persistent ~1.11 as a reason to recalibrate POA serve-side (report
-§6). Phase 2 (LOSO) then runs as validator.
+runaway is gone, Gate A is materially improved (1.515 → ~1.15–1.20) with the residual
+attributable to the known non-age factors (§2), **and the promotion-gate R² holds within
+2 pp** (the binding check above). Do **not** gate on an absolute ≈ 1.0, and do **not**
+treat the persistent ~1.11 as a reason to recalibrate POA serve-side (report §6). Phase 2
+(LOSO) then runs as validator. (An R² miss routes to the embedding, not to `r` — see above.)
 
 ---
 
@@ -287,9 +323,13 @@ Gated on a model that passes the above (Phase 1 sufficient for the launch decisi
   the "Site identity is not a feature" note **stands** (embedding deferred). Add the LOSO
   eval section. Per `documenting.md`, model-internal design → model README.
 - **Report:** write `reports/pv-age-feature.md` (the outcome lives outside the source tree —
-  a model behaviour change + Gate A / LOSO measurements). Retain it; delete the brief + this
-  plan on finalisation (CLAUDE.md task lifecycle). The cross-site/LOSO brief is closed by
-  Phase 2 and finalised likewise.
+  a model behaviour change + Gate A / LOSO measurements). **Must fold in the Phase 0 fork
+  rationale** from `data-exploration/irradiance/poa_attribution/age_identifiability.md`
+  (why FIX `r`, why 0.007, the contamination + reverse-ordering evidence) — that reasoning
+  lives only in this plan and that note today, and **this plan is deleted on finalisation**
+  (CLAUDE.md task lifecycle), so the report is its permanent home. Retain the report; delete
+  the brief + this plan on finalisation. The cross-site/LOSO brief is closed by Phase 2 and
+  finalised likewise.
 
 ---
 
@@ -338,11 +378,13 @@ C (hold for full validation) is not taken — LOSO runs as B's validator, not a 
 
 ## 6. Risks / open decisions
 
-- **Phase 0 says "no signal."** Then `r` is fixed (not fitted) and the launch leans harder
-  on the caveat; LOSO confirms "impose, don't identify." Embedding stays deferred. Plan
-  already forks for this.
-- **`r` pins to a band edge in Phase 1.** Informative, not fatal — report it; consider
-  widening the band slightly or fixing `r` at the Phase 0 central estimate.
+- **Phase 0 outcome (resolved): FIX `r`.** Signal robust in sign but non-physical in
+  magnitude (~2–5 %/yr) → `r` fixed at 0.007/yr, not fitted; launch leans on the prior +
+  caveat; LOSO confirms "impose, don't identify." Embedding stays deferred.
+- **Choice of fixed-`r` value (open, mild).** Data argues for the band's upper end but a
+  larger `r` makes the age=0 prospect *more* optimistic (already-optimistic self-selected
+  sites pull the other way). 0.007/yr is the mid-band compromise; revisit only if Gate A
+  (§3.7) lands materially off the §2 expectation.
 - **Promotion-gate metric comparability.** Keeping MSE-on-CF (vs log-space) preserves the
   `test_*_space` R² the gate compares; do not switch the loss without re-checking the gate.
 - **`age_known` repurposing** vs the live `chain.py` (`age_known=1`) — reconcile in Phase 1
