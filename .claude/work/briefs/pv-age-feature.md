@@ -7,8 +7,11 @@
 > context: **`briefs/pv-yield-overestimate.md`**.
 >
 > **This is now the W1 public-launch gate** (re-pointed here from the completed
-> `pv-train-on-served-poa` task). The model-structure section below may be promoted to
-> a plan when implementation design firms up.
+> `pv-train-on-served-poa` task). The model-structure section below is now specified in
+> **`plans/pv-age-feature.md`** (Phase 0 identifiability check → Phase 1 bounded prior,
+> which unblocks W1 alone → Phase 2 LOSO validator → Phase 3 finalisation). **The site
+> embedding is deferred** (a trip-wire upgrade, built only if Phase 2 LOSO shows a
+> site-shaped gap) — so this task is model-only, with no serving-contract churn.
 
 ## Problem
 
