@@ -4,48 +4,32 @@
 > options and their design. The diagnosis (Gate A / Gate B) is in
 > **`reports/weather-pv-vintage-alignment.md`**. The primary fix execution (retrain
 > on 24 h-mean POA basis) is in **`reports/pv-train-on-served-poa.md`**: it reduced
-> pred/actual from 2.011 → 1.515 but hit a structural Jensen ceiling.
+> pred/actual from 2.011 → 1.515. The "Jensen ceiling" reading is **withdrawn** (report
+> §5–6): the corpus target is correct (`corpus/true 1.01`) and the residual is the
+> `age_years` train/serve convention — closed by **`briefs/pv-age-feature.md`**.
 
 ---
 
-## Serve-side fix (the next lever)
+## Residual-closing lever (corrected) — the `age_years` feature
 
-The Jensen ceiling means additional PV training cannot close the remaining ~51 % bias.
-The residual is a daily→monthly Jensen gap: Gate A's `measure_yield.py` feeds
-monthly-mean weather to the chain, and pushing that through a nonlinear MLP introduces
-a convexity gap that is independent of training-set coverage. Two routes:
+The "Jensen ceiling" framing is **withdrawn** (report §5–6). The corpus target is
+correct (`corpus/true 1.01`); the +51 % residual is the **`age_years` train/serve
+convention** — trained on each site's real install age, served `age=0` — likely a
+memorised per-site intercept rather than real degradation. The fix is its own task,
+**`briefs/pv-age-feature.md`** (Next): a constrained degradation prior plus a site/age
+decomposition (explicit site effect + shared age slope, with embedding dropout for the
+unknown-site case), validated by the LOSO eval. See that brief for the design.
 
-### Option 1 — Serve on the trained basis (chain-only, no retrain)
+### Rejected serve-side routes (retained as rejected-with-reason)
 
-At inference, feed the **daytime-mean POA** (the model's trained region, where the
-curve is ≈ unbiased) and integrate over daylight hours instead of ×24. Touches
-`pv-prospect-app`'s chain only (`reconstruct_daily_mean_poa` / energy integration) —
-**no retrain**. Lowest blast radius; cheapest to trial.
+Two serve-side routes were considered as the residual fix and **rejected**: each chases
+only ~5 % and would mask the real cause (the age feature) — report §6 ("don't").
 
-Design notes:
-- `reconstruct_daily_mean_poa` currently returns a 24 h-mean; it must instead return
-  a daytime-mean or supply a daylight-fraction alongside the POA.
-- Energy integration in `chain.py` changes from `cf × 24` to `cf × daylight_hours`.
-- Daylight hours derivable from solar geometry (`pvlib.solarposition` or equivalent)
-  given site lat/lon and date; already available from the POA physics stack.
-- Gate A (`measure_yield.py`) must be re-run against the modified chain to confirm
-  pred/actual ≈ 1.
-
-### Option 2 — Recalibrate the low-POA CF curve
-
-Zero-force the intercept *and* correct the concave low-POA over-prediction by
-augmenting low-POA training samples and/or constraining the MLP curvature. Touches
-`pv-prospect-model` training. Note: zero-forcing the intercept alone does **not** fix
-the concave over-prediction at 25–150 W/m² — both must be addressed together.
-
-Design notes:
-- Low-POA augmentation: synthesise pre-dawn / post-dusk samples (POA = 0, power = 0)
-  and twilight samples derived from site physics. Add as a training-time augmentation
-  step, not corpus data.
-- Curvature constraint: a monotone spline or physics-informed constraint that forces
-  CF(POA = 0) = 0 and CF / (POA/1000) ≤ 1 at low POA.
-- After training, validate the CF-vs-POA curve before Gate A: the concave kink at
-  25–150 W/m² should flatten to ≤ 1.0 × CF_physics.
+- **Serve on the trained basis** — feed the daytime-mean POA at inference and integrate
+  over daylight hours instead of ×24 (chain-only, no retrain). Cheap, but ~5 % and
+  off-cause.
+- **Recalibrate the low-POA CF curve** — zero-force the intercept and constrain the
+  concave low-POA over-prediction. Touches `pv-prospect-model`; ~5 % and off-cause.
 
 ---
 
@@ -100,13 +84,16 @@ needed.
 
 ---
 
-## Cleanup + unblock W1 (contingent on pred/actual ≈ 1)
+## Cleanup + unblock W1 (now owned by `pv-age-feature`)
 
-Once a fix reaches smoke-test MAPE < 15 %:
+Contingent on **promotion** of the retrained model — deferred until
+`briefs/pv-age-feature.md` yields a defensible `age=0` prediction. Production still
+serves old-basis artifacts, so the caveats remain *true* until promotion; do not touch
+them before then. Once promoted (this list now rides with `pv-age-feature`):
 - Correct/remove the ~30 % caveat in `app/poa.py`'s docstring and in
   `pv-prospect-app/README.md`.
-- Fix the `/predict` response caveat in `main.py:35` (already updated to +100 %; will
-  need correcting to reflect the fixed state).
+- Fix the `/predict` response caveat in `main.py:35` (currently +100 %; correct to the
+  fixed state).
 - Fix the now-false "< 1 % self-consistent" note in `app/poa.py`.
 - Flip the `TODO.md` note and unblock the website's W1 public launch.
 

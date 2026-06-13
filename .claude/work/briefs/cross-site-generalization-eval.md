@@ -3,6 +3,10 @@
 Parked, eyes-open. **Not** part of the Validation API — a separate model-quality
 diagnostic.
 
+> **Now sequenced with `briefs/pv-age-feature.md`** (Next): LOSO is the validator for
+> the site/age decomposition there — it tells you whether the age slope transfers to an
+> unseen site or is a memorised per-site intercept. The two run together.
+
 ## Why
 
 The Prediction API's headline feature is speculative yield for a site we have never

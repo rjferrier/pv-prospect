@@ -34,8 +34,9 @@ for the full design and phasing (W0 substrate → W1 prediction → W2 validatio
   model), so it is insulated from the yield bias and is the strongest credibility
   artifact.
 - **W1** is buildable now (`/predict` exists), but its **public launch is gated**
-  on shipping the PV yield-overestimate fix (decision: fix-first —
-  `pv-train-on-served-poa`).
+  on shipping the PV yield-overestimate fix (decision: fix-first). The corpus
+  re-base (`pv-train-on-served-poa`) shipped and halved it; the remaining gate is
+  the `age_years` fix (`pv-age-feature`).
   W1 may be exercised privately (IAM auth) before then; W2 is the only public
   surface until the fix lands.
 - **Public launch (either section) forces an auth flip**: the service is private

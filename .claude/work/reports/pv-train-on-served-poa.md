@@ -1,7 +1,9 @@
 # Report: Train the PV model on the served (24 h-mean) POA basis
 
-> Companion to `plans/pv-train-on-served-poa.md` (the design) and
-> `reports/weather-pv-vintage-alignment.md` (the diagnosis). This report records the
+> Companion to `reports/weather-pv-vintage-alignment.md` (the diagnosis). The design
+> it implemented is in submodule commit `c59f018`; the re-base mechanics it pioneered
+> are generalised in
+> `pv-prospect-data-transformation/doc/runbooks/re-base-corpus.md`. This report records the
 > **outcome** — most of which is a change to the **data corpus** (`data-v2026-06-12`)
 > and a measurement, neither of which the code diff reveals. Executed 2026-06-12.
 

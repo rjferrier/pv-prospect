@@ -159,6 +159,14 @@ the prepared-feature corpus and pushes them to `gs://pv-prospect-versioned-featu
 then commits and tags `data-v<date>` in the instance repo. Implemented in
 `pv-prospect-data-versioner`.
 
+The versioner is **accumulate-only**: it `dvc add`s the latest staging output onto
+the existing corpus (overwriting by path) and never removes a partition. So the
+corpus at a `data-v<date>` tag is the union of every producer's output to date, and
+**a full re-base onto a new feature convention cannot be produced by re-running the
+pipeline** — any un-regenerated window stays on the old basis. That case needs an
+explicit clean rebuild: see
+[`pv-prospect-data-transformation/doc/runbooks/re-base-corpus.md`](pv-prospect-data-transformation/doc/runbooks/re-base-corpus.md).
+
 ### M — Model Training
 
 Triggered automatically by the version workflow (V) on success. The model trainer

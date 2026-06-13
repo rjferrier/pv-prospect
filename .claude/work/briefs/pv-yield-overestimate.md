@@ -4,24 +4,26 @@
 > (Gate A: mean pred/actual 2.011 across 10 sites). Full diagnosis and attribution is
 > in **`reports/weather-pv-vintage-alignment.md`**. The primary fix (retrain on the
 > served 24 h-mean POA basis) has been executed — see **`reports/pv-train-on-served-poa.md`**
-> — and reduced the overestimate to 1.515, hitting a structural Jensen ceiling.
+> — and reduced the overestimate to 1.515. The corpus target is correct
+> (`corpus/true 1.01`); the **+51 % residual is re-attributed to the `age_years`
+> train/serve convention** (report §5–6), **not** a Jensen ceiling. Closing it is the
+> new **`briefs/pv-age-feature.md`** task.
 > The fix space and remaining options are in the companion plan
 > **`plans/pv-yield-overestimate.md`**.
 
 ## The collection
 
-### Serve-side fix (the next lever)
+### Residual-closing lever (corrected) — the `age_years` feature
 
-The Jensen ceiling means more PV training cannot reach pred/actual ≈ 1. The remaining
-bias is a daily→monthly Jensen gap baked in by pushing a monthly-mean POA through a
-nonlinear MLP. Two serve-side routes — see the plan for detail:
+The "Jensen ceiling" reading is **withdrawn** (report §5–6). The corpus target is
+correct (`corpus/true 1.01`); the +51 % residual is the **`age_years` train/serve
+convention** (trained on real install ages, served `age=0`), likely a memorised
+per-site intercept rather than real degradation. Closing it is **`briefs/pv-age-feature.md`**
+(Next) — a constrained degradation prior + site/age decomposition, validated by LOSO.
 
-- **Serve on the trained basis** — feed the daytime-mean POA at inference and
-  integrate over daylight hours instead of ×24. Chain-only, no retrain; lowest blast
-  radius.
-- **Recalibrate the low-POA CF curve** — zero-force the intercept *and* correct the
-  concave low-POA over-prediction (augment low-POA samples / constrain curvature).
-  Touches `pv-prospect-model` training.
+The two earlier serve-side routes — serving the daytime-mean POA, and recalibrating the
+low-POA CF curve — are **rejected** as residual fixes: each chases only ~5 % and would
+mask the real cause. Retained as rejected-with-reason in the plan, not as live options.
 
 ### Weather-path rider — Option A: one weather source feeds both corpora
 
@@ -47,12 +49,14 @@ stamp it, and have `prepare_pv` reject a day whose on-site-weather vintage diffe
 from the grid-weather vintage by > 1 week. Perpetuates the train/serve skew Option A
 removes; unlikely to be needed.
 
-### Cleanup + unblock W1 (contingent on pred/actual ≈ 1)
+### Cleanup + unblock W1 (now owned by `pv-age-feature`)
 
-Once a fix reaches the smoke-test MAPE < 15 %: correct/remove the legacy caveat still
-carried in `app/poa.py` and `pv-prospect-app/README.md`; fix the now-false "< 1 %
-self-consistent" note in `app/poa.py`; flip the TODO note and unblock the website's
-W1 public launch.
+Contingent on **promotion** of the retrained model (deferred until `pv-age-feature`
+gives a defensible `age=0` prediction) — production still serves old-basis artifacts, so
+the caveats are still *true* until then. Once promoted: correct/remove the legacy caveat
+in `app/poa.py` and `pv-prospect-app/README.md`, fix the now-false "< 1 % self-consistent"
+note in `app/poa.py`, flip the TODO note, and unblock W1. These now ride with
+**`briefs/pv-age-feature.md`**.
 
 ## Acceptance
 

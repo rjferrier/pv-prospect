@@ -7,6 +7,9 @@ leaving a silent hole in `data/prepared/`. See
 [`doc/orchestration.md`](../../../doc/orchestration.md) for the underlying
 plan / filter / commit design.
 
+For a **full corpus re-base** onto a new feature convention (every partition, not
+just a hole), see [`re-base-corpus.md`](re-base-corpus.md).
+
 ## Why marker-rewind alone is not enough
 
 Lowering `consumed_through` in

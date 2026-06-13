@@ -161,8 +161,10 @@ artifact — lead with it. W1 (prediction) is buildable in parallel but its
   torch-backed `/predict` world-callable. `max_instances=2` caps the blast radius
   to degraded-service, not a runaway bill; no auth for a demo. Make this an
   explicit, reviewed step.
-- **Yield fix shipped** — `pv-train-on-served-poa` is a hard prerequisite
-  for W1's *public* exposure (decision: fix-first). W1 may ship privately before.
+- **Yield fix shipped** — a hard prerequisite for W1's *public* exposure (decision:
+  fix-first). The corpus re-base (`pv-train-on-served-poa`) shipped and halved the
+  overestimate; the residual gate is the `age_years` fix (`pv-age-feature`). W1 may
+  ship privately before.
 - **Cloud Run health-check + 5xx alert** re-checked if `/healthz` is redefined.
 
 ### Finalisation
@@ -180,13 +182,15 @@ the dual-source 422 distinction). Specifics deferred to per-phase speccing.
 
 ### Resolved
 - **Yield bias — RESOLVED: fix it first, then launch W1 publicly.**
-  `POST /predict` knowingly over-estimates annual yield by ~2× (mean pred/actual
-  2.0) until the yield fix (`pv-train-on-served-poa`). The product call is to
+  `POST /predict` over-estimated annual yield by ~2× (mean pred/actual 2.0). The
+  corpus re-base (`pv-train-on-served-poa`) shipped and halved it (→ ~1.5×); the
+  residual `age_years` fix (`pv-age-feature`) is the remaining gate. The product
+  call is to
   **sequence that fix before W1's public launch** and present clean numbers,
   rather than launch behind a prominent caveat. Consequences:
   - W0 and W2 proceed now; **W2 is the only public surface until the fix lands.**
   - W1 may be *built* now (and exercised privately behind IAM auth) but **stays
-    out of the public site until `pv-train-on-served-poa` ships.**
+    out of the public site until the `age_years` fix (`pv-age-feature`) ships.**
   - The yield fix is therefore a **W1 public-launch prerequisite**, not just a
     "Later" item — track it as a hard dependency of W1 exposure.
   - The in-payload `caveats[]` are still rendered (defence in depth), but they are
