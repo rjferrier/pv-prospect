@@ -35,18 +35,28 @@ pv_prospect/model/
 3. **Target.** `capacity_factor = power / panels_capacity`. Training on
    capacity factor (rather than raw watts) means one model generalises across
    all 10 sites and degrades gracefully on unseen prospect sites.
-4. **Augment.** Add `day_of_year` (continuous), `age_years`, `age_known`
-   (site-attribute). Sites with missing `installation_date` get `age_known = 0`
-   and `age_years` imputed from the global median of known sites.
+4. **Augment.** Add `day_of_year` (continuous weather feature). Compute
+   `age_years` per row from each site's `installation_date` — but **not** as an
+   MLP input: it is routed into a bounded multiplicative degradation factor at
+   step 7 (see [Design Notes](#design-notes)). Sites with missing
+   `installation_date` get `age_years` imputed from the global median of known
+   sites; the `age_known` flag is still computed but is retained as a diagnostic
+   column only, no longer a model feature.
 5. **Split.** Temporal hold-out at the 80th percentile of the date range.
    Train on the earlier window; test on the later window. Random splits are not
    used — PV-weather rows are autocorrelated day-to-day, so a random split
    inflates reported R².
-6. **Scale.** `StandardScaler` fitted on train continuous features only;
-   binary features (`age_known`) are not scaled.
-7. **Train.** `CapacityFactorNet` (4 dense layers, Dropout(0.2), no output
-   activation). MSE loss on `capacity_factor`, Adam optimizer. Early stopping
-   on a temporal val slice (last 10% of train). 100 epochs max, patience 10.
+6. **Scale.** `StandardScaler` fitted on the train weather features only
+   (`day_of_year`, `temperature`, `plane_of_array_irradiance`). The `age_years`
+   column is passed through **unscaled** — it enters the degradation factor, not
+   the MLP.
+7. **Train.** `CapacityFactorNet` predicts
+   `CF = head(weather) × (1 − r · age_years)` — a 4-layer feed-forward head on
+   the weather features only, multiplied by a **bounded degradation factor** with
+   a **fixed** rate `r = 0.007/yr` (a non-trainable buffer; physical band
+   `[0.005, 0.010]`; see [Design Notes](#design-notes)). Dropout(0.2), no output
+   activation. MSE loss on `capacity_factor`, Adam optimizer. Early stopping on a
+   temporal val slice (last 10% of train). 100 epochs max, patience 10.
 8. **Evaluate.** Metrics in two spaces:
    - *Capacity-factor space*: R², RMSE, MAE on predicted vs actual `f`.
    - *Clamped-power space*: same metrics on
@@ -112,7 +122,8 @@ artifact = load_artifact('/path/to/pv-artifact')
 # artifact.model        → CapacityFactorNet (eval mode)
 # artifact.scaler       → fitted StandardScaler (continuous features only)
 # artifact.feature_spec → FeatureSpec (column order, target, scaler params)
-# artifact.eval_report  → EvalReport (R², RMSE, MAE per space and per site)
+# artifact.eval_report  → EvalReport (R², RMSE, MAE per space and per site;
+#                          optional `loso` section, see PV Cross-Site Evaluation)
 
 # Weather artifact
 artifact = load_weather_artifact('/path/to/weather-artifact')
@@ -125,10 +136,25 @@ artifact = load_weather_artifact('/path/to/weather-artifact')
 
 ## Design Notes
 
-- **One model across all sites.** Per-site differences are absorbed by
-  `age_years` / `age_known` features and the physics-grounded `capacity_factor`
-  target. Site identity is not a feature because it cannot be populated for a
-  prospect site at inference time.
+- **One model across all sites.** The weather-driven response is shared across
+  all 10 sites (the physics-grounded `capacity_factor` target non-dimensionalises
+  capacity), so a single model transfers to an unseen prospect. **Site identity
+  is not a feature** — it cannot be populated for a prospect at inference time.
+  The residual *per-site level* (orientation, shading, soiling baseline,
+  panel/inverter quality) is therefore deliberately **not modelled**; for an
+  unknown prospect it is unknowable, and is instead quantified as an uncertainty
+  band downstream (see [PV Cross-Site (LOSO) Evaluation](#pv-cross-site-loso-evaluation)).
+- **Age is a bounded multiplicative degradation factor, not a free feature.**
+  `CF = head(weather) × (1 − r · age_years)` with a **fixed** `r = 0.007/yr`
+  (physical band `[0.005, 0.010]`). Age was removed as an MLP input because, with
+  only 10 aged sites, `age_years` is near-collinear with site identity and the
+  free fit used it as a per-site intercept — a non-monotonic ~1.4–2.2 %/yr
+  in-sample rate that inflated the served `age=0` (new-install) prospect by ×1.33.
+  The bounded factor makes the `age=0` prediction defensible by construction
+  (monotone, ≈ ×1.06 uplift at ~8 yr). The rate is **fixed, not fitted**: a
+  within-site identifiability check found the decline robustly *signed* but
+  ~2–5 %/yr (non-physical, irradiance-fragile), so physics supplies the rate, not
+  this data. Full rationale: `reports/pv-age-feature.md`.
 - **Inverter clamping at inference.** The model predicts `f`; the product
   delivers `min(f × panel_capacity, inverter_capacity)`.
 - **Weather features (POA, temperature) are already joined** in the prepared
@@ -137,6 +163,33 @@ artifact = load_weather_artifact('/path/to/weather-artifact')
 - **Tobit / censored regression not used.** Biased days are simply dropped
   (see step 2). The 1% margin was verified against site 82517 (inverter cap
   sharp at 6,000 W, max observed 6,004 W).
+
+## PV Cross-Site (LOSO) Evaluation
+
+Alongside the within-site temporal hold-out (step 8), the PV model carries an
+optional **leave-one-site-out (LOSO)** eval — the genuine prospect scenario: for
+each of the 10 sites, train on the other 9 and predict the held-out 10th. It is
+computed by `training/loso.py::loso_eval`, recorded in the artifact's
+`eval_report.json` under a `loso` section (`LosoReport`: per-site power-space
+R²/MAPE + level ratio, pooled power R², and the level band), and surfaced in the
+trainer's provenance JSON (`pv_loso_pooled_r2`, `pv_loso_band_1sigma`). Run it
+standalone with `entrypoint loso-pv`.
+
+LOSO is a **diagnostic, never a promotion gate** — a fold failure cannot abort or
+gate the weekly trainer job. Its two purposes:
+
+- **Calibrate the prospect uncertainty band.** The held-out per-site *level*
+  (mean actual CF / mean predicted CF, in CF space so the fixed-`r` factor
+  cancels and the ratio isolates level) is the out-of-sample spread a prospect
+  estimate carries. Measured at **1σ ≈ ±17 %** (`data-v2026-06-12`), with
+  out-of-sample mean level ≈ 1.00 (no transfer bias). This is a **floor** — the
+  10 are self-selected, well-maintained PVOutput sites, so an arbitrary roof can
+  sit below the worst of them.
+- **Cross-site transfer sanity.** Pooled power-space R² 0.839 vs the model's own
+  within-site 0.844 — a small cross-site penalty, confirming the shared weather
+  response transfers.
+
+Full method and results: `reports/pv-age-feature.md`.
 
 ---
 

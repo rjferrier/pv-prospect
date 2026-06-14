@@ -19,6 +19,18 @@
 > and instead **expose a prospect uncertainty band** (≈ ±15 % 1σ — see
 > **`briefs/prospect-uncertainty-band.md`**). The embedding is **demoted** to "revisit only
 > for the known-site `/validate` (W2) path"; Phase 2 LOSO now also calibrates the band.
+>
+> **Phase 3 status (2026-06-14).** Docs + report **done** — see
+> `reports/pv-age-feature.md` (the permanent record; folds in the Phase 0 fork
+> rationale and the exact pending caveat diffs) and `pv-prospect-model/README.md`.
+> **Two outward-facing steps remain, in order** (report §8): (1) promote the
+> bounded-prior artifact **by hand** to the production model store
+> (`gs://pv-prospect-versioned-model`; the Cloud job won't auto-promote it — gate
+> −2.6 pp, no skip flag); (2) **then** clean the API caveats (`app/poa.py`
+> docstring, `main.py` `_VINTAGE_CAVEAT` + `/predict` age caveat, app `README.md`),
+> which describe *production-served* behaviour and stay true only while the old
+> model is live. **This brief + the plan + the cross-site brief are deleted only
+> after step 1** (finalisation is gated on the deploy).
 
 ## Problem
 
