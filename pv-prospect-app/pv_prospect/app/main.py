@@ -49,6 +49,20 @@ _static_dir = Path(str(files('pv_prospect.app').joinpath('static')))
 # See reports/pv-age-feature.md §6 and briefs/prospect-uncertainty-band.md.
 PROSPECT_BAND_1SIGMA_FRAC = 0.17
 
+SITE_DISPLAY_ID: dict[int, int] = {
+    89665: 1,
+    61272: 2,
+    25724: 3,
+    79336: 4,
+    4708: 5,
+    82517: 6,
+    36019: 7,
+    42248: 8,
+    24667: 9,
+    56874: 10,
+}
+SITE_REAL_ID: dict[int, int] = {v: k for k, v in SITE_DISPLAY_ID.items()}
+
 _VINTAGE_CAVEAT = (
     'Model limitation: predictions carry per-site level uncertainty due to '
     'self-selection bias in the training corpus (10 well-maintained PVOutput '
@@ -66,7 +80,7 @@ _VALIDATION_IN_SAMPLE_CAVEAT = (
 )
 
 _VALIDATION_AGE_FILL_CAVEAT = (
-    'Sites 61272 and 79336 have no installation_date in pv_sites.csv.  '
+    'Sites 2 and 4 have no known installation date.  '
     'Their age_years feature is imputed from the window-global median of '
     'known sites — a best-effort approximation of the training fill.'
 )
@@ -179,6 +193,8 @@ class SiteSummary(BaseModel):
     system_id: int
     window_start: datetime.date
     window_end: datetime.date
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class ValidateSitesResponse(BaseModel):
@@ -344,41 +360,57 @@ def validate_sites(request: Request, response: Response) -> ValidateSitesRespons
     window = _window_cache.current()
     if window is None:
         raise HTTPException(status_code=503, detail='Validation window not loaded')
-    sites = [
-        SiteSummary(
-            system_id=sid,
-            window_start=window.windows[sid]['time'].min().date(),
-            window_end=window.windows[sid]['time'].max().date(),
+    sites = []
+    for sid in sorted(window.system_ids, key=lambda s: SITE_DISPLAY_ID.get(s, s)):
+        display_id = SITE_DISPLAY_ID.get(sid, sid)
+        try:
+            pv_site = get_pv_site_by_system_id(sid)
+            lat: float | None = float(pv_site.location.latitude)
+            lng: float | None = float(pv_site.location.longitude)
+        except KeyError:
+            lat = None
+            lng = None
+        sites.append(
+            SiteSummary(
+                system_id=display_id,
+                window_start=window.windows[sid]['time'].min().date(),
+                window_end=window.windows[sid]['time'].max().date(),
+                latitude=lat,
+                longitude=lng,
+            )
         )
-        for sid in window.system_ids
-    ]
     return ValidateSitesResponse(sites=sites)
 
 
 @app.get(
-    '/validate/{system_id}',
+    '/validate/{display_id}',
     response_model=ValidateSiteResponse,
     responses={**_503, **_404, **_429},
 )
 @limiter.limit(validate_limit)
 def validate_site(
-    request: Request, response: Response, system_id: int
+    request: Request, response: Response, display_id: int
 ) -> ValidateSiteResponse:
     if _store is None or _window_cache is None:
         raise HTTPException(status_code=503, detail='Service not ready')
+    system_id = SITE_REAL_ID.get(display_id)
+    if system_id is None:
+        raise HTTPException(
+            status_code=404, detail=f'Site {display_id} not found'
+        )
     window = _window_cache.current()
     if window is None:
         raise HTTPException(status_code=503, detail='Validation window not loaded')
     site_df = window.for_site(system_id)
     if site_df is None:
         raise HTTPException(
-            status_code=404, detail=f'Site {system_id} not in validation window'
+            status_code=404, detail=f'Site {display_id} not in validation window'
         )
     try:
         pv_site = get_pv_site_by_system_id(system_id)
     except KeyError as exc:
         raise HTTPException(
-            status_code=404, detail=f'Site {system_id} not found in site registry'
+            status_code=404, detail=f'Site {display_id} not found in site registry'
         ) from exc
 
     install_dates = {}
@@ -392,7 +424,7 @@ def validate_site(
     result = _validate_site(site_df, pv_site, _store.pv, age_fill)
 
     return ValidateSiteResponse(
-        system_id=system_id,
+        system_id=display_id,
         series=[
             SeriesPointModel(
                 date=pt.date,

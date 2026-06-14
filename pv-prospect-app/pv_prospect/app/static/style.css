@@ -233,6 +233,84 @@ footer {
 .submit-btn:hover:not(:disabled) { background: var(--clr-primary-dark); }
 .submit-btn:disabled { background: var(--clr-border); cursor: not-allowed; }
 
+/* --- Validation map layout --- */
+
+.validation-layout {
+    display: flex;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+
+.validation-map {
+    height: 340px;
+}
+
+.validation-layout > .controls {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 0;
+    flex: 0 1 auto;
+}
+
+.validation-layout > .controls select {
+    min-width: 0;
+    width: 100%;
+    max-width: 22rem;
+}
+
+.site-marker {
+    background: var(--clr-primary);
+    border-radius: 50%;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 24px;
+    text-align: center;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    cursor: pointer;
+    transition: background 0.15s, transform 0.15s;
+}
+
+.site-marker--active {
+    background: #c0392b;
+    transform: scale(1.3);
+}
+
+/* --- About section --- */
+
+.about-content {
+    max-width: 65ch;
+}
+
+.about-content h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 1.25rem 0 0.5rem;
+    color: var(--clr-text);
+}
+
+.about-content p {
+    margin: 0 0 0.75rem;
+    line-height: 1.55;
+}
+
+.about-content ol,
+.about-content ul {
+    margin: 0 0 0.75rem;
+    padding-left: 1.5rem;
+    line-height: 1.55;
+}
+
+.about-content li { margin-bottom: 0.4rem; }
+
+.about-content a { color: var(--clr-primary); }
+.about-content a:hover { text-decoration: none; }
+
+/* --- Headline (prediction result) --- */
+
 .headline {
     background: var(--clr-surface);
     border: 1px solid var(--clr-border);

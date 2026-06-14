@@ -18,6 +18,6 @@ def test_validate_sites_warming_returns_503() -> None:
 
 def test_validate_site_warming_returns_503() -> None:
     client = TestClient(app)
-    resp = client.get('/validate/89665')
+    resp = client.get('/validate/1')
     assert resp.status_code == 503
     assert isinstance(resp.json()['detail'], str)

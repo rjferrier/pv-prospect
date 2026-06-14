@@ -22,58 +22,25 @@
 
   <nav class="tab-bar" role="tablist">
     <button class="tab-btn active" role="tab"
-            aria-selected="true" aria-controls="panel-validation"
+            aria-selected="true" aria-controls="panel-prediction"
+            id="tab-prediction">
+      Prediction
+    </button>
+    <button class="tab-btn" role="tab"
+            aria-selected="false" aria-controls="panel-validation"
             id="tab-validation">
       Validation
     </button>
     <button class="tab-btn" role="tab"
-            aria-selected="false" aria-controls="panel-prediction"
-            id="tab-prediction">
-      Prediction
+            aria-selected="false" aria-controls="panel-about"
+            id="tab-about">
+      About
     </button>
   </nav>
 
   <main>
-    <section id="panel-validation" class="panel active"
-             role="tabpanel" aria-labelledby="tab-validation">
-      <div class="section-intro">
-        <h2>How the model tracks real sites</h2>
-        <p>
-          The deployed PV model is run over the last ~90 days of <em>real</em>
-          weather for each known site and compared against that site's measured
-          output. This path never runs the weather model, so it isolates
-          PV-model accuracy from weather-forecast error.
-        </p>
-      </div>
-
-      <div class="controls">
-        <label for="site-select">Site</label>
-        <select id="site-select" disabled>
-          <option>Loading sites…</option>
-        </select>
-        <label class="toggle">
-          <input type="checkbox" id="cf-toggle"> Show capacity factor
-        </label>
-      </div>
-
-      <div id="validation-status" class="status" hidden></div>
-
-      <div id="validation-result" hidden>
-        <div id="validation-metrics" class="metrics"></div>
-        <div id="validation-chart" class="chart"></div>
-        <p class="chart-note">
-          Lines compare predicted vs actual daily energy. Red markers flag
-          <strong>clipped</strong> (inverter-limited) days — these are excluded
-          from the error metrics above, since the lost headroom is informative,
-          not model error.
-        </p>
-        <ul id="validation-caveats" class="caveats"></ul>
-        <p id="validation-meta" class="meta"></p>
-      </div>
-    </section>
-
-    <section id="panel-prediction" class="panel"
-             role="tabpanel" aria-labelledby="tab-prediction" hidden>
+    <section id="panel-prediction" class="panel active"
+             role="tabpanel" aria-labelledby="tab-prediction">
       <div class="section-intro">
         <h2>Speculate a new installation</h2>
         <p>
@@ -139,6 +106,105 @@
         <p id="prediction-meta" class="meta"></p>
       </div>
     </section>
+
+    <section id="panel-validation" class="panel"
+             role="tabpanel" aria-labelledby="tab-validation" hidden>
+      <div class="section-intro">
+        <h2>How the model tracks real sites</h2>
+        <p>
+          The deployed PV model is run over the last ~90 days of <em>real</em>
+          weather for each known site and compared against that site's measured
+          output. This path never runs the weather model, so it isolates
+          PV-model accuracy from weather-forecast error.
+        </p>
+      </div>
+
+      <div class="validation-layout">
+        <div id="validation-map" class="map validation-map"></div>
+        <div class="controls">
+          <label for="site-select">Site</label>
+          <select id="site-select" disabled>
+            <option>Loading sites…</option>
+          </select>
+          <label class="toggle">
+            <input type="checkbox" id="cf-toggle"> Show capacity factor
+          </label>
+        </div>
+      </div>
+
+      <div id="validation-status" class="status" hidden></div>
+
+      <div id="validation-result" hidden>
+        <div id="validation-metrics" class="metrics"></div>
+        <div id="validation-chart" class="chart"></div>
+        <p class="chart-note">
+          Lines compare predicted vs actual daily energy. Red markers flag
+          <strong>clipped</strong> (inverter-limited) days — these are excluded
+          from the error metrics above, since the lost headroom is informative,
+          not model error.
+        </p>
+        <ul id="validation-caveats" class="caveats"></ul>
+        <p id="validation-meta" class="meta"></p>
+      </div>
+    </section>
+
+    <section id="panel-about" class="panel"
+             role="tabpanel" aria-labelledby="tab-about" hidden>
+      <div class="section-intro">
+        <h2>About PV Prospect</h2>
+      </div>
+      <div class="about-content">
+        <p>
+          PV Prospect estimates the annual energy yield of a UK solar installation.
+          The result is a <strong>typical-year climatological estimate</strong> — not
+          a forecast for a specific year, but a long-run average learned from
+          historical data.
+        </p>
+        <h3>How the model works</h3>
+        <p>Two neural networks are chained with a physics step between them:</p>
+        <ol>
+          <li>
+            <strong>Weather model</strong> — given location and time of year, predicts
+            climatological values for direct normal irradiance (DNI), diffuse horizontal
+            irradiance (DHI), and ambient temperature, from
+            <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>
+            historical data.
+          </li>
+          <li>
+            <strong>Solar geometry</strong> — standard physics converts DNI and DHI into
+            plane-of-array (POA) irradiance for the given panel orientation and tilt.
+          </li>
+          <li>
+            <strong>PV model</strong> — predicts daily capacity factor from POA irradiance
+            and temperature; a fixed degradation factor (~0.7&thinsp;%/year) is applied for
+            panel age. Trained on generation data from 10 real UK systems shared on
+            <a href="https://pvoutput.org/" target="_blank" rel="noopener">PVOutput</a>.
+          </li>
+        </ol>
+        <h3>Inputs</h3>
+        <ul>
+          <li>Location (latitude and longitude)</li>
+          <li>Panel rating (W) and optional inverter rating (W)</li>
+          <li>Orientation: azimuth (° clockwise from North) and tilt (° from horizontal)</li>
+          <li>Installation age (years, optional)</li>
+        </ul>
+        <h3>Uncertainty</h3>
+        <p>
+          The annual yield estimate carries a <strong>±17&thinsp;% (1σ) uncertainty
+          floor</strong>, calibrated by leave-one-site-out cross-validation across the
+          10 training sites. It captures site-to-site variability but excludes
+          weather-year fluctuations and real-world variation in shading, soiling,
+          and roof condition. The training corpus is self-selected by motivated system
+          owners, so estimates are optimistic for an arbitrary installation.
+        </p>
+        <p class="meta">
+          Source code:
+          <a href="https://github.com/rjferrier/pv-prospect" target="_blank" rel="noopener">
+            github.com/rjferrier/pv-prospect
+          </a>
+        </p>
+      </div>
+    </section>
   </main>
 
   <footer>
@@ -185,7 +251,7 @@
       if (v.window_loaded && v.window_updated_at) {
         parts.push('Window: ' + v.window_updated_at);
       }
-      versionEl.textContent = parts.join(' · ');
+      versionEl.textContent = parts.join(' · ');
     }).catch(function(e) {
       versionEl.textContent = e.type === 'warming' ? 'Models warming up…' : '';
     });

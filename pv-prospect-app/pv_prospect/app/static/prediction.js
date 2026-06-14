@@ -48,6 +48,8 @@
         // Leaflet measures the now-visible container.
         tabBtn.addEventListener('click', function () { setTimeout(ensureMap, 0); });
     }
+    // Prediction is the default-visible tab, so also initialise the map on load.
+    setTimeout(ensureMap, 0);
 
     function showStatus(message, onRetry) {
         statusEl.textContent = message;

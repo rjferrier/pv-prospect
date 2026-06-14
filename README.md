@@ -1,39 +1,41 @@
-# pv-prospect
+# PV Prospect
 
-A model of photovoltaic (PV) power outputs according to weather in the UK. This
-may be useful if you are thinking about installing solar panels and would like to
-know how much energy you could get from them.
-
-The app can be accessed [here](https://pv-prospect-app-iwge6y4a5q-nw.a.run.app/).
+A model of photovoltaic (PV) power outputs according to weather in the UK. 
+The website can be accessed [here](https://pv-prospect-app-iwge6y4a5q-nw.a.run.app/).
 
 ## About the Model
 
-The model is a pair of deep neural networks trained on the power output data of 10
-existing PV systems and corresponding weather data. The PV data has been kindly
-uploaded by the system owners to [PVOutput](https://pvoutput.org/). Historical
-weather data is available from [Open-Meteo](https://open-meteo.com/).
+PV Prospect estimates the annual energy yield of a UK solar installation. The
+result is a **typical-year climatological estimate** — not a forecast for a
+specific year, but a long-run average learned from historical data.
 
-To predict energy yield, the model requires the following inputs:
+Two neural networks are chained with a physics step between them:
+
+1. **Weather model** — given location and time of year, predicts climatological
+   values for direct normal irradiance (DNI), diffuse horizontal irradiance (DHI),
+   and ambient temperature, learned from
+   [Open-Meteo](https://open-meteo.com/) historical data.
+2. **Solar geometry** — standard physics converts DNI and DHI into plane-of-array
+   (POA) irradiance for the given panel orientation and tilt.
+3. **PV model** — predicts daily capacity factor from POA irradiance and
+   temperature; a fixed degradation factor (~0.7 %/year) is applied for panel age.
+   Trained on generation data from 10 real UK systems shared on
+   [PVOutput](https://pvoutput.org/).
+
+**Inputs:**
 
 * location (latitude and longitude)
-* period (start and end dates)
-* solar panel power rating
-* azimuthal orientation (angle clockwise from North)
-* tilt (angle from the horizontal)
+* panel rating (W) and optional inverter rating (W)
+* azimuthal orientation (degrees clockwise from North)
+* tilt (degrees from the horizontal)
+* installation age (years, optional)
 
-From the location and period, the first neural network will predict a time series
-of relevant weather variables such as temperature, direct normal irradiance (DNI)
-and diffuse horizontal irradiance (DHI). From irradiance data and the solar panel
-features, plane-of-array (POA) irradiance can be calculated. The second neural
-network will use POA irradiance and other features to estimate power output over
-time.
-
-Some caveats:
-
-* The model does not factor in shade from trees and other obstacles. These could
-  negatively impact the actual power output.
-* The model is trained on systems that may have old or ageing technology. Newer
-  technology could mean the actual power output is higher than expected.
+**Uncertainty:** the annual yield estimate carries a ±17 % (1σ) uncertainty floor,
+calibrated by leave-one-site-out cross-validation across the 10 training sites. It
+captures site-to-site variability but excludes weather-year fluctuations and
+real-world variation in shading, soiling, and roof condition. The training corpus is
+self-selected by motivated system owners, so estimates are optimistic for an
+arbitrary installation.
 
 ## System Architecture
 
