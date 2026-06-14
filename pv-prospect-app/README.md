@@ -150,7 +150,7 @@ The limiter state is per-instance (effective ceiling ~2× at `max_instances=2`).
 `Retry-After` and `X-RateLimit-*` headers. The website's error client surfaces
 a "you're going too fast" message rather than a broken UI.
 
-## Known limitation
+## Known limitations
 
 The PV model is trained on 10 self-selected, well-maintained PVOutput sites, so
 predictions carry per-site level uncertainty (±17 % at 1σ out-of-sample). This
@@ -166,6 +166,15 @@ This floor is exposed, not just documented: every `/predict` response carries an
 margin lets a client widen to 2σ without an API change. The constant lives in
 `PROSPECT_BAND_1SIGMA_FRAC` (`app/main.py`), which also sources the matching
 caveat text so the two cannot drift.
+
+**Inverter clipping.** `/predict` applies the inverter cap to reconstructed
+hourly power rather than the daily mean. The intraday shape comes from a
+pvlib clear-sky profile (the same shape used for POA reconstruction), so the
+clipping fraction is a climatological estimate. Because real partly-cloudy days
+can produce brief irradiance spikes above the clear-sky envelope, this slightly
+under-estimates clipping losses — a conservative direction. The `/validate`
+route uses real measured daily-mean power and excludes clipped days from
+metrics, so this approximation does not affect validation accuracy reporting.
 
 ## Served website
 
