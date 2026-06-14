@@ -6,12 +6,19 @@
 > **`briefs/cross-site-generalization-eval.md`** — run the two together. Umbrella
 > context: **`briefs/pv-yield-overestimate.md`**.
 >
-> **This is now the W1 public-launch gate** (re-pointed here from the completed
-> `pv-train-on-served-poa` task). The model-structure section below is now specified in
-> **`plans/pv-age-feature.md`** (Phase 0 identifiability check → Phase 1 bounded prior,
-> which unblocks W1 alone → Phase 2 LOSO validator → Phase 3 finalisation). **The site
-> embedding is deferred** (a trip-wire upgrade, built only if Phase 2 LOSO shows a
-> site-shaped gap) — so this task is model-only, with no serving-contract churn.
+> **This is the W1 public-launch gate** (re-pointed here from the completed
+> `pv-train-on-served-poa` task). Specified in **`plans/pv-age-feature.md`** (Phase 0
+> identifiability check → Phase 1 bounded prior → Phase 2 LOSO → Phase 3 finalisation).
+>
+> **Resolution (2026-06-14 — plan §3.8).** Phase 0 → **fix `r`** at 0.007/yr (the
+> within-site decline is real in sign but ~2–5 %/yr, non-physical, so impose the rate).
+> Phase 1 (done, committed) bounds the age=0 runaway but **misses the promotion gate by
+> ~2.6 pp**; a probe proved the gap is **per-site level**, not slope. Decision: **promote
+> the bounded prior by hand** (documented — the gate's yardstick is the overfit incumbent),
+> **do not build the site embedding for W1** (it can't change an unknown prospect's output),
+> and instead **expose a prospect uncertainty band** (≈ ±15 % 1σ — see
+> **`briefs/prospect-uncertainty-band.md`**). The embedding is **demoted** to "revisit only
+> for the known-site `/validate` (W2) path"; Phase 2 LOSO now also calibrates the band.
 
 ## Problem
 

@@ -3,9 +3,12 @@
 Parked, eyes-open. **Not** part of the Validation API — a separate model-quality
 diagnostic.
 
-> **Now sequenced with `briefs/pv-age-feature.md`** (Next): LOSO is the validator for
-> the site/age decomposition there — it tells you whether the age slope transfers to an
-> unseen site or is a memorised per-site intercept. The two run together.
+> **Sequenced with `briefs/pv-age-feature.md`** (Next). **Reframed 2026-06-14 (that plan's
+> §3.8):** the embedding question is resolved (per-site level is **not** modelled for W1 —
+> it is exposed as an uncertainty band, `briefs/prospect-uncertainty-band.md`). So LOSO's
+> primary purpose is now to **calibrate that band** — its out-of-sample per-site error *is*
+> the honest prospect spread (wider than the in-sample ±15 %). It still measures cross-site
+> transfer; its embedding trip-wire is **demoted** to the known-site `/validate` (W2) path.
 
 ## Why
 
@@ -29,9 +32,11 @@ existing temporal hold-out — mirroring the weather model's spatially-blocked e
 (`neural-network-cross-grid-weather-spatial-eval`). For each site: train on the other
 nine (reuse `train_pv`'s `system_ids` exclusion), predict the held-out site, score
 power-space R²/MAPE. Aggregate + per-site into a new `eval_report.loso` section;
-surface via `/version` and/or monitoring. Compare the LOSO aggregate to the
-within-site number — a large gap is the trip-wire for adding a site embedding (with an
-"unknown site" default vector for prospects at predict time).
+surface via `/version` and/or monitoring. The **per-site out-of-sample error is the
+prospect uncertainty band's calibration** (feeds `briefs/prospect-uncertainty-band.md`).
+Compare the LOSO aggregate to the within-site number — a large gap no longer routes to a
+W1 embedding (resolved as won't-build, plan §3.8); it would only motivate the embedding for
+the known-site `/validate` (W2) path, or argue for more / more-representative sites.
 
 ## Scope
 
