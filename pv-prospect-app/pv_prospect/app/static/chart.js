@@ -6,11 +6,42 @@
 /**
  * Render a monthly bar chart for the prediction section (W1).
  * @param {HTMLElement} container
- * @param {string[]} months - ['Jan', ..., 'Dec']
- * @param {number[]} values_kwh - 12 values
+ * @param {string[]} months - e.g. ['Jan', ..., 'Dec']
+ * @param {number[]} values_kwh - one value per month
+ * @returns {uPlot|null} the chart instance, or null when there is no data.
  */
 function renderBarChart(container, months, values_kwh) {
-    // Implemented in W1.
+    container.innerHTML = '';
+    if (!values_kwh || !values_kwh.length) {
+        container.textContent = 'No data.';
+        return null;
+    }
+    var xs = months.map(function (_, i) { return i; });
+    var opts = {
+        width: container.clientWidth || 720,
+        height: 320,
+        scales: { x: { time: false, range: [-0.6, months.length - 0.4] } },
+        axes: [
+            {
+                splits: function () { return xs; },
+                values: function (u, splits) {
+                    return splits.map(function (i) { return months[i] || ''; });
+                },
+            },
+            { label: 'kWh / month' },
+        ],
+        series: [
+            {},
+            {
+                label: 'Energy',
+                stroke: '#1a6b3c',
+                fill: 'rgba(26, 107, 60, 0.55)',
+                paths: uPlot.paths.bars({ size: [0.7, 60] }),
+                points: { show: false },
+            },
+        ],
+    };
+    return new uPlot(opts, [xs, values_kwh], container);
 }
 
 /**

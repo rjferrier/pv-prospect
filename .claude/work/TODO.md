@@ -4,18 +4,19 @@
 
 The **website** fronts both serving surfaces (`User → PredictionApi` /
 `User → ValidationApi`). Served from the existing app — no separate frontend, no
-build step. Build order **W0 → W2 → W1**. W2 (validation) is unblocked and the
-only public surface for now; W1 (prediction)'s **model gate is now resolved** —
-the PV `age_years` feature fix is done and documented (`reports/pv-age-feature.md`).
-W1 *public launch* still depends on three things: the **promotion deploy** (by
-hand — see the age-feature task), the **uncertainty band** product (#5 below), and
-the **website** itself. The upstream corpus re-base (`pv-train-on-served-poa`) is
-delivered; it halved the overestimate and re-attributed the residual to the age
+build step. Build order **W0 → W2 → W1**. W0, W2 (validation) and **W1
+(prediction) are now all built** — the prediction section renders expected yield
+with its uncertainty band (`prospect-uncertainty-band`, done below). W1's **model
+gate is resolved** (the PV `age_years` fix, `reports/pv-age-feature.md`). W1
+*public launch* now depends only on the **operational/outward-facing** steps: the
+**promotion deploy** (by hand — see the age-feature task) and the **auth flip**
+(`allow_unauthenticated`). The upstream corpus re-base (`pv-train-on-served-poa`)
+is delivered; it halved the overestimate and re-attributed the residual to the age
 feature, where the W1 gate sat.
 
-- [ ] [Website: map prediction + known-site validation UI](briefs/website.md)
+- [ ] [Website: map prediction + known-site validation UI](briefs/website.md) — W0/W2/W1 all **built** (validation + prediction sections, tests green). Remaining: public-launch ops (promotion deploy, auth flip) and finalisation (ungrey `doc/architecture.puml`, README website section).
 - [x] Validate & fix the PV `age_years` feature: degradation law vs. site fixed-effect — **W1 public-launch gate RESOLVED**. All phases done; bounded-prior model promoted to production (2026-06-14); API caveats cleaned; report at `reports/pv-age-feature.md`.
-- [ ] [Expose a prospect yield uncertainty band](briefs/prospect-uncertainty-band.md) — W1 product work from the `pv-age-feature` §3.8 resolution: `/predict` returns expected ± margin since per-site level is unmodellable for a prospect. **Calibrated (Phase 2 LOSO): ship ±17 % 1σ** (out-of-sample; in-sample ±15 % is the floor-of-the-floor)
+- [x] Expose a prospect yield uncertainty band — **DONE**: `/predict` returns an `uncertainty` object (`sigma_frac` 0.17 + `annual_kwh_low/high`, the ±17 % 1σ LOSO floor); the website Prediction (W1) section renders it; `openapi.yaml` regenerated; documented in `pv-prospect-app/README.md`. Brief deleted (scope fully delivered; calibration recorded in `reports/pv-age-feature.md` §6).
 - [x] [Offline cross-site (LOSO) generalisation eval for the PV model](briefs/cross-site-generalization-eval.md) — **DONE (pv-age-feature Phase 2)**: LOSO loop + `EvalReport.loso` + `loso-pv` CLI + defensive trainer wiring. Calibrated the band (±17 % 1σ), pooled power R² 0.839 vs the bounded prior's own within-site 0.844 (small cross-site penalty). Brief closed; **deleted at pv-age-feature finalisation** (gated on the promotion deploy — report §8)
 
 ## Later

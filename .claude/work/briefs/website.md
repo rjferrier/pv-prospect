@@ -33,12 +33,13 @@ for the full design and phasing (W0 substrate → W1 prediction → W2 validatio
   it feeds the PV model the in-distribution corpus POA (and bypasses the weather
   model), so it is insulated from the yield bias and is the strongest credibility
   artifact.
-- **W1** is buildable now (`/predict` exists), but its **public launch is gated**
-  on shipping the PV yield-overestimate fix (decision: fix-first). The corpus
-  re-base (`pv-train-on-served-poa`) shipped and halved it; the remaining gate is
-  the `age_years` fix (`pv-age-feature`).
-  W1 may be exercised privately (IAM auth) before then; W2 is the only public
-  surface until the fix lands.
+- **W1 is now built** — the prediction section renders expected yield with its
+  uncertainty band (`prospect-uncertainty-band`, shipped: `/predict` returns an
+  `uncertainty` object). The model gate is resolved (the `age_years` fix,
+  `pv-age-feature`, shipped on top of the `pv-train-on-served-poa` corpus re-base).
+  W1's **public launch** now turns only on the operational steps below (promotion
+  deploy + auth flip); until they land, W2 is the only public surface and W1 may be
+  exercised privately (IAM auth).
 - **Public launch (either section) forces an auth flip**: the service is private
   today (`allow_unauthenticated = false`); serving the site from it makes
   `/predict` world-callable. `max_instances=2` caps the cost.

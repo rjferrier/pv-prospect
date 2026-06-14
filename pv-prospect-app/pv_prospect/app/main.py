@@ -34,13 +34,21 @@ _store: ModelStore | None = None
 _window_cache: ValidationWindowCache | None = None
 _static_dir = Path(str(files('pv_prospect.app').joinpath('static')))
 
+# Prospect yield uncertainty band: the 1σ fractional margin on the expected
+# annual estimate, calibrated by the Phase 2 LOSO cross-site eval (the spread of
+# per-site "level" across the 10 self-selected training sites). Framed as a
+# floor — it captures per-site level, not weather-model or single-year noise.
+# See reports/pv-age-feature.md §6 and briefs/prospect-uncertainty-band.md.
+PROSPECT_BAND_1SIGMA_FRAC = 0.17
+
 _VINTAGE_CAVEAT = (
     'Model limitation: predictions carry per-site level uncertainty due to '
     'self-selection bias in the training corpus (10 well-maintained PVOutput '
-    'sites). Cross-site generalisation testing shows a floor of ±17 % (1σ) '
-    'yield uncertainty for an arbitrary prospect (see pv-age-feature report). '
-    'The model represents an optimistic population; actual installations on '
-    'less-ideal roofs will fall below the estimate.'
+    'sites). Cross-site generalisation testing shows a floor of '
+    f'±{PROSPECT_BAND_1SIGMA_FRAC * 100:.0f} % (1σ) yield uncertainty for an '
+    'arbitrary prospect (see pv-age-feature report). The model represents an '
+    'optimistic population; actual installations on less-ideal roofs will fall '
+    'below the estimate.'
 )
 
 _VALIDATION_IN_SAMPLE_CAVEAT = (
@@ -124,9 +132,16 @@ class PredictRequest(BaseModel):
         return self
 
 
+class UncertaintyBand(BaseModel):
+    sigma_frac: float
+    annual_kwh_low: float
+    annual_kwh_high: float
+
+
 class PredictResponse(BaseModel):
     expected_annual_kwh: float
     monthly_kwh: list[float]
+    uncertainty: UncertaintyBand
     assumptions: dict[str, Any]
     caveats: list[str]
 
@@ -179,6 +194,23 @@ class _ErrorDetail(BaseModel):
 _503 = {503: {'model': _ErrorDetail, 'description': 'Service not ready'}}
 _404 = {404: {'model': _ErrorDetail, 'description': 'Site not found'}}
 _502 = {502: {'model': _ErrorDetail, 'description': 'Elevation lookup failed'}}
+
+
+def prospect_uncertainty_band(
+    expected_annual_kwh: float,
+    sigma_frac: float = PROSPECT_BAND_1SIGMA_FRAC,
+) -> UncertaintyBand:
+    """Annual-yield uncertainty band for a prospect.
+
+    A uniform fractional margin on the expected estimate (the LOSO-calibrated
+    per-site level spread), exposed as a 1σ band. It is a *floor*: it omits
+    weather-model and single-year noise — see PROSPECT_BAND_1SIGMA_FRAC.
+    """
+    return UncertaintyBand(
+        sigma_frac=sigma_frac,
+        annual_kwh_low=round(expected_annual_kwh * (1 - sigma_frac), 1),
+        annual_kwh_high=round(expected_annual_kwh * (1 + sigma_frac), 1),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +281,7 @@ def predict(request: PredictRequest) -> PredictResponse:
     return PredictResponse(
         expected_annual_kwh=round(result.expected_annual_kwh, 1),
         monthly_kwh=[round(k, 1) for k in result.monthly_kwh],
+        uncertainty=prospect_uncertainty_band(result.expected_annual_kwh),
         assumptions={
             'climatology': True,
             'elevation_m': elevation,

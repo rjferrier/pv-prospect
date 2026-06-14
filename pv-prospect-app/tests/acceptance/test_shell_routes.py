@@ -38,3 +38,24 @@ def test_static_validation_js_served() -> None:
     resp = client.get('/static/validation.js')
     assert resp.status_code == 200
     assert 'javascript' in resp.headers['content-type']
+
+
+def test_prediction_panel_renders_controls() -> None:
+    client = TestClient(app)
+    body = client.get('/').text
+    # W1 controls the prediction controller binds to.
+    assert 'id="prediction-map"' in body
+    assert 'id="prediction-form"' in body
+    assert 'id="pred-capacity"' in body
+    assert 'id="pred-azimuth"' in body
+    assert 'id="pred-tilt"' in body
+    assert 'id="prediction-headline"' in body
+    assert 'id="prediction-chart"' in body
+    assert '/static/prediction.js' in body
+
+
+def test_static_prediction_js_served() -> None:
+    client = TestClient(app)
+    resp = client.get('/static/prediction.js')
+    assert resp.status_code == 200
+    assert 'javascript' in resp.headers['content-type']

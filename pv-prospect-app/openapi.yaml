@@ -224,6 +224,8 @@ components:
             type: number
           type: array
           title: Monthly Kwh
+        uncertainty:
+          $ref: '#/components/schemas/UncertaintyBand'
         assumptions:
           additionalProperties: true
           type: object
@@ -237,6 +239,7 @@ components:
       required:
       - expected_annual_kwh
       - monthly_kwh
+      - uncertainty
       - assumptions
       - caveats
       title: PredictResponse
@@ -289,6 +292,23 @@ components:
       - window_start
       - window_end
       title: SiteSummary
+    UncertaintyBand:
+      properties:
+        sigma_frac:
+          type: number
+          title: Sigma Frac
+        annual_kwh_low:
+          type: number
+          title: Annual Kwh Low
+        annual_kwh_high:
+          type: number
+          title: Annual Kwh High
+      type: object
+      required:
+      - sigma_frac
+      - annual_kwh_low
+      - annual_kwh_high
+      title: UncertaintyBand
     ValidateSiteResponse:
       properties:
         system_id:

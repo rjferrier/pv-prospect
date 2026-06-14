@@ -59,7 +59,7 @@ Authoritative source: `pv-prospect-app/openapi.yaml` (regenerate from
 
 | Endpoint | Request | Success body (fields the UI uses) | Error codes |
 |---|---|---|---|
-| `POST /predict` | `latitude` 49.5–61, `longitude` −9–2, `start_date`, `end_date`, `panels_capacity_w`>0, `azimuth_deg` 0–359, `tilt_deg` 0–90, `inverter_capacity_w?`>0, `install_age_years`≥0 | `expected_annual_kwh`, `monthly_kwh[12]`, `assumptions{elevation_m, *_model_version, inverter_capacity_w, climatology}`, `caveats[]` | 422, 502, 503 |
+| `POST /predict` | `latitude` 49.5–61, `longitude` −9–2, `start_date`, `end_date`, `panels_capacity_w`>0, `azimuth_deg` 0–359, `tilt_deg` 0–90, `inverter_capacity_w?`>0, `install_age_years`≥0 | `expected_annual_kwh`, `monthly_kwh[12]`, `uncertainty{sigma_frac, annual_kwh_low, annual_kwh_high}` (1σ floor), `assumptions{elevation_m, *_model_version, inverter_capacity_w, climatology}`, `caveats[]` | 422, 502, 503 |
 | `GET /version` | — | `pv_model_version`, `weather_model_version`, `pv_critical_metric_r2`, `window_loaded`, `window_updated_at` | 503 |
 | `GET /validate/sites` | — | `sites[]{system_id, window_start, window_end}` | 503 |
 | `GET /validate/{system_id}` | path `system_id` | `series[]{date, predicted_kwh, actual_kwh, predicted_cf, actual_cf, clipped}`, `error{mape, power_space_r2}`, `model_version`, `window_updated_at`, `caveats[]` | 422, 404, 503 |
@@ -148,7 +148,10 @@ artifact — lead with it. W1 (prediction) is buildable in parallel but its
   (0–359), `tilt_deg` (0–90), `install_age_years`, optional
   `inverter_capacity_w`, and the period (`start_date`/`end_date`, defaulting to a
   representative year).
-- Render `monthly_kwh` as a bar chart + the `expected_annual_kwh` headline.
+- Render `monthly_kwh` as a bar chart + the `expected_annual_kwh` headline with
+  its `uncertainty` band (`annual_kwh_low`–`annual_kwh_high`, the ±17 % 1σ floor;
+  shown on the annual figure only, not per month). **Done** — see
+  `prospect-uncertainty-band` (closed).
 - **Render `response.caveats[]`** as defence-in-depth — the public headline
   number will be post-vintage-fix (decision: fix-first, below), so caveat
   rendering is not the launch mechanism for the number, but the honest caveats

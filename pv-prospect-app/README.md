@@ -135,3 +135,20 @@ estimate. The model applies a fixed degradation factor (0.7%/year) to handle
 age-related decline; this factor is held constant across sites rather than
 site-specific to avoid overfitting. See the `pv-age-feature` report for full
 rationale and cross-site generalisation analysis.
+
+This floor is exposed, not just documented: every `/predict` response carries an
+`uncertainty` object — `sigma_frac` (0.17) plus the `annual_kwh_low` /
+`annual_kwh_high` bracket around `expected_annual_kwh`. The single fractional
+margin lets a client widen to 2σ without an API change. The constant lives in
+`PROSPECT_BAND_1SIGMA_FRAC` (`app/main.py`), which also sources the matching
+caveat text so the two cannot drift.
+
+## Served website
+
+The app also serves a no-build demo UI from `/` (HTML + vanilla JS + CDN Leaflet
+and uPlot, mounted at `/static`). It fronts the same JSON endpoints same-origin:
+a **Validation** tab (predicted-vs-actual over the rolling window) and a
+**Prediction** tab (click a UK map point, enter panel parameters, see the
+expected annual yield with its uncertainty band). The OpenAPI contract the UI
+binds to is committed in `openapi.yaml` (regenerate from `app.openapi()` if routes
+change) and served live at `/docs`.
