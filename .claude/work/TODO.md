@@ -12,9 +12,9 @@ is delivered; it halved the overestimate and re-attributed the residual to the a
 feature, where the W1 gate now sits.
 
 - [ ] [Website: map prediction + known-site validation UI](briefs/website.md)
-- [ ] [Validate & fix the PV `age_years` feature: degradation law vs. site fixed-effect](briefs/pv-age-feature.md) — **W1 public-launch gate**. Phase 0–1 done (bounded prior, `r`=0.007, committed). **Resolution (plan §3.8):** promote the bounded prior by hand (it misses the gate by ~2.6 pp on per-site *level*); **no embedding for W1**; expose an uncertainty band instead. Remaining: Phase 2 (LOSO) + Phase 3 (promote, caveats, docs, report)
-- [ ] [Expose a prospect yield uncertainty band](briefs/prospect-uncertainty-band.md) — W1 product work from the `pv-age-feature` §3.8 resolution: `/predict` returns expected ± margin (≈ ±15 % 1σ, a floor) since per-site level is unmodellable for a prospect; calibrated by the LOSO eval
-- [ ] [Offline cross-site (LOSO) generalisation eval for the PV model](briefs/cross-site-generalization-eval.md) — validator for `pv-age-feature`; **now also calibrates the prospect uncertainty band** (its out-of-sample per-site error is the honest spread). Embedding trip-wire demoted to the W2 `/validate` path (plan §3.8)
+- [ ] [Validate & fix the PV `age_years` feature: degradation law vs. site fixed-effect](briefs/pv-age-feature.md) — **W1 public-launch gate**. Phase 0–2 done (bounded prior `r`=0.007 + LOSO validator, committed). **Resolution (plan §3.8):** promote the bounded prior by hand (it misses the gate by ~2.6 pp on per-site *level*); **no embedding for W1**; expose an uncertainty band instead. Remaining: Phase 3 (promote by hand, caveats, W1 flip, docs, report)
+- [ ] [Expose a prospect yield uncertainty band](briefs/prospect-uncertainty-band.md) — W1 product work from the `pv-age-feature` §3.8 resolution: `/predict` returns expected ± margin since per-site level is unmodellable for a prospect. **Calibrated (Phase 2 LOSO): ship ±17 % 1σ** (out-of-sample; in-sample ±15 % is the floor-of-the-floor)
+- [x] [Offline cross-site (LOSO) generalisation eval for the PV model](briefs/cross-site-generalization-eval.md) — **DONE (pv-age-feature Phase 2)**: LOSO loop + `EvalReport.loso` + `loso-pv` CLI + defensive trainer wiring. Calibrated the band (±17 % 1σ), pooled power R² 0.839 vs the bounded prior's own within-site 0.844 (small cross-site penalty). Brief closed; **deleted at pv-age-feature Phase 3 finalisation**
 
 ## Later
 

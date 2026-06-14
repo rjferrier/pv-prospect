@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +12,8 @@ import torch
 from pv_prospect.model.domain import (
     EvalReport,
     FeatureSpec,
+    LosoReport,
+    LosoSiteMetrics,
     ModelArtifact,
     PerSiteMetrics,
     SplitMetrics,
@@ -111,6 +114,37 @@ def test_round_trip_scaler_transforms_identically(tmp_path: Path) -> None:
     orig = artifact.scaler.transform(x)
     loaded_result = loaded.scaler.transform(x)
     np.testing.assert_allclose(orig, loaded_result)
+
+
+def test_round_trip_preserves_populated_loso(tmp_path: Path) -> None:
+    """A populated eval_report.loso survives save → load identically."""
+    loso = LosoReport(
+        per_site=(
+            LosoSiteMetrics(
+                system_id=1, n=100, power_r2=0.8, power_mape=0.2, level_ratio=0.9
+            ),
+            LosoSiteMetrics(
+                system_id=2, n=120, power_r2=0.7, power_mape=0.3, level_ratio=1.1
+            ),
+        ),
+        pooled_power_r2=0.84,
+        level_mean=1.0,
+        level_band_1sigma=0.17,
+    )
+    artifact = _make_artifact()
+    artifact.eval_report = dataclasses.replace(artifact.eval_report, loso=loso)
+    save_artifact(artifact, tmp_path)
+    loaded = load_artifact(tmp_path)
+    assert loaded.eval_report.loso == loso
+
+
+def test_round_trip_absent_loso_stays_none(tmp_path: Path) -> None:
+    """A pre-LOSO artifact (loso=None) round-trips to None, not an error."""
+    artifact = _make_artifact()
+    assert artifact.eval_report.loso is None
+    save_artifact(artifact, tmp_path)
+    loaded = load_artifact(tmp_path)
+    assert loaded.eval_report.loso is None
 
 
 def test_round_trip_preserves_degradation_rate(tmp_path: Path) -> None:

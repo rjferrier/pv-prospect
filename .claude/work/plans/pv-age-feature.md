@@ -351,6 +351,43 @@ distribution is those 10 sites). Record it in the report and carry it in W1 laun
 (brief Option A's caveat survives in spirit). The fix is more / younger / more-
 representative sites, not this task.
 
+### Phase 2 outcome (2026-06-14 — DONE)
+
+Implemented `loso_eval` (`pv-prospect-model/.../training/loso.py`) + pure scorers
+(`loso_site_metrics`, `build_loso_report` in `evaluation.py`), an optional
+`EvalReport.loso` section (persistence round-trips it; pre-LOSO artifacts load with
+`loso=None`), the `loso-pv` CLI subcommand, and defensive trainer wiring
+(`bootstrap._maybe_attach_loso`, `config.compute_loso=True`, `provenance.pv_loso_*`) —
+LOSO never gates promotion and a fold failure can't abort the weekly job. Driver:
+`data-exploration/.../loso_probe.py`. Model: ruff/mypy clean, 68 tests; trainer: 12 tests
+(2 pre-existing `google.cloud.storage` mypy errors in untouched files).
+
+**Result (seed 1, `data-v2026-06-12`; full table in `age_promotion_gate.md`):**
+- **Prospect band 1σ ≈ ±17 %** out-of-sample (vs in-sample ±15 %; 2σ ≈ ±34 %, range
+  −34 %…+28 %). Excluding `61272` (imputed age; fit-outlier, pw R² 0.35) → ~±13–14 %.
+  **This is the band to ship** (`briefs/prospect-uncertainty-band.md`, #5), framed as a floor.
+- **Predominantly genuine per-site level, not an age artifact.** Out-of-sample mean level
+  ≈ 1.00 (no transfer bias), the per-site ordering matches the in-sample probe, and the
+  fixed-`r` factor cancels in the CF-space ratio. An age check on the 8 dated sites:
+  r(age, level) = −0.55, but **+0.08 excluding the youngest site `89665`** — i.e. **no
+  systematic age trend** across the 7 sites spanning 6–14 yr; the lone signal is the
+  youngest reading highest, equally explained by its genuinely premium config (dual-azimuth
+  + optimisers). So the band is level, with at most a small, single-point degradation-
+  mismatch hint (the fixed `r`=0.7 % under-corrects Phase 0's ~2–5 %/yr) — which only widens
+  the floor, never narrows it. (Acceptance #2's "clamped-`r` ⇒ transfer passes trivially"
+  caveat concerns the *slope*; the *level* read is what LOSO reveals here, and it is real.)
+- **pooled power R² 0.839**, compared against the **bounded prior's own** within-site
+  temporal-holdout R² **0.844** (Phase 1, 6-seed) — not the incumbent 0.871, which is the
+  *old free-age* model. So the cross-site penalty is **small** (~0.005), not the 0.871→0.839
+  gap (most of which is the Phase-1 model change). "Small" not "zero": LOSO scores each site's
+  full window, the temporal number scores only the hard tail. Trip-wire stays demoted.
+- **Surfacing:** LOSO is **recorded** (in `eval_report.json` `loso` section + provenance
+  `pv_loso_pooled_r2`/`pv_loso_band_1sigma`). Wiring it through `/version` or a Cloud
+  Monitoring metric is **deferred** — the plan asked for "`/version` and/or monitoring" and
+  the provenance record satisfies the "record" half; Phase 3 may surface it if wanted.
+
+Closes `briefs/cross-site-generalization-eval.md` (deleted at Phase 3 finalisation).
+
 ---
 
 ## Phase 3 — Finalisation (carried forward from `pv-train-on-served-poa`)

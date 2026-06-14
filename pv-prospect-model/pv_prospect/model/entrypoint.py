@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import json
 from pathlib import Path
 
 from pv_prospect.model.domain import TrainingConfig, WeatherTrainingConfig
 from pv_prospect.model.persistence import save_artifact, save_weather_artifact
+from pv_prospect.model.training.loso import loso_eval
 from pv_prospect.model.training.pv import train_pv
 from pv_prospect.model.training.weather import train_weather
 
@@ -54,6 +57,32 @@ def _build_parser() -> argparse.ArgumentParser:
     pv.add_argument('--num-epochs', type=int, default=TrainingConfig.num_epochs)
     pv.add_argument('--batch-size', type=int, default=TrainingConfig.batch_size)
     pv.add_argument('--learning-rate', type=float, default=TrainingConfig.learning_rate)
+
+    loso = sub.add_parser(
+        'loso-pv',
+        help='Run the leave-one-site-out cross-site eval (offline; one training per site)',
+    )
+    loso.add_argument('--data-root', required=True, type=Path)
+    loso.add_argument('--pv-sites-csv', required=True, type=Path)
+    loso.add_argument(
+        '--system-ids',
+        type=lambda s: [int(x) for x in s.split(',')],
+        default=None,
+        help='Comma-separated PV system IDs (default: all sites in pv_sites.csv)',
+    )
+    loso.add_argument(
+        '--seed',
+        type=int,
+        default=None,
+        help='Seed set before each fold (reproducible)',
+    )
+    loso.add_argument(
+        '--output-json',
+        type=Path,
+        default=None,
+        help='Optional path to write the LosoReport as JSON',
+    )
+    loso.add_argument('--num-epochs', type=int, default=TrainingConfig.num_epochs)
 
     weather = sub.add_parser(
         'train-weather', help='Train the weather climatology model'
@@ -114,6 +143,34 @@ def _cmd_train_pv(args: argparse.Namespace) -> None:
     print(f'Test R² (clamped-power):   {artifact.eval_report.test_power_space.r2:.4f}')
 
 
+def _cmd_loso_pv(args: argparse.Namespace) -> None:
+    config = TrainingConfig(num_epochs=args.num_epochs)
+    report = loso_eval(
+        data_root=args.data_root,
+        pv_sites_csv=args.pv_sites_csv,
+        config=config,
+        system_ids=args.system_ids,
+        seed=args.seed,
+    )
+    print(f'\n{"site":>6} {"n":>5} {"pwR2":>7} {"level":>7} {"norm":>7}')
+    for m in report.per_site:
+        norm = m.level_ratio / report.level_mean
+        print(
+            f'{m.system_id:>6} {m.n:>5} {m.power_r2:>7.3f} '
+            f'{m.level_ratio:>7.3f} {norm:>7.3f}'
+        )
+    print(f'\nPooled power R²:        {report.pooled_power_r2:.4f}')
+    print(f'Out-of-sample mean level: {report.level_mean:.4f}')
+    print(
+        f'Prospect band (1σ):     ±{100 * report.level_band_1sigma:.1f}%  '
+        f'(2σ ±{200 * report.level_band_1sigma:.1f}%)'
+    )
+    if args.output_json is not None:
+        with open(args.output_json, 'w') as f:
+            json.dump(dataclasses.asdict(report), f, indent=2)
+        print(f'\nLosoReport written to {args.output_json}')
+
+
 def _cmd_train_weather(args: argparse.Namespace) -> None:
     config = WeatherTrainingConfig(
         cutoff_quantile=args.cutoff_quantile,
@@ -146,6 +203,8 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == 'train-pv':
         _cmd_train_pv(args)
+    elif args.command == 'loso-pv':
+        _cmd_loso_pv(args)
     elif args.command == 'train-weather':
         _cmd_train_weather(args)
 

@@ -89,12 +89,61 @@ class PerSiteMetrics:
 
 
 @dataclass(frozen=True)
+class LosoSiteMetrics:
+    """Held-out-site metrics from the leave-one-site-out (LOSO) eval.
+
+    The model is trained on the other nine sites and scored on this site, which
+    contributed no training rows — the genuine *prospect* scenario.
+    ``level_ratio`` is the capacity-factor level the held-out site sits at
+    relative to the model's population response (``mean actual CF / mean
+    predicted CF``, in CF space at the site's real ages); its cross-site spread
+    is the prospect uncertainty band. ``power_r2``/``power_mape`` are the
+    transfer quality in clamped-power space.
+    """
+
+    system_id: int
+    n: int
+    power_r2: float
+    power_mape: float
+    level_ratio: float
+
+
+@dataclass(frozen=True)
+class LosoReport:
+    """Leave-one-site-out generalisation eval (offline; one training per site).
+
+    Primary purpose: calibrate the prospect uncertainty band from the
+    out-of-sample per-site level spread (``level_band_1sigma`` — the honest,
+    likely-wider counterpart of the in-sample probe's ±15 %). Secondary:
+    cross-site transfer quality (``pooled_power_r2``, sanity-comparable to the
+    within-site temporal-holdout number).
+
+    ``level_mean`` is the mean of the per-site raw level ratios — the model's
+    average out-of-sample calibration bias (≈ 1.0 means a 9-site fit predicts an
+    unseen site's level without systematic over/under-statement).
+    ``level_band_1sigma`` is the sample SD (ddof=1) of the per-site level ratios
+    normalised by ``level_mean`` — computed identically to the in-sample probe so
+    the two numbers are directly comparable.
+    """
+
+    per_site: tuple[LosoSiteMetrics, ...]
+    pooled_power_r2: float
+    level_mean: float
+    level_band_1sigma: float
+
+
+@dataclass(frozen=True)
 class EvalReport:
     """Metrics in both capacity-factor space and clamped-power space.
 
     Computed on train and test splits overall, plus per-site breakdowns
     on the test split only (the train split per-site breakdown is rarely
     diagnostically useful and would clutter the report).
+
+    ``loso`` carries the optional leave-one-site-out generalisation eval. It is
+    ``None`` for a plain single-model training (the CLI ``train-pv`` path and all
+    pre-LOSO artifacts) and populated by the scheduled trainer / the ``loso-pv``
+    command, which run the 10-fold cross-site eval.
     """
 
     train_f_space: SplitMetrics
@@ -104,6 +153,7 @@ class EvalReport:
     test_per_site_f_space: tuple[PerSiteMetrics, ...]
     test_per_site_power_space: tuple[PerSiteMetrics, ...]
     cutoff: str
+    loso: LosoReport | None = None
 
 
 @dataclass

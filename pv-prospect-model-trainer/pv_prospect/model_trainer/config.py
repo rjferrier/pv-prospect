@@ -19,6 +19,7 @@ class ModelTrainerConfig:
     model_dir: str
     model_bucket_name: str
     promotion_tolerance: float
+    compute_loso: bool = True
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ModelTrainerConfig':
@@ -32,4 +33,5 @@ class ModelTrainerConfig:
             model_dir=data.get('model_dir', 'models'),
             model_bucket_name=data.get('model_bucket_name', ''),
             promotion_tolerance=float(data.get('promotion_tolerance', 0.02)),
+            compute_loso=bool(data.get('compute_loso', True)),
         )

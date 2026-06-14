@@ -27,6 +27,12 @@ def test_from_dict_uses_defaults_for_optional_keys() -> None:
     assert config.model_dir == 'models'
     assert config.model_bucket_name == ''
     assert config.promotion_tolerance == 0.02
+    assert config.compute_loso is True
+
+
+def test_from_dict_accepts_compute_loso_override() -> None:
+    config = ModelTrainerConfig.from_dict({**_REQUIRED_KEYS, 'compute_loso': False})
+    assert config.compute_loso is False
 
 
 def test_from_dict_accepts_optional_overrides() -> None:

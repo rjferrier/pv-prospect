@@ -31,6 +31,8 @@ from sklearn.preprocessing import StandardScaler
 from pv_prospect.model.domain import (
     EvalReport,
     FeatureSpec,
+    LosoReport,
+    LosoSiteMetrics,
     ModelArtifact,
     PerSiteMetrics,
     SplitMetrics,
@@ -120,6 +122,19 @@ def _eval_report_from_dict(d: dict) -> EvalReport:  # type: ignore[type-arg]
             PerSiteMetrics(**m) for m in d['test_per_site_power_space']
         ),
         cutoff=d['cutoff'],
+        loso=_loso_report_from_dict(d.get('loso')),
+    )
+
+
+def _loso_report_from_dict(d: dict | None) -> LosoReport | None:  # type: ignore[type-arg]
+    """Reconstruct a LosoReport, tolerating its absence in pre-LOSO artifacts."""
+    if d is None:
+        return None
+    return LosoReport(
+        per_site=tuple(LosoSiteMetrics(**m) for m in d['per_site']),
+        pooled_power_r2=d['pooled_power_r2'],
+        level_mean=d['level_mean'],
+        level_band_1sigma=d['level_band_1sigma'],
     )
 
 

@@ -12,6 +12,7 @@ Writes a promoted-artifact store that the Prediction API can load directly:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from pv_prospect.model.domain import ModelArtifact, WeatherModelArtifact
 from pv_prospect.model.persistence import save_artifact, save_weather_artifact
+from pv_prospect.model.training.loso import loso_eval
 from pv_prospect.model.training.pv import train_pv
 from pv_prospect.model.training.weather import train_weather
 from pv_prospect.model_trainer.config import ModelTrainerConfig
@@ -80,6 +82,7 @@ def bootstrap_models(
 
         logger.info('Training PV model')
         pv_artifact = train_pv(data_root=data_root, pv_sites_csv=pv_sites_csv)
+        pv_artifact = _maybe_attach_loso(pv_artifact, data_root, pv_sites_csv, config)
 
         logger.info('Training weather model')
         weather_artifact = train_weather(data_root=data_root)
@@ -103,6 +106,39 @@ def bootstrap_models(
     logger.info('Bootstrap complete. Store written to %s', output_dir)
 
 
+def _maybe_attach_loso(
+    pv_artifact: ModelArtifact,
+    data_root: Path,
+    pv_sites_csv: Path,
+    config: ModelTrainerConfig,
+) -> ModelArtifact:
+    """Attach the leave-one-site-out eval to the PV artifact, defensively.
+
+    LOSO is a diagnostic — it calibrates the prospect uncertainty band and
+    sanity-checks cross-site transfer; it is **never** a promotion gate. It also
+    costs one extra training per site, so a failure (a single bad fold, or the
+    whole eval) must not abort the weekly job: this swallows exceptions and
+    leaves ``eval_report.loso = None``, the same guard ``emit_training_metrics``
+    uses for monitoring. ``compute_loso=False`` skips it entirely.
+    """
+    if not config.compute_loso:
+        return pv_artifact
+    try:
+        logger.info('Computing LOSO cross-site eval (one training per site)')
+        loso = loso_eval(data_root=data_root, pv_sites_csv=pv_sites_csv)
+        logger.info(
+            'LOSO: pooled power R²=%.3f, prospect band 1σ=±%.1f%%',
+            loso.pooled_power_r2,
+            100 * loso.level_band_1sigma,
+        )
+        pv_artifact.eval_report = dataclasses.replace(
+            pv_artifact.eval_report, loso=loso
+        )
+    except Exception:
+        logger.warning('LOSO eval failed; continuing without it', exc_info=True)
+    return pv_artifact
+
+
 def _write_provenance_json(
     output_dir: Path,
     data_version: str,
@@ -117,6 +153,7 @@ def _write_provenance_json(
         for m in weather_artifact.eval_report.block_clim_model
         if m.target == 'temperature'
     )
+    loso = pv_artifact.eval_report.loso
     provenance = {
         'data_version': data_version,
         'data_tag_sha': data_tag_sha,
@@ -124,6 +161,8 @@ def _write_provenance_json(
         'trained_at': trained_at,
         'pv_critical_metric': pv_artifact.eval_report.test_power_space.r2,
         'pv_cf_r2': pv_artifact.eval_report.test_f_space.r2,
+        'pv_loso_pooled_r2': loso.pooled_power_r2 if loso else None,
+        'pv_loso_band_1sigma': loso.level_band_1sigma if loso else None,
         'weather_temp_rmse': weather_temp_rmse,
     }
     with open(output_dir / 'provenance.json', 'w') as f:

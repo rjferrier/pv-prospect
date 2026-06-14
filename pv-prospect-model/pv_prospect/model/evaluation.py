@@ -8,6 +8,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from pv_prospect.model.domain import (
     EvalReport,
+    LosoReport,
+    LosoSiteMetrics,
     PerSiteMetrics,
     SplitMetrics,
     WeatherEvalReport,
@@ -112,6 +114,79 @@ def build_eval_report(
             ),
         ),
         cutoff=cutoff,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Leave-one-site-out (LOSO) cross-site evaluation
+# ---------------------------------------------------------------------------
+
+
+def _power_mape(power_true: np.ndarray, power_pred: np.ndarray) -> float:
+    """Mean absolute percentage error in power space, as a fraction.
+
+    Daily-mean power has near-zero winter values, so rows with non-positive
+    actuals are excluded from the denominator (they would otherwise dominate).
+    Returns ``nan`` if no positive-power rows remain.
+
+    Caveat: even the surviving *low* winter days inflate the percentage (a small
+    denominator), so this can read well above 1.0 on low-yield sites. It is a
+    noisy diagnostic only — no decision uses it; the band rides on ``level_ratio``
+    and transfer on ``power_r2``.
+    """
+    mask = power_true > 0.0
+    if not mask.any():
+        return float('nan')
+    return float(
+        np.mean(np.abs(power_true[mask] - power_pred[mask]) / power_true[mask])
+    )
+
+
+def loso_site_metrics(
+    system_id: int,
+    actual_cf: np.ndarray,
+    pred_cf: np.ndarray,
+    power_true: np.ndarray,
+    panel_capacity: np.ndarray,
+    inverter_capacity: np.ndarray,
+) -> LosoSiteMetrics:
+    """Score one held-out site against a model trained on the other nine.
+
+    ``level_ratio`` is computed in capacity-factor space (``mean actual /
+    mean predicted``) to match the in-sample level probe and to stay clear of
+    the inverter-clamp nonlinearity; ``power_r2``/``power_mape`` are the
+    end-user-facing transfer quality in clamped-power space.
+    """
+    power_pred = clamped_power_pred(pred_cf, panel_capacity, inverter_capacity)
+    return LosoSiteMetrics(
+        system_id=int(system_id),
+        n=int(len(actual_cf)),
+        power_r2=float(r2_score(power_true, power_pred)),
+        power_mape=_power_mape(power_true, power_pred),
+        level_ratio=float(np.mean(actual_cf) / np.mean(pred_cf)),
+    )
+
+
+def build_loso_report(
+    per_site: tuple[LosoSiteMetrics, ...],
+    pooled_power_true: np.ndarray,
+    pooled_power_pred: np.ndarray,
+) -> LosoReport:
+    """Aggregate per-site LOSO metrics into a report.
+
+    ``level_band_1sigma`` is the sample SD (``ddof=1``) of the per-site level
+    ratios normalised by their mean — the prospect uncertainty band, computed
+    the same way as the in-sample probe so the two are directly comparable.
+    """
+    level_ratios = np.array([m.level_ratio for m in per_site], dtype=float)
+    level_mean = float(np.mean(level_ratios))
+    normalised = level_ratios / level_mean
+    band = float(np.std(normalised, ddof=1)) if len(normalised) > 1 else 0.0
+    return LosoReport(
+        per_site=per_site,
+        pooled_power_r2=float(r2_score(pooled_power_true, pooled_power_pred)),
+        level_mean=level_mean,
+        level_band_1sigma=band,
     )
 
 

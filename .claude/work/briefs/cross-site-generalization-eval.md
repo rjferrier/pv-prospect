@@ -9,6 +9,14 @@ diagnostic.
 > primary purpose is now to **calibrate that band** — its out-of-sample per-site error *is*
 > the honest prospect spread (wider than the in-sample ±15 %). It still measures cross-site
 > transfer; its embedding trip-wire is **demoted** to the known-site `/validate` (W2) path.
+>
+> **DONE 2026-06-14 (plan `pv-age-feature.md` §Phase 2 outcome).** LOSO implemented
+> (`pv-prospect-model/.../training/loso.py`, `EvalReport.loso`, `loso-pv` CLI, defensive
+> trainer wiring). Result: prospect band **1σ ≈ ±17 %** out-of-sample (range −34 %…+28 %),
+> mean level ≈ 1.00, pooled power R² 0.839 vs the **bounded prior's own** within-site 0.844
+> (small cross-site penalty; the old free-age incumbent 0.871 is the wrong baseline). This brief is **closed**;
+> it is **deleted at the `pv-age-feature` Phase 3 finalisation** (its content folds into
+> that task's report + the model README's LOSO section).
 
 ## Why
 
