@@ -2,6 +2,7 @@
 
 ## Next
 
+- [ ] [Fix the inverter clamp: clip instantaneous power, not the daily mean](plans/inverter-clamp-intraday.md) — `/predict` clamps day-averaged power, so an inverter < panel barely changes yield (clamp inert until DC/AC > ~3.2); verified by code trace + corpus. Serve-side fix, no retrain: reconstruct hourly DC power from the clear-sky shape already built in `app/poa.py`, clip per hour, then average. Brief: `briefs/inverter-clamp-intraday.md`
 - [ ] [Replace Open-Meteo elevation with a cheaper API](briefs/elevation-api.md) — Open-Meteo is used to query elevation for a lat/lon; a free or cheaper dedicated elevation API would reduce costs
 
 ## Later
