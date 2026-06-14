@@ -35,14 +35,12 @@ _window_cache: ValidationWindowCache | None = None
 _static_dir = Path(str(files('pv_prospect.app').joinpath('static')))
 
 _VINTAGE_CAVEAT = (
-    'Known bias: the trained artifacts (model-v2026-06-10) carry a '
-    'systematic overestimate of annual yield, measured at approximately '
-    '+100% across 10 validation sites (mean pred/actual ratio 2.0, '
-    'year 2025-06-09 to 2026-06-08). Root cause under investigation; '
-    'a PV-model calibration issue (the model over-predicts capacity '
-    'factor at the low irradiance levels typical of UK climatological '
-    'means, where its training data is sparse). '
-    'Fix tracked in briefs/pv-yield-overestimate.md.'
+    'Model limitation: predictions carry per-site level uncertainty due to '
+    'self-selection bias in the training corpus (10 well-maintained PVOutput '
+    'sites). Cross-site generalisation testing shows a floor of ±17 % (1σ) '
+    'yield uncertainty for an arbitrary prospect (see pv-age-feature report). '
+    'The model represents an optimistic population; actual installations on '
+    'less-ideal roofs will fall below the estimate.'
 )
 
 _VALIDATION_IN_SAMPLE_CAVEAT = (
@@ -260,7 +258,8 @@ def predict(request: PredictRequest) -> PredictResponse:
         },
         caveats=[
             'This is a climatological (typical-year) estimate. Actual output will vary year-to-year.',
-            'Age degradation: age_years=0 (new install) is a slight extrapolation for most models.',
+            'Age degradation: age_years=0 (new install) applies a fixed ~1.06× uplift (0.7%/year degradation); '
+            'the model assumes monotone age decline, not non-physical site-by-site variation.',
             _VINTAGE_CAVEAT,
         ],
     )

@@ -128,8 +128,10 @@ curl http://localhost:8000/validate/89665
 
 ## Known limitation
 
-The first trained artifacts (`data-v2026-05-31`) carry a ~30 % systematic
-underestimate of annual yield due to a data-vintage mismatch between the
-prepared-weather and prepared-PV corpora (different OpenMeteo reanalysis
-snapshots). This is documented in every `/predict` response under `caveats` and
-tracked for resolution in `briefs/pv-yield-overestimate.md`.
+The PV model is trained on 10 self-selected, well-maintained PVOutput sites, so
+predictions carry per-site level uncertainty (±17 % at 1σ out-of-sample). This
+represents an optimistic population; an arbitrary roof will likely fall below the
+estimate. The model applies a fixed degradation factor (0.7%/year) to handle
+age-related decline; this factor is held constant across sites rather than
+site-specific to avoid overfitting. See the `pv-age-feature` report for full
+rationale and cross-site generalisation analysis.
