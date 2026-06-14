@@ -34,8 +34,8 @@ function renderBarChart(container, months, values_kwh) {
             {},
             {
                 label: 'Energy',
-                stroke: '#1a6b3c',
-                fill: 'rgba(26, 107, 60, 0.55)',
+                stroke: '#1f6fd6',
+                fill: 'rgba(31, 111, 214, 0.45)',
                 paths: uPlot.paths.bars({ size: [0.7, 60] }),
                 points: { show: false },
             },
@@ -80,8 +80,8 @@ function renderTimeSeriesChart(container, series, mode) {
         scales: { x: { time: true } },
         series: [
             {},
-            { label: 'Actual', stroke: '#1a6b3c', width: 2 },
-            { label: 'Predicted', stroke: '#d2691e', width: 2 },
+            { label: 'Actual', stroke: '#1f6fd6', width: 2 },
+            { label: 'Predicted', stroke: '#f5b829', width: 2 },
             {
                 label: 'Clipped (inverter-limited)',
                 stroke: '#b00020',

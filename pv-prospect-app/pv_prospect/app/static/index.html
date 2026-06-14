@@ -4,6 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PV Prospect</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="64x64" href="/static/favicon-64.png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         crossorigin="">
@@ -15,8 +21,24 @@
 <body>
   <header>
     <div class="header-inner">
-      <h1>PV Prospect</h1>
-      <p class="tagline">UK photovoltaic yield modelling</p>
+      <div class="brand">
+        <svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+          <circle cx="24" cy="24" r="13" fill="none" stroke="#f5b829" stroke-width="3"/>
+          <g stroke="#f5b829" stroke-width="3" stroke-linecap="round">
+            <line x1="24" y1="3" x2="24" y2="8"/>
+            <line x1="24" y1="40" x2="24" y2="45"/>
+            <line x1="3" y1="24" x2="8" y2="24"/>
+            <line x1="40" y1="24" x2="45" y2="24"/>
+          </g>
+          <path d="M9 28 H17 L21.5 19 L28 31 L33 23 H39" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="21.5" cy="19" r="2.6" fill="#ffffff"/>
+          <circle cx="33" cy="23" r="2.6" fill="#ffffff"/>
+        </svg>
+        <div>
+          <h1><span class="brand-pv">PV</span> Prospect</h1>
+          <p class="tagline">UK photovoltaic yield modelling</p>
+        </div>
+      </div>
     </div>
   </header>
 
