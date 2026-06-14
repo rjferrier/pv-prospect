@@ -11,13 +11,13 @@ component "PV Prospect App" as PvProspectApp {
 
 actor User
 
-User --> PredictionApi : lat, lon, \nperiod
+User --> PredictionApi : predict \n(location, \nperiod)
 
 PredictionApi --> WeatherModel : DNI, DHI, \ntemperature = \ncall_model(\nlat, lon, \nday, year)
 PredictionApi <- PredictionApi : calculate_POA
 PredictionApi --> PvModel : predicted\nenergy \nyield = \ncall_model(\nPOA, \ntemperature)
 
-User --> ValidationApi
+User --> ValidationApi : validate(site)
 ValidationApi --> PvModel
 
 @enduml

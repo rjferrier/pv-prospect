@@ -32,7 +32,6 @@ database "Project Instance Repo" as ProjectInstanceRepo #transparent
 
 component "PV Prospect App" as PvProspectApp
 
-
 'DataExtractor -[hidden]> DataTransformer
 
 'StagingResources -[hidden]> StagingRaw
@@ -40,11 +39,9 @@ StagingCleaned -[hidden]> StagingPrepared
 StagingRaw -[hidden]> StagingCleaned
 StagingPrepared -[hidden]> StagingServed
 
-
 'PvProspectApp --> StagingResources : A0: get
 PvProspectApp --> VersionedModel : A1: get
 PvProspectApp --> StagingServed : A2: get
-
 
 'DataExtractor ---> StagingResources : E0: get
 ThirdPartyAPIs <- DataExtractor : E1: call

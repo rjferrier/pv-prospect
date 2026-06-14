@@ -120,8 +120,6 @@ Implemented in `pv-prospect-data-transformation`.
 
 ### A — App Data Loading
 
-![App diagram](doc/app.png)
-
 At startup, `pv-prospect-app`:
 
 1. Downloads the promoted model artifacts from the model store
@@ -141,16 +139,8 @@ the in-memory manifest's `updated_at` against the live manifest on GCS. If the
 producer has written a fresher window since startup, the app reloads it on the spot.
 The check reads only the small manifest file, so unchanged requests pay no I/O cost.
 
-At request time, `/predict` takes a location (latitude and longitude) and a period:
-
-1. The **weather model** predicts a time series of DNI, DHI, and temperature from location and time.
-2. POA irradiance is computed from the irradiance components and the user-supplied panel geometry (shared `pv-prospect-physics` package — same computation as used during preparation).
-3. The **PV model** estimates capacity factor from POA and temperature, yielding predicted energy output.
-
-`/validate/{system_id}` runs the PV model over the validation window for the specified site and returns predicted vs. actual power output.
-
-See `pv-prospect-app` for the `/predict`, `/healthz`, `/version`, `/validate/sites`,
-and `/validate/{system_id}` endpoints.
+How these loaded models serve requests — the prediction and validation flows — is
+covered in the **App Serving** section below.
 
 ### V — Data Versioning
 
@@ -184,6 +174,44 @@ Triggered automatically by the version workflow (V) on success. The model traine
    (DVC lineage), copies the 4-file serving artifacts to the `promoted/` prefix
    (plain GCS, read by A), commits `models/current.json` + `models/provenance.json`,
    and tags `model-v<date>` in the instance repo.
+
+## App Serving
+
+![App serving diagram](doc/app.png)
+
+`pv-prospect-app` is the product's front door. It serves a **no-build demo
+website** from `/` — static HTML plus vanilla JS with CDN Leaflet (map) and uPlot
+(charts), mounted at `/static` and calling the JSON endpoints same-origin (no
+CORS, no build step) — fronting the two serving surfaces as browser tabs:
+
+* **Prediction** — click a UK map point and enter panel parameters (capacity,
+  azimuth, tilt, age, optional inverter). The page calls `POST /predict` and
+  renders the expected annual yield with its uncertainty band (the ±17 % 1σ
+  per-site level floor, calibrated by the cross-site LOSO eval — see the
+  `pv-age-feature` report), a monthly bar chart, and the response's own
+  `caveats[]`.
+* **Validation** — pick a known site (listed dynamically by
+  `GET /validate/sites`) and see predicted-vs-actual daily output over the
+  rolling 90-day window from `GET /validate/{system_id}`, with the in-sample
+  caveat surfaced verbatim.
+
+Behind the surfaces (diagram above), `POST /predict` takes a location (latitude
+and longitude) and a period:
+
+1. The **weather model** predicts a time series of DNI, DHI, and temperature from location and time.
+2. POA irradiance is computed from the irradiance components and the user-supplied panel geometry (shared `pv-prospect-physics` package — same computation as used during preparation).
+3. The **PV model** estimates capacity factor from POA and temperature, yielding predicted energy output.
+
+`/validate/{system_id}` runs the PV model over the validation window for the
+specified site and returns predicted vs. actual power output.
+
+See `pv-prospect-app` for the `/predict`, `/healthz`, `/version`,
+`/validate/sites`, and `/validate/{system_id}` endpoints. The committed
+`openapi.yaml` is the canonical contract the UI binds to; FastAPI also serves it
+live at `/docs`. The service is **private by default** (IAM-authenticated); a
+public demo sets `allow_unauthenticated=true` in `terraform.tfvars`, making
+`/predict`, `/validate/*`, and the website reachable without auth, with
+`max_instances=2` capping the blast radius (see the operational note below).
 
 ## Operational Workflows
 
@@ -250,11 +278,13 @@ Workflows on a daily or weekly basis:
      hang-on-exit bug — see `briefs/versioner-hang.md` — that reports failure despite
      completing all work; the trainer self-verifies by cloning the `data-v<date>` tag).
 
-* **Prediction API (`pv-prospect-app`)**: A Cloud Run Service that loads the promoted
-  model artifacts from `gs://pv-prospect-versioned-model/promoted/` at startup and
-  serves `/predict`, `/healthz`, and `/version` endpoints. Scale-to-zero with
-  `max_instances=2`. Set `allow_unauthenticated=true` in Terraform for a public demo
-  (default is IAM-authenticated).
+* **Prediction & Validation API + Website (`pv-prospect-app`)**: A Cloud Run Service
+  that loads the promoted model artifacts from `gs://pv-prospect-versioned-model/promoted/`
+  at startup and serves the prediction (`/predict`), validation (`/validate/sites`,
+  `/validate/{system_id}`), and health/metadata (`/healthz`, `/version`) endpoints,
+  plus a no-build demo website at `/` (see the **App Serving** section above).
+  Scale-to-zero with `max_instances=2`. Set `allow_unauthenticated=true` in
+  `terraform.tfvars` for a public demo (default is IAM-authenticated).
 
 > **Scheduling rationale**: The daily extraction and PV-sites extraction backfill
 > both use the PVOutput API, which rate-limits at 300 requests/hour. With
@@ -265,6 +295,35 @@ Workflows on a daily or weekly basis:
 > window — so it is split across two windows 70 minutes apart. The transformation
 > workflows do not call any external API, so they can run back-to-back; they are
 > scheduled after all extraction runs have safely completed.
+
+### Deploying the App & Going Public
+
+`pv-prospect-app` runs as a Terraform-managed Cloud Run Service; there is no CD
+pipeline, so deploys are manual. Build and push the image (the build context is
+the **submodule root**, so the shared local packages resolve), then apply:
+
+```bash
+# From the pv-prospect submodule root
+gcloud builds submit \
+  --tag europe-west2-docker.pkg.dev/<project-id>/pv-prospect-app/pv-prospect-app:latest \
+  --file pv-prospect-app/Dockerfile .
+
+cd terraform && terraform apply        # rolls out the new revision
+```
+
+The static website assets are baked into the image (`pv_prospect/app/static/`),
+and the promoted models load **at startup** — so picking up new static assets
+*or* a freshly promoted `model-v<date>` both require a new revision (the
+`terraform apply` above, or any redeploy that restarts the container).
+
+**Going public.** The service is private by default
+(`allow_unauthenticated = false` in `terraform/variables.tf`). To expose the
+public demo, override it with `allow_unauthenticated = true` in
+`terraform.tfvars` and `terraform apply`: this grants `roles/run.invoker` to
+`allUsers`, making `/predict`, `/validate/*`, and the website at `/` reachable
+without auth; `max_instances=2` caps the cost, and the existing 5xx / latency
+alerts (`terraform/monitoring.tf`) cover the public surface. Remove the override
+and re-apply to return the service to private.
 
 ### Trigger the Pipeline Manually (Optional)
 
