@@ -5,7 +5,9 @@ joins each site's data with capacities and installation_date from
 ``pv_sites.csv``, applies the inverter-clipping censoring filter using
 ``power_max`` (emitted by ``prepare_pv``), computes the target
 ``capacity_factor = power / panels_capacity``, and augments ``day_of_year``,
-``age_years``, and ``age_known`` features.
+``age_years``, and ``age_known``. ``age_years`` is a *structural* column routed
+to the degradation factor in ``CapacityFactorNet`` (not an MLP feature);
+``age_known`` is retained for diagnostics only (no longer a model input).
 
 Ported from ``pv-prospect-instance/data-exploration/main_models/common_cross_site.py``,
 which was validated against the prepared data (smoke run 2026-05-26).
@@ -17,14 +19,21 @@ from pathlib import Path
 
 import pandas as pd
 
+# Weather features fed to the MLP head. Age is deliberately NOT here: it is
+# routed into a fixed multiplicative degradation factor in CapacityFactorNet
+# (see nets/pv.py and the pv-age-feature task), not learned as a free input.
 CONTINUOUS_FEATURES = [
     'day_of_year',
     'temperature',
     'plane_of_array_irradiance',
-    'age_years',
 ]
-BINARY_FEATURES = ['age_known']
+BINARY_FEATURES: list[str] = []
 TARGET_COLUMN = 'capacity_factor'
+
+# Structural (non-scaled) column routed to the degradation factor, not the MLP.
+# `augment_features` still computes it (and `age_known`, retained for
+# diagnostics only); inference appends it as the trailing model-input column.
+AGE_COLUMN = 'age_years'
 
 DEFAULT_CENSORING_MARGIN = 0.01
 
@@ -151,8 +160,9 @@ def build_pv_features(
     with a printed warning rather than raising.
 
     Returns a DataFrame sorted by ``time`` with feature columns
-    (CONTINUOUS_FEATURES + BINARY_FEATURES + TARGET_COLUMN) plus auxiliary
-    columns (``system_id``, ``power``, ``panels_capacity``,
+    (CONTINUOUS_FEATURES + BINARY_FEATURES + TARGET_COLUMN), the structural
+    ``AGE_COLUMN`` (routed to the degradation factor, not the MLP), plus
+    auxiliary columns (``system_id``, ``power``, ``panels_capacity``,
     ``inverter_capacity``) needed for evaluation.
     """
     sites_df = load_site_metadata(pv_sites_csv)
@@ -185,7 +195,7 @@ def build_pv_features(
 
     df = augment_features(df)
     df = df.dropna(
-        subset=CONTINUOUS_FEATURES + BINARY_FEATURES + [TARGET_COLUMN]
+        subset=CONTINUOUS_FEATURES + BINARY_FEATURES + [AGE_COLUMN, TARGET_COLUMN]
     ).reset_index(drop=True)
 
     return df

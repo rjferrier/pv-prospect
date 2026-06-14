@@ -37,7 +37,16 @@ class FeatureSpec:
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    """Hyperparameters and data-splitting settings for PV model training."""
+    """Hyperparameters and data-splitting settings for PV model training.
+
+    ``r_fixed`` is the panel degradation rate (fraction of capacity factor lost
+    per year), applied as a fixed multiplicative factor ``(1 - r_fixed * age)``
+    rather than learned — see ``nets/pv.CapacityFactorNet``. Phase 0 of the
+    ``pv-age-feature`` task found the within-site degradation signal robust in
+    sign but non-physical in magnitude (~2-5 %/yr, 2-5x the literature band),
+    so the rate is imposed from physics, not fitted. ``r_min``/``r_max`` are the
+    physical band the fixed value must sit in (asserted below).
+    """
 
     censoring_margin: float = 0.01
     cutoff_quantile: float = 0.8
@@ -46,6 +55,16 @@ class TrainingConfig:
     num_epochs: int = 100
     batch_size: int = 32
     learning_rate: float = 1e-3
+    r_fixed: float = 0.007
+    r_min: float = 0.005
+    r_max: float = 0.010
+
+    def __post_init__(self) -> None:
+        if not self.r_min <= self.r_fixed <= self.r_max:
+            raise ValueError(
+                f'r_fixed={self.r_fixed} must lie in the physical band '
+                f'[{self.r_min}, {self.r_max}]'
+            )
 
 
 @dataclass(frozen=True)

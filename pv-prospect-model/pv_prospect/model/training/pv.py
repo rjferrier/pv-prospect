@@ -19,9 +19,9 @@ from pv_prospect.model.features import (
     TARGET_COLUMN,
     build_pv_features,
 )
-from pv_prospect.model.inference import _run_pv_forward
+from pv_prospect.model.inference import _pv_model_inputs, _run_pv_forward
 from pv_prospect.model.nets import CapacityFactorNet
-from pv_prospect.model.splits import fit_scaler, scale_features, temporal_holdout_split
+from pv_prospect.model.splits import fit_scaler, temporal_holdout_split
 from pv_prospect.model.training.loop import run_train_loop
 
 
@@ -64,9 +64,6 @@ def train_pv(
     )
 
     scaler = fit_scaler(train_df, list(CONTINUOUS_FEATURES))
-    train_features = scale_features(
-        train_df, scaler, list(CONTINUOUS_FEATURES), list(BINARY_FEATURES)
-    )
 
     feature_spec = FeatureSpec(
         continuous_features=tuple(CONTINUOUS_FEATURES),
@@ -76,13 +73,16 @@ def train_pv(
         scaler_scale=tuple(float(v) for v in scaler.scale_),
     )
 
-    n_train_total = len(train_features)
+    # Model input = scaled weather features + a trailing raw-age column.
+    train_inputs = _pv_model_inputs(scaler, feature_spec, train_df)
+
+    n_train_total = len(train_inputs)
     n_val = int(n_train_total * config.val_fraction)
     n_train = n_train_total - n_val
 
-    train_X = torch.FloatTensor(train_features.values[:n_train])
+    train_X = torch.FloatTensor(train_inputs[:n_train])
     train_y = torch.FloatTensor(train_df[TARGET_COLUMN].values[:n_train]).reshape(-1, 1)
-    val_X = torch.FloatTensor(train_features.values[n_train:])
+    val_X = torch.FloatTensor(train_inputs[n_train:])
     val_y = torch.FloatTensor(train_df[TARGET_COLUMN].values[n_train:]).reshape(-1, 1)
 
     train_loader = DataLoader(
@@ -91,7 +91,7 @@ def train_pv(
         shuffle=True,
     )
 
-    model = CapacityFactorNet(feature_spec.input_size).to(device)
+    model = CapacityFactorNet(feature_spec.input_size, r=config.r_fixed).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
     result = run_train_loop(

@@ -129,8 +129,9 @@ def predict_yield(
                 'day_of_year': [d.timetuple().tm_yday for d in days],
                 'temperature': [temperature] * len(days),
                 'plane_of_array_irradiance': [poa] * len(days),
+                # Structural input routed to the degradation factor (not an MLP
+                # feature). A prospect has no install history → age_years=0.
                 'age_years': [age_years] * len(days),
-                'age_known': [1] * len(days),
             }
         )
         pv_result = run_pv_model(

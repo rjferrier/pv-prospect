@@ -6,7 +6,9 @@ from pv_prospect.model.training.loop import run_train_loop
 from torch.utils.data import DataLoader, TensorDataset
 
 
-def _make_loader(n: int = 20, n_features: int = 3) -> DataLoader:  # type: ignore[type-arg]
+# CapacityFactorNet(3) is a 3-weather-feature head; its input tensor carries a
+# trailing age column, so the model sees 4 columns (weather + age).
+def _make_loader(n: int = 20, n_features: int = 4) -> DataLoader:  # type: ignore[type-arg]
     X = torch.randn(n, n_features)
     y = torch.rand(n, 1) * 0.3
     return DataLoader(TensorDataset(X, y), batch_size=8, shuffle=True)
@@ -14,10 +16,10 @@ def _make_loader(n: int = 20, n_features: int = 3) -> DataLoader:  # type: ignor
 
 def test_run_train_loop_returns_result_with_best_state() -> None:
     """run_train_loop completes and returns a non-empty best_state."""
-    model = CapacityFactorNet(3)
+    model = CapacityFactorNet(3, r=0.007)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     train_loader = _make_loader()
-    val_X = torch.randn(5, 3)
+    val_X = torch.randn(5, 4)
     val_y = torch.rand(5, 1) * 0.3
     device = torch.device('cpu')
 
@@ -41,10 +43,10 @@ def test_run_train_loop_returns_result_with_best_state() -> None:
 def test_run_train_loop_early_stops_when_val_loss_stagnates() -> None:
     """With patience=1, training stops after the second epoch of no improvement."""
     torch.manual_seed(0)
-    model = CapacityFactorNet(3)
+    model = CapacityFactorNet(3, r=0.007)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0)
     train_loader = _make_loader()
-    val_X = torch.randn(5, 3)
+    val_X = torch.randn(5, 4)
     val_y = torch.rand(5, 1) * 0.3
     device = torch.device('cpu')
 

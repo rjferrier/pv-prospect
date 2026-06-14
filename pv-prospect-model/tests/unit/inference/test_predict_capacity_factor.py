@@ -18,19 +18,21 @@ from pv_prospect.model.nets.pv import CapacityFactorNet
 from pv_prospect.model.persistence import _scaler_from_params
 from pv_prospect.model.splits import scale_features
 
+_WEATHER = ['day_of_year', 'temperature', 'plane_of_array_irradiance']
 
-def _make_artifact() -> tuple[ModelArtifact, pd.DataFrame]:
+
+def _make_artifact(r: float = 0.01) -> tuple[ModelArtifact, pd.DataFrame]:
     feature_spec = FeatureSpec(
-        continuous_features=('f1', 'f2', 'f3'),
-        binary_features=('b1',),
-        target_column='y',
-        scaler_mean=(1.0, 2.0, 3.0),
-        scaler_scale=(0.5, 1.0, 2.0),
+        continuous_features=tuple(_WEATHER),
+        binary_features=(),
+        target_column='capacity_factor',
+        scaler_mean=(180.0, 12.0, 150.0),
+        scaler_scale=(100.0, 5.0, 80.0),
     )
     scaler = _scaler_from_params(
         feature_spec.scaler_mean, feature_spec.scaler_scale, n_features=3
     )
-    model = CapacityFactorNet(feature_spec.input_size)
+    model = CapacityFactorNet(feature_spec.input_size, r=r)
     model.eval()
     split = SplitMetrics(r2=0.8, rmse=0.05, mae=0.04, mse=0.0025)
     site = PerSiteMetrics(system_id=1, n=10, r2=0.8, rmse=0.05, mae=0.04)
@@ -52,7 +54,12 @@ def _make_artifact() -> tuple[ModelArtifact, pd.DataFrame]:
         cutoff=pd.Timestamp('2026-01-01'),
     )
     df = pd.DataFrame(
-        {'f1': [1.0, 2.0], 'f2': [2.0, 3.0], 'f3': [3.0, 4.0], 'b1': [1, 0]}
+        {
+            'day_of_year': [60.0, 200.0],
+            'temperature': [8.0, 18.0],
+            'plane_of_array_irradiance': [90.0, 220.0],
+            'age_years': [0.0, 10.0],
+        }
     )
     return artifact, df
 
@@ -64,12 +71,18 @@ def test_returns_1d_array_with_one_value_per_row() -> None:
     assert result.shape == (len(df),)
 
 
-def test_values_match_manual_forward_pass() -> None:
-    artifact, df = _make_artifact()
+def test_values_equal_head_times_degradation_factor() -> None:
+    """Prediction == head(scaled weather) * (1 - r*age), age read from the df."""
+    r = 0.01
+    artifact, df = _make_artifact(r=r)
     result = predict_capacity_factor(artifact, df)
 
-    scaled = scale_features(df, artifact.scaler, ['f1', 'f2', 'f3'], ['b1'])
+    model = artifact.model
+    assert isinstance(model, CapacityFactorNet)
+    scaled = scale_features(df, artifact.scaler, _WEATHER, [])
+    age = df['age_years'].to_numpy().reshape(-1, 1)
     with torch.no_grad():
-        expected = artifact.model(torch.FloatTensor(scaled.values)).numpy().flatten()
+        head = model.network(torch.FloatTensor(scaled.values)).numpy()
+    expected = (head * (1.0 - r * age)).flatten()
 
-    np.testing.assert_allclose(result, expected)
+    np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-6)

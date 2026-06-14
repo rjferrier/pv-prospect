@@ -24,6 +24,7 @@ from pv_prospect.common.domain.pv_site import PVSite
 from pv_prospect.model import eval_in_f_space
 from pv_prospect.model.domain import ModelArtifact
 from pv_prospect.model.features import (
+    AGE_COLUMN,
     BINARY_FEATURES,
     CONTINUOUS_FEATURES,
     compute_age_years,
@@ -88,7 +89,8 @@ def assemble_features(
 ) -> pd.DataFrame:
     """Build the feature DataFrame from a per-site window frame.
 
-    Output contains CONTINUOUS_FEATURES + BINARY_FEATURES columns plus aux
+    Output contains CONTINUOUS_FEATURES + BINARY_FEATURES columns, the
+    structural ``age_years`` column (routed to the degradation factor), plus aux
     columns power, power_max, and inverter_capacity needed for clipping and
     actuals computation in validate_site.
     """
@@ -162,7 +164,7 @@ def validate_site(
 
     pv_result = run_pv_model(
         pv_artifact,
-        feature_df[CONTINUOUS_FEATURES + BINARY_FEATURES],
+        feature_df[CONTINUOUS_FEATURES + BINARY_FEATURES + [AGE_COLUMN]],
         panels_cap,
         inverter_cap,
     )

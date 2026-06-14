@@ -274,6 +274,51 @@ attributable to the known non-age factors (§2), **and the promotion-gate R² ho
 treat the persistent ~1.11 as a reason to recalibrate POA serve-side (report §6). Phase 2
 (LOSO) then runs as validator. (An R² miss routes to the embedding, not to `r` — see above.)
 
+### 3.8 Phase 1 outcome & resolution (2026-06-14 — DECISION TAKEN)
+
+**Retrain result (data-v2026-06-12).** The bounded prior fixes the age=0 runaway and the
+code is green (model+app: ruff/mypy, 59 model + 47 app tests). But the **promotion-gate R²
+misses**: within-site temporal-holdout **power-space R² 0.844** (mean of 6 seeds, sd 0.009)
+vs incumbent **0.8707** — a robust **−2.6 pp**, beyond the 2 pp tolerance (5/6 seeds below
+the 0.8507 floor). The §3.7 R²-check "holds within 2 pp" condition is **not met** — this
+block supersedes it.
+
+**Diagnosis — per-site LEVEL, not slope (probe: `age_level_probe.py` / `age_promotion_gate.md`).**
+A leakage-safe per-site multiplicative intercept (fit on train, applied to test — exactly
+what an embedding's `s_site` learns) recovers R² to **0.906**, *without touching `r`*. The
+free age feature had been using the sites' distinct ages (4–14 yr) as a per-site
+identity/level proxy; the weather head can't recover that. Raising `r` is a **false fix**
+(it recovers pooled R² only by re-spreading per-site levels through the cross-site age
+range — age re-proxying identity — and re-arms the age=0 runaway; per-site R² degrades and
+61272 doesn't recover). So the §3.7 trip-wire's "→ embedding" branch is the *mechanistically*
+correct read.
+
+**But the embedding does not help the W1 product.** The gate and the embedding's per-site
+levels concern the **known 10 sites**. W1 serves **prospects** (unknown site → embedding's
+unknown slot → **population-default** level = the *same* output the bounded prior already
+gives). The embedding would recover the gate metric and known-site `/validate`, not the
+prospect prediction.
+
+**Decision (user, 2026-06-14):**
+1. **Promote the bounded-prior model (`r = 0.007`) by hand, accepting the −2.6 pp gate
+   drop**, documented. Rationale: the gate compares against the *incumbent*, whose extra R²
+   **is** the age-as-site-level overfitting this task exists to remove — so the gate is the
+   wrong yardstick here. (Promotion is already a manual step; the Cloud job auto-promotes
+   within 2 pp and has no skip flag — report §5.)
+2. **Do not build the site embedding for W1.** Per-site level is genuinely unknowable for an
+   unknown prospect; the honest treatment is to quantify it as uncertainty, not model it.
+3. **Expose a prospect uncertainty band** instead: `expected_yield × (1 ± ~0.15)` at **1σ
+   (≈ ±15 %)**, derived from the spread of per-site levels across the 10 sites (normalised
+   levels range **−30 % … +23 %**, 1σ 14.8 %; worst 61272, best 89665). Frame it as a
+   **floor** ("at least ±15 %") — the 10 are self-selected good sites so a bad prospect roof
+   can sit below the worst here, and this is **level-only** (excludes weather-model error,
+   single-year weather noise, and degradation uncertainty, which widen the true band). This
+   is **new W1 product work**: `/predict` returns `expected ± margin`; the website draws it.
+   Tracked as a separate task (not the model change).
+4. **Embedding demoted** from "Phase-2 trip-wire, build if LOSO shows a gap" to **"revisit
+   only if the known-site `/validate` (W2) path later needs it."** For prospects it is
+   resolved as *won't-build* (the band replaces it).
+
 ---
 
 ## Phase 2 — LOSO validator (closes `briefs/cross-site-generalization-eval.md`)
@@ -285,10 +330,14 @@ Runs on the **Phase-1 architecture** (no embedding). Touches `pv-prospect-model`
 - For each site: train on the other 9 (reuse `train_pv`'s `system_ids` exclusion),
   predict the held-out 10th, score power-space R²/MAPE. Aggregate + per-site into a new
   `eval_report.loso` section; surface via `/version` and/or monitoring.
-- **Trip-wire:** compare the LOSO aggregate to the within-site (temporal-holdout) number.
-  A small gap → the population-mean model transfers to an unseen site (W1's headline claim
-  holds). A large / site-shaped gap → the trip-wire for building the **deferred embedding**
-  (with its unknown-site default) and/or more sites.
+- **Primary purpose now: calibrate the prospect uncertainty band (§3.8).** LOSO (predict a
+  site from the other 9) *is* the prospect scenario, so its per-site error distribution is
+  the **out-of-sample** prospect spread — the honest version of §3.8's in-sample ±15 %
+  (expect it to be **wider**). This becomes the basis for the band the product exposes.
+- **Trip-wire (now demoted, per §3.8):** a large / site-shaped LOSO gap no longer routes to
+  "build the embedding for W1" — that is resolved as *won't-build* (the band replaces it).
+  It would only motivate the embedding for the known-site `/validate` (W2) path, or argue
+  for more / more-representative training sites.
 - **Acceptance #2 caveat (from advisor):** if `r` is tightly band-clamped, the same `r`
   applies everywhere and "transfer" passes near-trivially. The *meaningful* transfer test
   compares the held-out site's **freer within-site slope** (Phase 0 method, on the
@@ -306,13 +355,18 @@ representative sites, not this task.
 
 ## Phase 3 — Finalisation (carried forward from `pv-train-on-served-poa`)
 
-Gated on a model that passes the above (Phase 1 sufficient for the launch decision; Phase
-2 LOSO informs how strong the caveat needs to be).
+Phase 1 is sufficient for the launch decision (§3.8); Phase 2 LOSO calibrates the band.
 
-- **Promote** the retrained PV model. The Cloud `model-trainer` auto-promotes via
-  `passes_promotion_gate` on `pv.critical_metric` (clamped-power test R²); confirm the new
-  artifact's R² is within the 2 pp tolerance of the incumbent before promoting, or promote
-  the locally-trained artifact by hand as the report did (the Cloud job has no skip flag).
+- **Promote** the retrained PV model **by hand, despite the −2.6 pp gate drop** (§3.8). It
+  will **not** clear the Cloud `model-trainer`'s `passes_promotion_gate` (`pv.critical_metric`
+  = clamped-power test R², 2 pp tolerance) — promote the locally-trained artifact by hand as
+  the report did (the Cloud job has no skip flag). **Document the override**: the gate's
+  yardstick is the incumbent, whose extra R² is the age-as-site-level overfitting this task
+  removes; the bounded-prior model is correct-by-construction for the prospect product.
+- **Expose the prospect uncertainty band (§3.8)** — `/predict` returns `expected ± margin`
+  (≈ ±15 % 1σ from the per-site level spread, calibrated by Phase-2 LOSO; framed as a floor);
+  the website renders it. This is **new W1 product work** spanning `app/` + the website —
+  tracked as a separate task, not part of the model change.
 - **Caveat cleanup** (do **not** touch until promotion — production still serves old-basis
   artifacts, so the caveats are still *true*): `app/poa.py` docstring (both notes),
   `pv-prospect-app/README.md`, and the `/predict` caveat in `main.py` (line ~263, "Age
@@ -335,9 +389,12 @@ Gated on a model that passes the above (Phase 1 sufficient for the launch decisi
 
 ## Deferred — site embedding (trip-wire upgrade, **not** in this task)
 
-Kept here so the design isn't lost. Build **only** if Phase 2 LOSO shows a site-shaped
-generalisation gap (the trip-wire). This is the brief's full decomposition and decision
-#10's "revisit with a small embedding".
+Kept here so the design isn't lost. **Resolution §3.8 demoted this for W1:** the gate
+trip-wire fired (the R² miss *is* per-site level), but the embedding cannot help the
+prospect product (unknown site → population default), so W1 takes the **uncertainty band**
+instead. Build the embedding **only** if the known-site `/validate` (W2) path later needs
+per-site level — **not** for prospect prediction. This is the brief's full decomposition
+and decision #10's "revisit with a small embedding".
 
 **Model.** Add `s_site` as `nn.Embedding(n_sites + 1, 1)` (index `n_sites` = "unknown /
 prospect" slot), applied multiplicatively (`exp(emb)` init ~0 → scale ~1). **Embedding
@@ -390,6 +447,8 @@ C (hold for full validation) is not taken — LOSO runs as B's validator, not a 
 - **`age_known` repurposing** vs the live `chain.py` (`age_known=1`) — reconcile in Phase 1
   so serving and training agree. (No site channel is added — embedding deferred — so this
   is the only serving-side touch.)
-- **Trip-wire decision (resolved for now):** the site embedding — including wiring a real
-  site embedding into the known-site Validation API — is **deferred**, revisited only if
-  Phase 2 LOSO shows a site-shaped gap.
+- **Trip-wire decision (RESOLVED 2026-06-14, §3.8):** the Phase-1 retrain missed the gate
+  by −2.6 pp; the miss is per-site **level**, not slope. **Resolution:** promote the
+  bounded prior by hand (documented), do **not** build the embedding for W1, and expose a
+  prospect **uncertainty band** (≈ ±15 % 1σ, a floor) instead. The embedding is revisited
+  only for the known-site `/validate` (W2) path. Phase 2 LOSO now calibrates the band.

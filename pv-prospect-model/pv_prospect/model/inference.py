@@ -18,7 +18,31 @@ from pv_prospect.model.domain import (
     WeatherFeatureSpec,
     WeatherModelArtifact,
 )
+from pv_prospect.model.features import AGE_COLUMN
 from pv_prospect.model.splits import scale_features
+
+
+def _pv_model_inputs(
+    scaler: StandardScaler,
+    feature_spec: FeatureSpec,
+    df: pd.DataFrame,
+) -> np.ndarray:
+    """Assemble the ``CapacityFactorNet`` input matrix from ``df``.
+
+    Columns: the scaled weather features (``feature_spec`` order) followed by a
+    single trailing column of raw, unscaled ``age_years`` — the input contract
+    documented on ``CapacityFactorNet``. This is the one place the age column is
+    appended, so training and inference stay consistent. ``df`` must therefore
+    carry the weather feature columns *and* ``age_years``.
+    """
+    scaled = scale_features(
+        df,
+        scaler,
+        list(feature_spec.continuous_features),
+        list(feature_spec.binary_features),
+    )
+    age = df[AGE_COLUMN].to_numpy(dtype=float).reshape(-1, 1)
+    return np.concatenate([scaled.to_numpy(dtype=float), age], axis=1)
 
 
 def _run_pv_forward(
@@ -32,24 +56,18 @@ def _run_pv_forward(
     Device is derived from the model's own parameters so this works correctly
     whether the model is on CPU or GPU.
     """
-    scaled = scale_features(
-        df,
-        scaler,
-        list(feature_spec.continuous_features),
-        list(feature_spec.binary_features),
-    )
+    inputs = _pv_model_inputs(scaler, feature_spec, df)
     device = next(model.parameters()).device
     with torch.no_grad():
-        return (
-            model(torch.FloatTensor(scaled.values).to(device)).cpu().numpy().flatten()
-        )
+        return model(torch.FloatTensor(inputs).to(device)).cpu().numpy().flatten()
 
 
 def predict_capacity_factor(artifact: ModelArtifact, df: pd.DataFrame) -> np.ndarray:
     """Run PV inference on ``df``.
 
     ``df`` must contain the continuous and binary feature columns declared in
-    ``artifact.feature_spec``. Returns a 1-D array of capacity-factor
+    ``artifact.feature_spec`` **and** the ``age_years`` column (routed to the
+    degradation factor, not scaled). Returns a 1-D array of capacity-factor
     predictions, one per row of ``df``.
     """
     return _run_pv_forward(artifact.model, artifact.scaler, artifact.feature_spec, df)

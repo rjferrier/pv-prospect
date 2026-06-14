@@ -89,7 +89,10 @@ def load_artifact(artifact_dir: Path) -> ModelArtifact:
         n_features=len(feature_spec.continuous_features),
     )
 
-    model = CapacityFactorNet(feature_spec.input_size)
+    # r is a non-persistent buffer: sourced from the training config, not the
+    # state dict. An old-basis artifact (age was a head feature → larger
+    # input_size) will fail loudly here on a state-dict shape mismatch.
+    model = CapacityFactorNet(feature_spec.input_size, r=training_config.r_fixed)
     state_dict = torch.load(artifact_dir / 'model.pt', weights_only=True)
     model.load_state_dict(state_dict)
     model.eval()

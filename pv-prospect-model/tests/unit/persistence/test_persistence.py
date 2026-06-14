@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 from pv_prospect.model.domain import (
     EvalReport,
@@ -26,7 +27,7 @@ from pv_prospect.model.persistence import (
 def _make_artifact() -> ModelArtifact:
     feature_spec = FeatureSpec(
         continuous_features=('a', 'b', 'c'),
-        binary_features=('d',),
+        binary_features=(),
         target_column='y',
         scaler_mean=(1.0, 2.0, 3.0),
         scaler_scale=(0.5, 1.0, 2.0),
@@ -43,7 +44,9 @@ def _make_artifact() -> ModelArtifact:
         test_per_site_power_space=(site_metrics,),
         cutoff='2026-01-01',
     )
-    model = CapacityFactorNet(feature_spec.input_size)
+    # r is reconstructed from training_config on load, so the in-memory net must
+    # be built with the same r for the round-trip to be prediction-identical.
+    model = CapacityFactorNet(feature_spec.input_size, r=training_config.r_fixed)
     scaler = _scaler_from_params(
         feature_spec.scaler_mean,
         feature_spec.scaler_scale,
@@ -108,3 +111,16 @@ def test_round_trip_scaler_transforms_identically(tmp_path: Path) -> None:
     orig = artifact.scaler.transform(x)
     loaded_result = loaded.scaler.transform(x)
     np.testing.assert_allclose(orig, loaded_result)
+
+
+def test_round_trip_preserves_degradation_rate(tmp_path: Path) -> None:
+    """The fixed degradation rate r survives save → load (via training_config)."""
+    artifact = _make_artifact()
+    save_artifact(artifact, tmp_path)
+    loaded = load_artifact(tmp_path)
+    loaded_model = loaded.model
+    original_model = artifact.model
+    assert isinstance(loaded_model, CapacityFactorNet)
+    assert isinstance(original_model, CapacityFactorNet)
+    assert loaded_model.r == original_model.r
+    assert loaded_model.r == pytest.approx(artifact.training_config.r_fixed)

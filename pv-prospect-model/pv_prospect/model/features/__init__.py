@@ -1,4 +1,5 @@
 from .pv import (
+    AGE_COLUMN,
     BINARY_FEATURES,
     CONTINUOUS_FEATURES,
     DEFAULT_CENSORING_MARGIN,
@@ -22,6 +23,7 @@ from .weather import (
 )
 
 __all__ = [
+    'AGE_COLUMN',
     'BINARY_FEATURES',
     'CONTINUOUS_FEATURES',
     'DEFAULT_CENSORING_MARGIN',
