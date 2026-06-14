@@ -125,6 +125,30 @@ curl http://localhost:8000/validate/89665
 | `store_dir` | `/tmp/pv-prospect-models` | Model artifact store. Override with `STORE_DIR` env var (e.g. `gs://pv-prospect-versioned-model` in production). |
 | `validation_window_dir` | `/tmp/pv-prospect-validation-window` | Validation window artifact directory. Override with `VALIDATION_WINDOW_DIR` env var. |
 | `resources_dir` | `resources` | Directory containing `pv_sites.csv`. Override with `RESOURCES_DIR` env var (e.g. `gs://<staging-bucket>/resources` in production). |
+| `rate_limit_enabled` | `true` | Enable per-IP rate limiting on `/predict` and `/validate/*`. Override with `RATE_LIMIT_ENABLED` env var (`false` to disable). |
+| `rate_limit_predict` | `20/minute` | Rate limit for `POST /predict`. Override with `RATE_LIMIT_PREDICT` env var (e.g. `10/minute`). |
+| `rate_limit_validate` | `30/minute` | Rate limit for `GET /validate/*`. Override with `RATE_LIMIT_VALIDATE` env var. |
+| `rate_limit_trusted_hops` | `1` | Number of infrastructure hops to count from the right of `X-Forwarded-For` to find the client IP. `1` = direct `*.run.app`; raise to `2` behind an external load balancer. Override with `RATE_LIMIT_TRUSTED_HOPS` env var. |
+
+### Rate limiting
+
+`/predict` and `/validate/*` are limited per client IP via `slowapi` (in-memory
+per-instance storage; no Redis). `/healthz` and `/version` are exempt.
+
+**Client IP on Cloud Run.** Requests arrive behind Google's front-end, so
+`request.client.host` is the Google proxy, not the caller. The limiter reads the
+client IP from `X-Forwarded-For` — specifically the entry `trusted_hops` places
+from the right, which is the infrastructure-stamped (non-spoofable) end. Default
+`trusted_hops=1` is correct for direct `*.run.app` access. **Verify on first
+deploy**: if all callers share one rate-limit bucket (global throttle), Google
+appended an extra internal hop — raise `RATE_LIMIT_TRUSTED_HOPS` to `2`. If a
+spoofed `X-Forwarded-For` resets someone's count, the value is too high. The
+derived key is logged at `DEBUG` level to support this check.
+
+The limiter state is per-instance (effective ceiling ~2× at `max_instances=2`).
+429 responses carry `{"detail": "..."}` matching the app's error contract, plus
+`Retry-After` and `X-RateLimit-*` headers. The website's error client surfaces
+a "you're going too fast" message rather than a broken UI.
 
 ## Known limitation
 

@@ -8,6 +8,7 @@
  *   'not_found'    — 404: site not in registry or validation window
  *   'field_error'  — 422 with array detail: Pydantic field validation failure
  *   'domain_error' — 422 with string detail: outside-UK-domain rejection
+ *   'rate_limited' — 429: per-IP rate limit exceeded
  *   'unknown'      — any other non-OK status
  */
 async function callApi(method, path, body) {
@@ -30,6 +31,8 @@ async function callApi(method, path, body) {
             type = 'not_found';
         } else if (resp.status === 422) {
             type = Array.isArray(detail) ? 'field_error' : 'domain_error';
+        } else if (resp.status === 429) {
+            type = 'rate_limited';
         } else {
             type = 'unknown';
         }

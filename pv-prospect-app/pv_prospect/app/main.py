@@ -10,12 +10,19 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pv_prospect.app.chain import OutsideUKDomainError, check_uk_domain, predict_yield
 from pv_prospect.app.config import AppConfig
 from pv_prospect.app.elevation import get_grid_cell_elevation
+from pv_prospect.app.rate_limit import (
+    SETTINGS,
+    limiter,
+    predict_limit,
+    rate_limit_exceeded_handler,
+    validate_limit,
+)
 from pv_prospect.app.resources import get_config_dir
 from pv_prospect.app.store import (
     ModelStore,
@@ -27,6 +34,7 @@ from pv_prospect.app.validation import validate_site as _validate_site
 from pv_prospect.app.validation import window_age_fill
 from pv_prospect.common import build_pv_site_repo, get_config, get_pv_site_by_system_id
 from pydantic import BaseModel, Field, model_validator
+from slowapi.errors import RateLimitExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +76,17 @@ _VALIDATION_AGE_FILL_CAVEAT = (
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _store, _window_cache
     config = get_config(AppConfig, base_config_dirs=[get_config_dir()])
+    SETTINGS.predict = config.rate_limit_predict
+    SETTINGS.validate = config.rate_limit_validate
+    SETTINGS.trusted_hops = config.rate_limit_trusted_hops
+    limiter.enabled = config.rate_limit_enabled
+    logger.info(
+        'Rate limiting %s: predict=%s validate=%s trusted_hops=%d',
+        'enabled' if limiter.enabled else 'disabled',
+        SETTINGS.predict,
+        SETTINGS.validate,
+        SETTINGS.trusted_hops,
+    )
     logger.info('Loading model store from %s', config.store_dir)
     _store = load_store(config.store_dir)
     logger.info(
@@ -102,6 +121,8 @@ app = FastAPI(
     version='0.1.0',
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 app.mount('/static', StaticFiles(directory=_static_dir), name='static')
 
 
@@ -191,9 +212,13 @@ class _ErrorDetail(BaseModel):
     detail: str
 
 
-_503 = {503: {'model': _ErrorDetail, 'description': 'Service not ready'}}
-_404 = {404: {'model': _ErrorDetail, 'description': 'Site not found'}}
-_502 = {502: {'model': _ErrorDetail, 'description': 'Elevation lookup failed'}}
+_Responses = dict[int | str, dict[str, Any]]
+_503: _Responses = {503: {'model': _ErrorDetail, 'description': 'Service not ready'}}
+_404: _Responses = {404: {'model': _ErrorDetail, 'description': 'Site not found'}}
+_502: _Responses = {
+    502: {'model': _ErrorDetail, 'description': 'Elevation lookup failed'}
+}
+_429: _Responses = {429: {'model': _ErrorDetail, 'description': 'Rate limit exceeded'}}
 
 
 def prospect_uncertainty_band(
@@ -246,34 +271,43 @@ def version() -> VersionResponse:
     )
 
 
-@app.post('/predict', response_model=PredictResponse, responses={**_503, **_502})
-def predict(request: PredictRequest) -> PredictResponse:
+@app.post(
+    '/predict', response_model=PredictResponse, responses={**_503, **_502, **_429}
+)
+@limiter.limit(predict_limit)
+def predict(
+    request: Request, response: Response, predict_request: PredictRequest
+) -> PredictResponse:
     if _store is None:
         raise HTTPException(status_code=503, detail='Models not loaded')
 
     try:
-        check_uk_domain(request.latitude, request.longitude)
+        check_uk_domain(predict_request.latitude, predict_request.longitude)
     except OutsideUKDomainError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
-        elevation = get_grid_cell_elevation(request.latitude, request.longitude)
+        elevation = get_grid_cell_elevation(
+            predict_request.latitude, predict_request.longitude
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    inverter_capacity_w = request.inverter_capacity_w or request.panels_capacity_w
+    inverter_capacity_w = (
+        predict_request.inverter_capacity_w or predict_request.panels_capacity_w
+    )
 
     result = predict_yield(
-        latitude=request.latitude,
-        longitude=request.longitude,
+        latitude=predict_request.latitude,
+        longitude=predict_request.longitude,
         elevation=elevation,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        panels_capacity_w=request.panels_capacity_w,
+        start_date=predict_request.start_date,
+        end_date=predict_request.end_date,
+        panels_capacity_w=predict_request.panels_capacity_w,
         inverter_capacity_w=inverter_capacity_w,
-        tilt=request.tilt_deg,
-        azimuth=request.azimuth_deg,
-        age_years=request.install_age_years,
+        tilt=predict_request.tilt_deg,
+        azimuth=predict_request.azimuth_deg,
+        age_years=predict_request.install_age_years,
         pv_artifact=_store.pv,
         weather_artifact=_store.weather,
     )
@@ -298,8 +332,13 @@ def predict(request: PredictRequest) -> PredictResponse:
     )
 
 
-@app.get('/validate/sites', response_model=ValidateSitesResponse, responses=_503)
-def validate_sites() -> ValidateSitesResponse:
+@app.get(
+    '/validate/sites',
+    response_model=ValidateSitesResponse,
+    responses={**_503, **_429},
+)
+@limiter.limit(validate_limit)
+def validate_sites(request: Request, response: Response) -> ValidateSitesResponse:
     if _window_cache is None:
         raise HTTPException(status_code=503, detail='Validation window not loaded')
     window = _window_cache.current()
@@ -319,9 +358,12 @@ def validate_sites() -> ValidateSitesResponse:
 @app.get(
     '/validate/{system_id}',
     response_model=ValidateSiteResponse,
-    responses={**_503, **_404},
+    responses={**_503, **_404, **_429},
 )
-def validate_site(system_id: int) -> ValidateSiteResponse:
+@limiter.limit(validate_limit)
+def validate_site(
+    request: Request, response: Response, system_id: int
+) -> ValidateSiteResponse:
     if _store is None or _window_cache is None:
         raise HTTPException(status_code=503, detail='Service not ready')
     window = _window_cache.current()

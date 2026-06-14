@@ -70,6 +70,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/_ErrorDetail'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -89,6 +95,12 @@ paths:
                 $ref: '#/components/schemas/ValidateSitesResponse'
         '503':
           description: Service not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
+        '429':
+          description: Rate limit exceeded
           content:
             application/json:
               schema:
@@ -119,6 +131,12 @@ paths:
                 $ref: '#/components/schemas/_ErrorDetail'
         '404':
           description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_ErrorDetail'
+        '429':
+          description: Rate limit exceeded
           content:
             application/json:
               schema:

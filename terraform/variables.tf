@@ -118,8 +118,8 @@ variable "app_image_tag" {
 
 variable "allow_unauthenticated" {
   type        = bool
-  default     = false
-  description = "Allow unauthenticated (public) access to the pv-prospect-app Cloud Run Service. false = IAM auth required (private testing); true = public demo."
+  default     = true
+  description = "Allow unauthenticated (public) access to the pv-prospect-app Cloud Run Service. true = public demo (default, protected by per-IP rate limiting); false = IAM auth required (private testing)."
 }
 
 variable "alert_notification_email" {

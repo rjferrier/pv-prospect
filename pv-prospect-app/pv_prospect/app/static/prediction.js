@@ -114,6 +114,8 @@
             showStatus('The model is warming up. Try again in a moment.', submit);
         } else if (e.type === 'upstream') {
             showStatus('Elevation lookup failed (transient). Try again.', submit);
+        } else if (e.type === 'rate_limited') {
+            showStatus('You\'re sending requests too quickly. Wait a moment and try again.', submit);
         } else if (e.type === 'domain_error') {
             showStatus(typeof e.detail === 'string' ? e.detail
                 : 'That point is inside the bounding box but outside the UK '

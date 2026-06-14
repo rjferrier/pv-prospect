@@ -208,10 +208,10 @@ specified site and returns predicted vs. actual power output.
 See `pv-prospect-app` for the `/predict`, `/healthz`, `/version`,
 `/validate/sites`, and `/validate/{system_id}` endpoints. The committed
 `openapi.yaml` is the canonical contract the UI binds to; FastAPI also serves it
-live at `/docs`. The service is **private by default** (IAM-authenticated); a
-public demo sets `allow_unauthenticated=true` in `terraform.tfvars`, making
-`/predict`, `/validate/*`, and the website reachable without auth, with
-`max_instances=2` capping the blast radius (see the operational note below).
+live at `/docs`. The service is **public by default** (per-IP rate limiting on
+`/predict` and `/validate/*` baked into the image guards against Open-Meteo quota
+burn and self-DoS; `/healthz` and `/version` are exempt). To return to private,
+set `allow_unauthenticated = false` in `terraform.tfvars` and re-apply.
 
 ## Operational Workflows
 
@@ -283,8 +283,9 @@ Workflows on a daily or weekly basis:
   at startup and serves the prediction (`/predict`), validation (`/validate/sites`,
   `/validate/{system_id}`), and health/metadata (`/healthz`, `/version`) endpoints,
   plus a no-build demo website at `/` (see the **App Serving** section above).
-  Scale-to-zero with `max_instances=2`. Set `allow_unauthenticated=true` in
-  `terraform.tfvars` for a public demo (default is IAM-authenticated).
+  Scale-to-zero with `max_instances=2`. Public by default (per-IP rate limiting
+  on `/predict` and `/validate/*` is baked into the image). To restrict to IAM
+  auth, set `allow_unauthenticated = false` in `terraform.tfvars` and re-apply.
 
 > **Scheduling rationale**: The daily extraction and PV-sites extraction backfill
 > both use the PVOutput API, which rate-limits at 300 requests/hour. With
@@ -316,14 +317,15 @@ and the promoted models load **at startup** — so picking up new static assets
 *or* a freshly promoted `model-v<date>` both require a new revision (the
 `terraform apply` above, or any redeploy that restarts the container).
 
-**Going public.** The service is private by default
-(`allow_unauthenticated = false` in `terraform/variables.tf`). To expose the
-public demo, override it with `allow_unauthenticated = true` in
-`terraform.tfvars` and `terraform apply`: this grants `roles/run.invoker` to
-`allUsers`, making `/predict`, `/validate/*`, and the website at `/` reachable
-without auth; `max_instances=2` caps the cost, and the existing 5xx / latency
-alerts (`terraform/monitoring.tf`) cover the public surface. Remove the override
-and re-apply to return the service to private.
+**Public by default.** The service is public by default
+(`allow_unauthenticated = true` in `terraform/variables.tf`), protected by
+per-IP rate limiting baked into the image: `POST /predict` and `GET /validate/*`
+are limited (default 20 req/min and 30 req/min respectively); `/healthz` and
+`/version` are exempt. This guards against Open-Meteo quota burn (every novel
+coordinate on `/predict` makes one elevation lookup) and self-DoS of the
+2-instance service. Limits are tunable via `RATE_LIMIT_PREDICT` /
+`RATE_LIMIT_VALIDATE` env vars without a redeploy. To return to private, set
+`allow_unauthenticated = false` in `terraform.tfvars` and re-apply.
 
 ### Trigger the Pipeline Manually (Optional)
 

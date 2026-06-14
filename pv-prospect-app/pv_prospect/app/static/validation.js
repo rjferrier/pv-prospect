@@ -99,6 +99,9 @@
                     function () { loadSite(systemId); });
             } else if (e.type === 'not_found') {
                 showStatus('Site ' + systemId + ' is no longer in the window.');
+            } else if (e.type === 'rate_limited') {
+                showStatus('You\'re sending requests too quickly. Wait a moment and try again.',
+                    function () { loadSite(systemId); });
             } else {
                 showStatus('Could not load site ' + systemId + '.');
             }
@@ -129,6 +132,8 @@
         callApi('GET', '/validate/sites').then(populateSites).catch(function (e) {
             if (e.type === 'warming') {
                 showStatus('Validation data is warming up.', init);
+            } else if (e.type === 'rate_limited') {
+                showStatus('You\'re sending requests too quickly. Wait a moment and try again.', init);
             } else {
                 showStatus('Could not load validation sites.');
             }
