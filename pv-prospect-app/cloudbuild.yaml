@@ -1,9 +1,15 @@
 # Build the pv-prospect-app image.
 #
 # Must be submitted from the repo root so sibling packages (pv-prospect-common,
-# pv-prospect-etl, pv-prospect-physics) are available in the build context:
+# pv-prospect-etl, pv-prospect-physics) are available in the build context.
 #
-#   gcloud builds submit --config pv-prospect-app/cloudbuild.yaml .
+# _IMAGE_TAG is required (no default): pass the commit SHA so each build is a
+# distinct, traceable tag.  This mirrors deploy.sh and avoids the ':latest'
+# no-op, where Terraform sees an unchanged tag and never rolls the Cloud Run
+# service onto the freshly-built image.
+#
+#   gcloud builds submit --config pv-prospect-app/cloudbuild.yaml \
+#     --substitutions=_IMAGE_TAG=$(git rev-parse --short HEAD) .
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -11,14 +17,16 @@ steps:
       - DOCKER_BUILDKIT=1
     args:
       - build
+      - --target
+      - entrypoint
       - -t
-      - europe-west2-docker.pkg.dev/$PROJECT_ID/pv-prospect-app/pv-prospect-app:latest
+      - europe-west2-docker.pkg.dev/$PROJECT_ID/pv-prospect-app/pv-prospect-app:${_IMAGE_TAG}
       - -f
       - pv-prospect-app/Dockerfile
       - .
 
 images:
-  - europe-west2-docker.pkg.dev/$PROJECT_ID/pv-prospect-app/pv-prospect-app:latest
+  - europe-west2-docker.pkg.dev/$PROJECT_ID/pv-prospect-app/pv-prospect-app:${_IMAGE_TAG}
 
 options:
   logging: CLOUD_LOGGING_ONLY

@@ -8,6 +8,8 @@ echo "=========================================================="
 
 cd "$(dirname "$0")"
 
+APP_TAG=$(git rev-parse --short HEAD)
+
 usage() {
   echo "Usage: $0 [-p|--project-id PROJECT_ID] [STAGES]"
   echo ""
@@ -23,16 +25,19 @@ usage() {
   echo "    build-app             — build and push pv-prospect-app Docker image"
   echo "    terraform-extraction  — apply extraction infrastructure (Cloud Run, Workflows, Schedulers)"
   echo "    terraform-transform   — apply transformation infrastructure (Cloud Run, Workflow)"
+  echo "    terraform-app         — apply pv-prospect-app Cloud Run Service only"
   echo "    terraform             — apply all infrastructure (full apply)"
   echo ""
   echo "  Shorthand aliases:"
-  echo "    build   = build-extraction,build-transformation,build-versioner,build-trainer,build-app"
-  echo "    all     = registry,build,terraform  (the default)"
+  echo "    build      = build-extraction,build-transformation,build-versioner,build-trainer,build-app"
+  echo "    deploy-app = build-app,terraform-app  (rebuild + redeploy just the app)"
+  echo "    all        = registry,build,terraform  (the default)"
   echo ""
   echo "Examples:"
   echo "  $0                                                       # run everything"
   echo "  $0 -p my-project build-transformation                   # rebuild transformation image only"
   echo "  $0 -p my-project build-transformation,terraform-transform  # redeploy transformation"
+  echo "  $0 -p my-project deploy-app                             # rebuild + redeploy the app"
   echo "  $0 --project-id my-project terraform                    # re-apply all infra, no image build"
   exit 1
 }
@@ -58,8 +63,9 @@ fi
 expand_stages() {
   echo "$1" | tr ',' '\n' | while read -r stage; do
     case "$stage" in
-      all)      echo "registry"; echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer"; echo "build-app"; echo "terraform" ;;
-      build)    echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer"; echo "build-app" ;;
+      all)        echo "registry"; echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer"; echo "build-app"; echo "terraform" ;;
+      build)      echo "build-extraction"; echo "build-transformation"; echo "build-versioner"; echo "build-trainer"; echo "build-app" ;;
+      deploy-app) echo "build-app"; echo "terraform-app" ;;
       *)        echo "$stage" ;;
     esac
   done
@@ -156,9 +162,9 @@ if run_stage build-app; then
   echo ""
   echo "[build-app] Building and pushing pv-prospect-app Docker image..."
   resolve_image_urls
-  echo "Building: $IMAGE_URL_APP:latest"
-  docker build -t "$IMAGE_URL_APP:latest" --target entrypoint -f ../pv-prospect-app/Dockerfile ..
-  docker push "$IMAGE_URL_APP:latest"
+  echo "Building: $IMAGE_URL_APP:$APP_TAG"
+  docker build -t "$IMAGE_URL_APP:$APP_TAG" --target entrypoint -f ../pv-prospect-app/Dockerfile ..
+  docker push "$IMAGE_URL_APP:$APP_TAG"
 fi
 
 # 3a. Apply extraction infrastructure
@@ -190,11 +196,21 @@ if run_stage terraform-transform; then
     -auto-approve
 fi
 
-# 3c. Full infrastructure apply
+# 3c. Apply pv-prospect-app Cloud Run Service only
+if run_stage terraform-app; then
+  echo ""
+  echo "[terraform-app] Provisioning pv-prospect-app Cloud Run Service..."
+  terraform apply \
+    -target=module.cloud_run_app \
+    -var "app_image_tag=$APP_TAG" \
+    -auto-approve
+fi
+
+# 3d. Full infrastructure apply
 if run_stage terraform; then
   echo ""
   echo "[terraform] Applying all infrastructure..."
-  terraform apply -auto-approve
+  terraform apply -var "app_image_tag=$APP_TAG" -auto-approve
 fi
 
 echo ""
