@@ -4,7 +4,7 @@ A model of photovoltaic (PV) power outputs according to weather in the UK. This
 may be useful if you are thinking about installing solar panels and would like to
 know how much energy you could get from them.
 
-This is a work in progress.
+The app can be accessed [here](https://pv-prospect-app-iwge6y4a5q-nw.a.run.app/).
 
 ## About the Model
 
@@ -305,12 +305,14 @@ the **submodule root**, so the shared local packages resolve), then apply:
 
 ```bash
 # From the pv-prospect submodule root
-gcloud builds submit \
-  --tag europe-west2-docker.pkg.dev/<project-id>/pv-prospect-app/pv-prospect-app:latest \
-  --file pv-prospect-app/Dockerfile .
+gcloud builds submit --config pv-prospect-app/cloudbuild.yaml .
 
 cd terraform && terraform apply        # rolls out the new revision
 ```
+
+`cloudbuild.yaml` sets the image tag (using Cloud Build's `$PROJECT_ID` substitution)
+and enables BuildKit. The build context is `.` (submodule root) so the shared local
+packages are visible to the Dockerfile's `COPY` instructions.
 
 The static website assets are baked into the image (`pv_prospect/app/static/`),
 and the promoted models load **at startup** — so picking up new static assets

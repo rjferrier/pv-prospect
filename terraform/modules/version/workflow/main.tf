@@ -50,7 +50,7 @@ resource "google_workflows_workflow" "data_versioning" {
                 - log_versioner_non_success:
                     call: sys.log
                     args:
-                      text: $${"Versioner reported non-success (may be hang bug — see briefs/versioner-hang.md); proceeding to trainer which will self-verify: " + json.encode_to_string(e)}
+                      text: '$${"Versioner reported non-success (may be hang bug - see briefs/versioner-hang.md); proceeding to trainer which will self-verify: " + json.encode_to_string(e)}'
                       severity: WARNING
 
         - run_trainer:

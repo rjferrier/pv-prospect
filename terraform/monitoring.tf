@@ -26,10 +26,37 @@ resource "google_monitoring_notification_channel" "email" {
 }
 
 # ---------------------------------------------------------------------------
+# Custom metric descriptors
+#
+# Alert policies cannot reference a custom metric type until its descriptor
+# exists in Cloud Monitoring.  The descriptors are normally auto-created on
+# first write (when the model trainer emits them), but that creates a
+# chicken-and-egg problem on first deploy.  Declaring them explicitly here
+# ensures they exist before the alert policies are applied.
+# ---------------------------------------------------------------------------
+
+resource "google_monitoring_metric_descriptor" "pv_clamped_power_r2" {
+  description  = "R² of the PV clamped-power model on the held-out test set, emitted by the model trainer on each retraining run."
+  display_name = "PV clamped-power R²"
+  type         = "custom.googleapis.com/pv_prospect/pv_clamped_power_r2"
+  metric_kind  = "GAUGE"
+  value_type   = "DOUBLE"
+}
+
+resource "google_monitoring_metric_descriptor" "model_promoted" {
+  description  = "1 if the newly trained model passed the promotion gate and was written to the model bucket; 0 if it was rejected."
+  display_name = "Model promoted"
+  type         = "custom.googleapis.com/pv_prospect/model_promoted"
+  metric_kind  = "GAUGE"
+  value_type   = "DOUBLE"
+}
+
+# ---------------------------------------------------------------------------
 # Offline degradation: absolute R² floor
 # ---------------------------------------------------------------------------
 
 resource "google_monitoring_alert_policy" "pv_r2_floor" {
+  depends_on = [google_monitoring_metric_descriptor.pv_clamped_power_r2]
   display_name          = "PV Prospect: PV model R² below floor"
   combiner              = "OR"
   notification_channels = local.notification_channels
@@ -63,6 +90,7 @@ resource "google_monitoring_alert_policy" "pv_r2_floor" {
 # ---------------------------------------------------------------------------
 
 resource "google_monitoring_alert_policy" "model_rejected" {
+  depends_on            = [google_monitoring_metric_descriptor.model_promoted]
   display_name          = "PV Prospect: model trainer rejected new model"
   combiner              = "OR"
   notification_channels = local.notification_channels

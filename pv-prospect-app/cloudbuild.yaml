@@ -1,0 +1,24 @@
+# Build the pv-prospect-app image.
+#
+# Must be submitted from the repo root so sibling packages (pv-prospect-common,
+# pv-prospect-etl, pv-prospect-physics) are available in the build context:
+#
+#   gcloud builds submit --config pv-prospect-app/cloudbuild.yaml .
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - -t
+      - europe-west2-docker.pkg.dev/$PROJECT_ID/pv-prospect-app/pv-prospect-app:latest
+      - -f
+      - pv-prospect-app/Dockerfile
+      - .
+
+images:
+  - europe-west2-docker.pkg.dev/$PROJECT_ID/pv-prospect-app/pv-prospect-app:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
