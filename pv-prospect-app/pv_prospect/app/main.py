@@ -343,6 +343,8 @@ def predict(
             'This is a climatological (typical-year) estimate. Actual output will vary year-to-year.',
             'Age degradation: age_years=0 (new install) applies a fixed ~1.06× uplift (0.7%/year degradation); '
             'the model assumes monotone age decline, not non-physical site-by-site variation.',
+            'Inverter clipping is estimated from a clear-sky intraday irradiance profile; '
+            'actual clipping losses may be slightly higher on days with cloud-edge irradiance spikes.',
             _VINTAGE_CAVEAT,
         ],
     )

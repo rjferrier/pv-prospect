@@ -7,9 +7,9 @@ isolates PV-model error from weather-model error and sidesteps the
 weather-path vintage bias.
 
 predicted_cf is the model's raw capacity-factor output (pre-clamp).
-predicted_kwh is post-inverter-clamp delivered power in kWh/day.
-On clipped days predicted_cf * panels_capacity * 24/1000 > predicted_kwh;
-the gap is headroom lost to the inverter — informative, not a bug.
+predicted_kwh is post-inverter-clamp delivered power in kWh/day, where the
+clamp is applied to the 24 h-mean power.  Clipped days (is_clipped == True)
+are excluded from error metrics; they are included in the series for display.
 """
 
 from __future__ import annotations

@@ -1,12 +1,18 @@
-"""POA reconstruction: monthly-mean 24h-mean DNI/DHI → daily-mean POA.
+"""POA reconstruction: monthly-mean 24h-mean DNI/DHI → hourly and daily-mean POA.
 
 The weather model outputs monthly-mean daily DNI/DHI (24h-mean, night zeros
-included). The PV model trains on the 24 h-mean POA that prepare_pv now
-computes, so this reconstruction is self-consistent with the training corpus.
+included). The PV model trains on the 24 h-mean POA that prepare_pv computes,
+so this reconstruction is self-consistent with the training corpus.
 
 Method: use pvlib clear-sky as the hourly *shape* for DNI and DHI, scale each
 independently so its 24h-mean equals the weather model's monthly-mean output,
-then compute hourly POA with compute_poa_irradiance and average over all 24h.
+then compute hourly POA with compute_poa_irradiance.
+
+Two public functions:
+- ``reconstruct_hourly_poa`` — returns the 24-element hourly array.  Used by
+  ``predict_yield`` to apply inverter clipping per hour before re-averaging.
+- ``reconstruct_daily_mean_poa`` — returns the 24h-mean (bit-identical to the
+  former single function).  Used as the PV model feature input and by tests.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from pv_prospect.common.domain import Location, PanelGeometry
 from pv_prospect.physics import compute_poa_irradiance
 
 
-def reconstruct_daily_mean_poa(
+def reconstruct_hourly_poa(
     latitude: float,
     longitude: float,
     representative_date: datetime.date,
@@ -29,13 +35,12 @@ def reconstruct_daily_mean_poa(
     dhi_monthly_mean: float,
     tilt: int,
     azimuth: int,
-) -> float:
-    """Reconstruct daily-mean POA from monthly-mean 24h-mean DNI and DHI.
+) -> np.ndarray:
+    """Reconstruct 24-element hourly POA from monthly-mean 24h-mean DNI and DHI.
 
     Uses the pvlib Ineichen clear-sky profile for the representative date as
     the intraday shape, scales each component so its 24h-mean equals the
-    weather model output, then returns the 24h-mean of the resulting hourly
-    POA — matching the daily-mean-of-hourly-POA the PV model trained on.
+    weather model output, then returns hourly POA (W/m²) as a (24,) array.
 
     ``representative_date`` should be the month midpoint (month 1st + 14 days),
     matching ``downsample_to_monthly``'s convention.
@@ -61,7 +66,26 @@ def reconstruct_daily_mean_poa(
 
     loc = Location(Decimal(str(round(latitude, 4))), Decimal(str(round(longitude, 4))))
     panel_geometry = PanelGeometry(azimuth=azimuth, tilt=tilt, area_fraction=1.0)
-    poa_hourly = compute_poa_irradiance(
-        times, scaled_dni, scaled_dhi, loc, panel_geometry
+    return compute_poa_irradiance(times, scaled_dni, scaled_dhi, loc, panel_geometry)
+
+
+def reconstruct_daily_mean_poa(
+    latitude: float,
+    longitude: float,
+    representative_date: datetime.date,
+    dni_monthly_mean: float,
+    dhi_monthly_mean: float,
+    tilt: int,
+    azimuth: int,
+) -> float:
+    """Reconstruct daily-mean POA from monthly-mean 24h-mean DNI and DHI.
+
+    Returns the 24h-mean of ``reconstruct_hourly_poa`` — matching the
+    daily-mean-of-hourly-POA the PV model trained on.
+    """
+    return float(
+        reconstruct_hourly_poa(
+            latitude, longitude, representative_date,
+            dni_monthly_mean, dhi_monthly_mean, tilt, azimuth,
+        ).mean()
     )
-    return float(poa_hourly.mean())
