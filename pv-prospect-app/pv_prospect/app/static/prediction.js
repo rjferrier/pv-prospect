@@ -102,7 +102,6 @@
         metaEl.textContent = 'Elevation ' + Math.round(a.elevation_m) + ' m'
             + ' · PV model ' + a.pv_model_version
             + ' · weather ' + a.weather_model_version
-            + ' · inverter ' + a.inverter_capacity_w + ' W'
             + ' · ' + YEAR;
 
         statusEl.hidden = true;
@@ -148,9 +147,6 @@
             tilt_deg: readNumber('pred-tilt'),
             install_age_years: readNumber('pred-age') || 0,
         };
-        var inverter = readNumber('pred-inverter');
-        if (inverter !== null) { body.inverter_capacity_w = inverter; }
-
         showStatus('Estimating…');
         callApi('POST', '/predict', body).then(renderPrediction).catch(handleError);
     }

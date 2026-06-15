@@ -10,8 +10,8 @@
     --clr-bg: #f5f8fc;
     --clr-surface: #ffffff;
     --clr-border: #e5eaf0;
-    --font: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    --font-mono: 'Space Mono', 'ui-monospace', monospace;
+    --font: 'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'IBM Plex Mono', 'ui-monospace', monospace;
 }
 
 html, body {
@@ -20,6 +20,7 @@ html, body {
     background: var(--clr-bg);
     color: var(--clr-text);
     font-family: var(--font);
+    font-stretch: 87.5%;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
