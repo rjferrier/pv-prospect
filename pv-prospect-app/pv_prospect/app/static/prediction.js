@@ -2,22 +2,28 @@
  * prediction.js — controller for the Prediction section (W1).
  *
  * A UK map click sets the location; the form supplies the panel parameters; a
- * POST /predict returns the climatological annual yield. The headline renders
- * the expected estimate plus its uncertainty band (uncertainty.annual_kwh_low /
- * _high, the LOSO-calibrated 1σ floor), the monthly bars render monthly_kwh, and
- * the endpoint's own caveats are rendered verbatim.
+ * POST /predict returns the climatological annual yield. The result card shows
+ * the expected estimate, its uncertainty range (uncertainty.annual_kwh_low /
+ * _high, the LOSO-calibrated 1σ floor), and a monthly chart with a unit toggle
+ * (kWh/month · kWh/day · kW avg / kW peak). The endpoint's caveats render
+ * verbatim.
  *
- * Requires callApi (api.js), initMap (map.js) and renderBarChart (chart.js).
+ * Requires callApi (api.js), initMap (map.js), and the chart helpers (chart.js).
  */
 (function () {
     var form = document.getElementById('prediction-form');
     if (!form) { return; }
 
+    var locEl = document.getElementById('prediction-location');
     var latlngEl = document.getElementById('prediction-latlng');
+    var pindotEl = locEl.querySelector('.pindot');
     var submitBtn = document.getElementById('pred-submit');
     var statusEl = document.getElementById('prediction-status');
     var resultEl = document.getElementById('prediction-result');
-    var headlineEl = document.getElementById('prediction-headline');
+    var valueEl = document.getElementById('pred-value');
+    var rangeEl = document.getElementById('pred-range');
+    var unitEl = document.getElementById('pred-unit');
+    var segEl = document.getElementById('pred-seg');
     var chartEl = document.getElementById('prediction-chart');
     var caveatsEl = document.getElementById('prediction-caveats');
     var metaEl = document.getElementById('prediction-meta');
@@ -27,29 +33,29 @@
     // Representative typical year: the last complete calendar year. The model is
     // climatological, so the specific year only frames the request period.
     var YEAR = new Date().getFullYear() - 1;
+    var DAYS = MONTHS.map(function (_, i) { return new Date(YEAR, i + 1, 0).getDate(); });
 
     var selected = null;       // { lat, lng } once the user clicks the map
     var map = null;
-    var chartInstance = null;
+    var current = null;        // last /predict response, for chart re-render
+    var chartMode = 'month';
 
-    // Leaflet measures its container on init; the prediction tab starts hidden,
-    // so defer init until the tab is first shown (and invalidate thereafter).
+    // Leaflet measures its container on init; the prediction page starts hidden,
+    // so defer init until the page is first shown (and invalidate thereafter).
     function ensureMap() {
         if (map) { map.invalidateSize(); return; }
         map = initMap('prediction-map', function (lat, lng) {
             selected = { lat: lat, lng: lng };
             latlngEl.textContent = lat.toFixed(4) + ', ' + lng.toFixed(4);
+            latlngEl.classList.remove('ph');
+            locEl.classList.add('chosen');
+            if (pindotEl) { pindotEl.hidden = false; }
             submitBtn.disabled = false;
         });
     }
-    var tabBtn = document.getElementById('tab-prediction');
-    if (tabBtn) {
-        // The inline tab handler un-hides the panel on the same click; defer so
-        // Leaflet measures the now-visible container.
-        tabBtn.addEventListener('click', function () { setTimeout(ensureMap, 0); });
-    }
-    // Prediction is the default-visible tab, so also initialise the map on load.
-    setTimeout(ensureMap, 0);
+    document.addEventListener('pv:pageshow', function (e) {
+        if (e.detail.page === 'prediction') { setTimeout(ensureMap, 0); }
+    });
 
     function showStatus(message, onRetry) {
         statusEl.textContent = message;
@@ -58,7 +64,6 @@
             btn.textContent = 'Retry';
             btn.className = 'retry-btn';
             btn.addEventListener('click', onRetry);
-            statusEl.appendChild(document.createTextNode(' '));
             statusEl.appendChild(btn);
         }
         statusEl.hidden = false;
@@ -79,23 +84,53 @@
         });
     }
 
-    function kwh(value) {
-        return Math.round(value).toLocaleString() + ' kWh/year';
+    function kwh(value) { return Math.round(value).toLocaleString(); }
+
+    // Build per-mode bar values + formatting from the stored response.
+    function modeData(mode) {
+        var monthly = current.monthly_kwh;
+        var peakKw = (readNumber('pred-capacity') || 0) / 1000;
+        if (mode === 'day') {
+            return {
+                values: monthly.map(function (v, i) { return v / DAYS[i]; }),
+                unit: 'kWh / day',
+                fmt: function (v) { return v.toFixed(1); },
+            };
+        }
+        if (mode === 'cf') {
+            return {
+                values: monthly.map(function (v, i) {
+                    return peakKw > 0 ? (v / (DAYS[i] * 24)) / peakKw : 0;
+                }),
+                unit: 'kW avg / kW peak',
+                fmt: function (v) { return v.toFixed(2); },
+            };
+        }
+        return {
+            values: monthly.slice(),
+            unit: 'kWh / month',
+            fmt: function (v) { return Math.round(v); },
+        };
+    }
+
+    function drawChart() {
+        if (!current) { return; }
+        var d = modeData(chartMode);
+        unitEl.textContent = d.unit;
+        renderBarChart(chartEl, MONTHS, d.values, {
+            fmt: d.fmt,
+            errFrac: current.uncertainty.sigma_frac,
+        });
     }
 
     function renderPrediction(data) {
+        current = data;
         var band = data.uncertainty;
         var pct = (band.sigma_frac * 100).toFixed(0);
-        headlineEl.innerHTML = '';
-        var value = document.createElement('div');
-        value.className = 'headline-value';
-        value.textContent = kwh(data.expected_annual_kwh);
-        var range = document.createElement('div');
-        range.className = 'headline-range';
-        range.textContent = '±' + pct + ' % (1σ floor): '
-            + kwh(band.annual_kwh_low) + ' – ' + kwh(band.annual_kwh_high);
-        headlineEl.appendChild(value);
-        headlineEl.appendChild(range);
+        valueEl.textContent = kwh(data.expected_annual_kwh);
+        rangeEl.innerHTML = 'Range <b>' + kwh(band.annual_kwh_low) + ' – '
+            + kwh(band.annual_kwh_high) + '</b> kWh/year'
+            + '<span class="pm">±' + pct + '%</span>';
 
         renderCaveats(data.caveats);
         var a = data.assumptions;
@@ -106,8 +141,7 @@
 
         statusEl.hidden = true;
         resultEl.hidden = false;
-        if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-        chartInstance = renderBarChart(chartEl, MONTHS, data.monthly_kwh);
+        drawChart();
     }
 
     function handleError(e) {
@@ -154,5 +188,10 @@
     form.addEventListener('submit', function (e) {
         e.preventDefault();
         submit();
+    });
+
+    wireSegmentedToggle(segEl, function (mode) {
+        chartMode = mode;
+        drawChart();
     });
 })();

@@ -1,4 +1,4 @@
-"""Smoke tests for the W0 HTML shell routes (no lifespan — no model store needed)."""
+"""Smoke tests for the HTML shell routes (no lifespan — no model store needed)."""
 
 from fastapi.testclient import TestClient
 from pv_prospect.app.main import app
@@ -10,9 +10,12 @@ def test_root_returns_html() -> None:
     assert resp.status_code == 200
     assert 'text/html' in resp.headers['content-type']
     body = resp.text
-    assert '<title>PV Prospect</title>' in body
-    assert 'id="panel-validation"' in body
-    assert 'id="panel-prediction"' in body
+    assert '<title>PV Prospect' in body
+    # Hash-routed single page: home (hero) plus the three app sections.
+    assert 'id="home"' in body
+    assert 'id="prediction"' in body
+    assert 'id="validation"' in body
+    assert 'id="about"' in body
 
 
 def test_validation_panel_renders_controls() -> None:
@@ -20,6 +23,7 @@ def test_validation_panel_renders_controls() -> None:
     body = client.get('/').text
     # W2 controls the validation controller binds to.
     assert 'id="site-select"' in body
+    assert 'id="val-seg"' in body
     assert 'id="validation-chart"' in body
     assert 'id="validation-status"' in body
     assert 'id="validation-caveats"' in body
@@ -49,7 +53,8 @@ def test_prediction_panel_renders_controls() -> None:
     assert 'id="pred-capacity"' in body
     assert 'id="pred-azimuth"' in body
     assert 'id="pred-tilt"' in body
-    assert 'id="prediction-headline"' in body
+    assert 'id="pred-value"' in body
+    assert 'id="pred-seg"' in body
     assert 'id="prediction-chart"' in body
     assert '/static/prediction.js' in body
 
@@ -57,5 +62,12 @@ def test_prediction_panel_renders_controls() -> None:
 def test_static_prediction_js_served() -> None:
     client = TestClient(app)
     resp = client.get('/static/prediction.js')
+    assert resp.status_code == 200
+    assert 'javascript' in resp.headers['content-type']
+
+
+def test_static_ui_js_served() -> None:
+    client = TestClient(app)
+    resp = client.get('/static/ui.js')
     assert resp.status_code == 200
     assert 'javascript' in resp.headers['content-type']

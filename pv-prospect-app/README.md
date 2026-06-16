@@ -178,10 +178,20 @@ metrics, so this approximation does not affect validation accuracy reporting.
 
 ## Served website
 
-The app also serves a no-build demo UI from `/` (HTML + vanilla JS + CDN Leaflet
-and uPlot, mounted at `/static`). It fronts the same JSON endpoints same-origin:
-a **Validation** tab (predicted-vs-actual over the rolling window) and a
-**Prediction** tab (click a UK map point, enter panel parameters, see the
-expected annual yield with its uncertainty band). The OpenAPI contract the UI
-binds to is committed in `openapi.yaml` (regenerate from `app.openapi()` if routes
-change) and served live at `/docs`.
+The app also serves a no-build demo UI from `/` (HTML + vanilla JS + CDN Leaflet,
+mounted at `/static`). It is a single hash-routed page (`ui.js`) with four views:
+a **Home** hero landing, **Prediction**, **Validation**, and **About**. It fronts
+the same JSON endpoints same-origin:
+
+- **Prediction** — click a UK map point, enter panel parameters, and see the
+  expected annual yield with its uncertainty band. The monthly chart has a unit
+  toggle (kWh/month · kWh/day · kW avg / kW peak) and ±17 % whiskers.
+- **Validation** — predicted-vs-actual over the rolling window, with the same unit
+  toggle (kWh/day · kW avg / kW peak); clipped (inverter-limited) days are flagged.
+
+Charts are hand-drawn inline SVG (`chart.js`, no charting library); maps are real
+Leaflet widgets. The Home hero shows an *illustrative* UK PV-potential map whose
+blue→teal→amber→sun colour ramp matches the capacity-factor render produced by
+`pv-prospect-map` (the rendered PNG itself is served separately). The OpenAPI
+contract the UI binds to is committed in `openapi.yaml` (regenerate from
+`app.openapi()` if routes change) and served live at `/docs`.

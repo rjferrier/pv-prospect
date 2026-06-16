@@ -7,6 +7,7 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.path import Path as MplPath
 from shapely.geometry.base import BaseGeometry
 
@@ -18,6 +19,19 @@ import matplotlib.pyplot as plt  # noqa: E402  (backend must be set first)
 # Cells (beyond land) onto which the field is extrapolated so contour fills reach
 # the coast before being clipped to it. 3 (>= 2) covers land's diagonal neighbours.
 GHOST_HALO = 3
+
+# Low-to-high capacity-factor ramp matching the PV Prospect website palette
+# (royal blue -> teal -> amber -> sun). The stops mirror the site's legend
+# gradient so the rendered map reads as the same family as the front end.
+CAPACITY_FACTOR_CMAP = LinearSegmentedColormap.from_list(
+    'pv_prospect',
+    [
+        (0.00, '#2b6fb0'),  # blue   — lower
+        (0.45, '#5092a3'),  # teal
+        (0.74, '#e7a23f'),  # amber
+        (1.00, '#f59e0b'),  # sun    — higher
+    ],
+)
 
 
 def _geometry_to_clip_path(geometry: BaseGeometry) -> MplPath:
@@ -57,7 +71,9 @@ def render_contour_map(
     field = fill_ghost_band(cf_percent_grid, land, GHOST_HALO)
 
     fig, ax = plt.subplots(figsize=(7, 9))
-    filled = ax.contourf(lon_grid, lat_grid, field, levels=levels, cmap='viridis')
+    filled = ax.contourf(
+        lon_grid, lat_grid, field, levels=levels, cmap=CAPACITY_FACTOR_CMAP
+    )
     lines = ax.contour(
         lon_grid,
         lat_grid,

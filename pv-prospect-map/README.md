@@ -60,6 +60,11 @@ extrapolated onto a band of *ghost* cells just outside land (nearest-neighbour),
 so the coastal quads have values, and the resulting contours are then clipped to
 the exact same UK polygon — extending past the boundary, then trimmed back to it.
 
+The fill uses `CAPACITY_FACTOR_CMAP` (a low-to-high blue→teal→amber→sun ramp)
+rather than a stock matplotlib colormap, so the render shares the PV Prospect
+website's palette — the same gradient the front end's PV-potential legend uses.
+Update both together if the brand palette changes.
+
 ## Usage
 
 ```bash

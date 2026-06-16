@@ -1,98 +1,140 @@
 /**
- * chart.js — chart helpers (rendered in W1 and W2).
- * Requires uPlot to be loaded before this script.
+ * chart.js — dependency-free SVG chart drawing for the prediction (W1) and
+ * validation (W2) sections. The charts are inline <svg> elements with a fixed
+ * viewBox; CSS scales them responsively. Drawing functions are pure: callers
+ * compute the per-mode data arrays and pass them in.
  */
 
-/**
- * Render a monthly bar chart for the prediction section (W1).
- * @param {HTMLElement} container
- * @param {string[]} months - e.g. ['Jan', ..., 'Dec']
- * @param {number[]} values_kwh - one value per month
- * @returns {uPlot|null} the chart instance, or null when there is no data.
- */
-function renderBarChart(container, months, values_kwh) {
-    container.innerHTML = '';
-    if (!values_kwh || !values_kwh.length) {
-        container.textContent = 'No data.';
-        return null;
-    }
-    var xs = months.map(function (_, i) { return i; });
-    var opts = {
-        width: container.clientWidth || 720,
-        height: 320,
-        scales: { x: { time: false, range: [-0.6, months.length - 0.4] } },
-        axes: [
-            {
-                splits: function () { return xs; },
-                values: function (u, splits) {
-                    return splits.map(function (i) { return months[i] || ''; });
-                },
-            },
-            { label: 'kWh / month' },
-        ],
-        series: [
-            {},
-            {
-                label: 'Energy',
-                stroke: '#1f6fd6',
-                fill: 'rgba(31, 111, 214, 0.45)',
-                paths: uPlot.paths.bars({ size: [0.7, 60] }),
-                points: { show: false },
-            },
-        ],
-    };
-    return new uPlot(opts, [xs, values_kwh], container);
+var CHART_PALETTE = {
+    blue: '#2b6fb0',
+    navy: '#16395a',
+    sun: '#f59e0b',
+    grid: '#eef2f6',
+    axis: '#9aa6b2',
+    clip: '#c0344d',
+};
+
+/** Round a maximum up to a "nice" axis bound (1, 2, 2.5, 5, 10 × 10ⁿ). */
+function niceMax(m) {
+    if (m <= 0) { return 1; }
+    var pow = Math.pow(10, Math.floor(Math.log10(m)));
+    var n = m / pow;
+    var f;
+    if (n <= 1) { f = 1; }
+    else if (n <= 2) { f = 2; }
+    else if (n <= 2.5) { f = 2.5; }
+    else if (n <= 5) { f = 5; }
+    else { f = 10; }
+    return f * pow;
+}
+
+/* --- small SVG element builders (numbers rounded to 1 dp for compactness) --- */
+function _n(v) { return Number(v).toFixed(1); }
+function _esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function _line(x1, y1, x2, y2, stroke, w) {
+    return '<line x1="' + _n(x1) + '" y1="' + _n(y1) + '" x2="' + _n(x2)
+        + '" y2="' + _n(y2) + '" stroke="' + stroke + '" stroke-width="' + w + '"/>';
+}
+function _text(x, y, s, anchor, fill, size) {
+    return '<text x="' + _n(x) + '" y="' + _n(y) + '" text-anchor="' + anchor
+        + '" font-family="var(--mono)" font-size="' + size + '" fill="' + fill + '">'
+        + _esc(s) + '</text>';
+}
+function _noData(svg, msg) {
+    svg.innerHTML = _text(450, 150, msg || 'No data.', 'middle', CHART_PALETTE.axis, 14);
 }
 
 /**
- * Render a predicted-vs-actual time-series overlay for the validation section.
- * Actual and predicted are drawn as lines; clipped (inverter-limited) days are
- * marked with distinct points (those days are excluded from the error metrics).
- *
- * @param {HTMLElement} container
- * @param {{ date: string, predicted_kwh: number, actual_kwh: number,
- *           predicted_cf: number, actual_cf: number, clipped: boolean }[]} series
- * @param {'kwh'|'cf'} [mode] - 'kwh' (default) plots energy; 'cf' plots the
- *        raw capacity factor (predicted_cf is pre-clamp, so on clipped days it
- *        can exceed what predicted_kwh reflects).
- * @returns {uPlot|null} the chart instance, or null when there is no data.
+ * Render a monthly bar chart with optional symmetric error whiskers.
+ * @param {SVGElement} svg     - target inline <svg> (viewBox 0 0 900 300)
+ * @param {string[]}   labels  - one x-axis label per bar
+ * @param {number[]}   values  - one value per bar
+ * @param {{fmt?:function, errFrac?:number}} [opts]
+ *        fmt formats axis tick values; errFrac (e.g. 0.17) draws ±errFrac whiskers.
  */
-function renderTimeSeriesChart(container, series, mode) {
-    mode = mode || 'kwh';
-    container.innerHTML = '';
-    if (!series || !series.length) {
-        container.textContent = 'No data for this site.';
-        return null;
+function renderBarChart(svg, labels, values, opts) {
+    if (!values || !values.length) { _noData(svg); return; }
+    opts = opts || {};
+    var fmt = opts.fmt || function (v) { return Math.round(v); };
+    var err = opts.errFrac || 0;
+    var W = 900, R = 16, L = 56, T = 12, B = 38, pw = W - L - R, ph = 300 - T - B;
+    var ymax = niceMax(Math.max.apply(null, values) * (1 + err));
+    var Y = function (v) { return T + ph * (1 - v / ymax); };
+    var n = values.length, gap = pw / n, bw = gap * 0.58;
+    var g = '';
+    for (var k = 0; k <= 5; k++) {
+        var v = ymax * k / 5, y = Y(v);
+        g += _line(L, y, W - R, y, CHART_PALETTE.grid, 1);
+        g += _text(L - 9, y + 3, fmt(v), 'end', CHART_PALETTE.axis, 11);
     }
-
-    var predKey = mode === 'cf' ? 'predicted_cf' : 'predicted_kwh';
-    var actKey = mode === 'cf' ? 'actual_cf' : 'actual_kwh';
-    var xs = series.map(function (p) { return Date.parse(p.date) / 1000; });
-    var actual = series.map(function (p) { return p[actKey]; });
-    var predicted = series.map(function (p) { return p[predKey]; });
-    var clippedMark = series.map(function (p) {
-        return p.clipped ? p[actKey] : null;
+    values.forEach(function (val, i) {
+        var cx = L + gap * i + gap / 2, x = cx - bw / 2, y = Y(val), h = T + ph - y;
+        g += '<rect x="' + _n(x) + '" y="' + _n(y) + '" width="' + _n(bw)
+            + '" height="' + _n(h) + '" rx="3" fill="' + CHART_PALETTE.blue + '" opacity="0.9"/>';
+        if (err > 0) {
+            var hi = Y(val * (1 + err)), lo = Y(Math.max(0, val * (1 - err)));
+            g += _line(cx, hi, cx, lo, CHART_PALETTE.navy, 1.6);
+            g += _line(cx - 4, hi, cx + 4, hi, CHART_PALETTE.navy, 1.6);
+            g += _line(cx - 4, lo, cx + 4, lo, CHART_PALETTE.navy, 1.6);
+        }
+        g += _text(cx, 300 - 12, labels[i] || '', 'middle', CHART_PALETTE.axis, 11);
     });
+    svg.innerHTML = g;
+}
 
-    var opts = {
-        width: container.clientWidth || 720,
-        height: 360,
-        scales: { x: { time: true } },
-        series: [
-            {},
-            { label: 'Actual', stroke: '#1f6fd6', width: 2 },
-            { label: 'Predicted', stroke: '#f5b829', width: 2 },
-            {
-                label: 'Clipped (inverter-limited)',
-                stroke: '#b00020',
-                width: 0,
-                points: { show: true, size: 9 },
-            },
-        ],
-        axes: [
-            {},
-            { label: mode === 'cf' ? 'Capacity factor' : 'kWh / day' },
-        ],
+/**
+ * Render an actual-vs-predicted daily time series with clipped-day markers.
+ * @param {SVGElement} svg       - target inline <svg> (viewBox 0 0 900 320)
+ * @param {{idx:number,text:string}[]} ticks - x-axis tick positions/labels
+ * @param {number[]} actual
+ * @param {number[]} predicted
+ * @param {number[]} clippedIdx  - indices of clipped (inverter-limited) days
+ * @param {{fmt?:function}} [opts]
+ */
+function renderTimeSeriesChart(svg, ticks, actual, predicted, clippedIdx, opts) {
+    if (!actual || !actual.length) { _noData(svg, 'No data for this site.'); return; }
+    opts = opts || {};
+    var fmt = opts.fmt || function (v) { return Math.round(v); };
+    var W = 900, R = 18, L = 50, T = 14, B = 42, pw = W - L - R, ph = 320 - T - B;
+    var n = actual.length;
+    var peak = Math.max(Math.max.apply(null, actual), Math.max.apply(null, predicted));
+    var ymax = niceMax(peak * 1.05);
+    var X = function (i) { return L + pw * i / (n > 1 ? n - 1 : 1); };
+    var Y = function (v) { return T + ph * (1 - v / ymax); };
+    var g = '';
+    for (var k = 0; k <= 5; k++) {
+        var v = ymax * k / 5, y = Y(v);
+        g += _line(L, y, W - R, y, CHART_PALETTE.grid, 1);
+        g += _text(L - 8, y + 3, fmt(v), 'end', CHART_PALETTE.axis, 11);
+    }
+    (ticks || []).forEach(function (t) {
+        g += _text(X(t.idx), 320 - 16, t.text, 'middle', CHART_PALETTE.axis, 11);
+    });
+    var poly = function (arr) {
+        return arr.map(function (v, i) { return _n(X(i)) + ',' + _n(Y(v)); }).join(' ');
     };
-    return new uPlot(opts, [xs, actual, predicted, clippedMark], container);
+    g += '<polyline points="' + poly(predicted) + '" fill="none" stroke="'
+        + CHART_PALETTE.sun + '" stroke-width="2.4" stroke-linejoin="round"/>';
+    g += '<polyline points="' + poly(actual) + '" fill="none" stroke="'
+        + CHART_PALETTE.blue + '" stroke-width="2.4" stroke-linejoin="round"/>';
+    (clippedIdx || []).forEach(function (i) {
+        g += '<rect x="' + _n(X(i) - 4) + '" y="' + _n(Y(actual[i]) - 4)
+            + '" width="8" height="8" fill="none" stroke="' + CHART_PALETTE.clip
+            + '" stroke-width="2"/>';
+    });
+    svg.innerHTML = g;
+}
+
+/** Wire a segmented toggle (.seg) so each button sets `active` and reports its mode. */
+function wireSegmentedToggle(segEl, onChange) {
+    if (!segEl) { return; }
+    segEl.querySelectorAll('button').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            segEl.querySelectorAll('button').forEach(function (b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            onChange(btn.dataset.mode);
+        });
+    });
 }

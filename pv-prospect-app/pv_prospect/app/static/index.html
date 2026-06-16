@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PV Prospect</title>
+  <title>PV Prospect — UK solar yield, predicted</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="/static/favicon-64.png">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon-180.png">
@@ -13,97 +13,185 @@
   <link rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         crossorigin="">
-  <link rel="stylesheet"
-        href="https://unpkg.com/uplot@1.6.31/dist/uPlot.min.css"
-        crossorigin="">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <div class="brand">
-        <svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-          <circle cx="24" cy="24" r="13" fill="none" stroke="#f5b829" stroke-width="3"/>
-          <g stroke="#f5b829" stroke-width="3" stroke-linecap="round">
-            <line x1="24" y1="3" x2="24" y2="8"/>
-            <line x1="24" y1="40" x2="24" y2="45"/>
-            <line x1="3" y1="24" x2="8" y2="24"/>
-            <line x1="40" y1="24" x2="45" y2="24"/>
-          </g>
-          <path d="M9 28 H17 L21.5 19 L28 31 L33 23 H39" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="21.5" cy="19" r="2.6" fill="#ffffff"/>
-          <circle cx="33" cy="23" r="2.6" fill="#ffffff"/>
-        </svg>
-        <div>
-          <h1><span class="brand-pv">PV</span> Prospect</h1>
-          <p class="tagline">UK photovoltaic yield modelling</p>
+  <div class="bg" aria-hidden="true">
+    <span class="glow g1"></span><span class="glow g2"></span><span class="grid"></span>
+  </div>
+
+  <!-- reusable logo mark, cloned into every .mark slot by the inline script -->
+  <template id="mark-tmpl">
+    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <circle cx="24" cy="24" r="13" fill="none" stroke="var(--sun)" stroke-width="3"></circle>
+      <g stroke="var(--sun)" stroke-width="3" stroke-linecap="round">
+        <line x1="24" y1="3" x2="24" y2="8"></line>
+        <line x1="24" y1="40" x2="24" y2="45"></line>
+        <line x1="3" y1="24" x2="8" y2="24"></line>
+        <line x1="40" y1="24" x2="45" y2="24"></line>
+      </g>
+      <path d="M9 28 H17 L21.5 19 L28 31 L33 23 H39" fill="none" stroke="var(--blue)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"></path>
+      <circle cx="21.5" cy="19" r="2.6" fill="var(--navy)"></circle>
+      <circle cx="33" cy="23" r="2.6" fill="var(--navy)"></circle>
+    </svg>
+  </template>
+
+  <div class="shell">
+    <nav>
+      <a class="brand" data-page="home" href="#home">
+        <span class="mark"></span>
+        <span class="wm"><span class="pv">PV</span> Prospect</span>
+      </a>
+      <div class="navlinks">
+        <a data-page="prediction" href="#prediction">Prediction</a>
+        <a data-page="validation" href="#validation">Validation</a>
+        <a data-page="about" href="#about">About</a>
+      </div>
+    </nav>
+
+    <!-- ============ HOME / HERO ============ -->
+    <section class="page active" id="home">
+      <div class="hero">
+        <div class="hero-copy">
+          <span class="eyebrow"><span class="pulse"></span>UK · weather-driven model</span>
+          <h1 class="head">Know what your roof could produce<span class="swoosh"><svg viewBox="0 0 200 11" preserveAspectRatio="none"><path d="M2 8 C 50 2, 150 2, 198 7" fill="none" stroke="var(--sun)" stroke-width="4" stroke-linecap="round"></path></svg></span></h1>
+          <p class="lede">PV&nbsp;Prospect models real solar output from UK weather. Enter your location and a few panel details — two neural networks turn the climate into an estimate of the energy you'd generate.</p>
+          <div class="trust">
+            <div class="t"><span class="ic">⚡</span><span>Training data from <b><a class="lnk" href="https://pvoutput.org/" target="_blank" rel="noopener">PVOutput</a></b></span></div>
+            <span class="sep"></span>
+            <div class="t"><span class="ic">◴</span><span>Weather from <b><a class="lnk" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a></b></span></div>
+          </div>
+        </div>
+
+        <!-- UK PV-POTENTIAL MAP (illustrative; the rendered capacity-factor map
+             is served separately and shares this colour ramp) -->
+        <div class="mapframe">
+          <div class="maphead">
+            <span class="rtitle">PV potential · United Kingdom</span>
+          </div>
+          <div class="mapcanvas">
+            <svg class="ukmap" viewBox="0 0 220 330" role="img" aria-label="Map of the United Kingdom shaded by photovoltaic potential — higher in the south, lower in the north">
+              <defs>
+                <linearGradient id="pvgrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="var(--blue)"></stop>
+                  <stop offset="0.45" stop-color="#5092a3"></stop>
+                  <stop offset="0.74" stop-color="#e7a23f"></stop>
+                  <stop offset="1" stop-color="var(--sun)"></stop>
+                </linearGradient>
+                <clipPath id="gbclip"><path id="gbpath" d=""></path></clipPath>
+              </defs>
+              <path id="ireland" d="" fill="#e1e8ef" stroke="#ccd7e1" stroke-width="1"></path>
+              <g clip-path="url(#gbclip)">
+                <rect x="0" y="0" width="220" height="330" fill="url(#pvgrad)"></rect>
+                <path id="c1" class="contour" d=""></path>
+                <path id="c2" class="contour" d=""></path>
+                <path id="c3" class="contour" d=""></path>
+                <path id="c4" class="contour" d=""></path>
+              </g>
+              <path id="gboutline" d="" fill="none" stroke="#16395a" stroke-width="1.5" stroke-linejoin="round" opacity="0.5"></path>
+              <g font-family="var(--mono)" font-size="8" font-weight="600">
+                <g>
+                  <circle cx="150" cy="92" r="3.1" fill="#fff" stroke="#16395a" stroke-width="1.6"></circle>
+                  <text x="158" y="95" fill="#16395a" stroke="#fff" stroke-width="2.4" paint-order="stroke">Edinburgh</text>
+                </g>
+                <g>
+                  <circle cx="139" cy="158" r="3.1" fill="#fff" stroke="#16395a" stroke-width="1.6"></circle>
+                  <text x="147" y="161" fill="#16395a" stroke="#fff" stroke-width="2.4" paint-order="stroke">Manchester</text>
+                </g>
+                <g>
+                  <circle cx="169" cy="205" r="3.1" fill="#fff" stroke="#16395a" stroke-width="1.6"></circle>
+                  <text x="176" y="208" fill="#16395a" stroke="#fff" stroke-width="2.4" paint-order="stroke">London</text>
+                </g>
+                <g>
+                  <circle cx="99" cy="229" r="5" fill="none" stroke="var(--sun)" stroke-width="2"></circle>
+                  <circle cx="99" cy="229" r="2.3" fill="var(--sun)"></circle>
+                  <text x="50" y="246" fill="#16395a" stroke="#fff" stroke-width="2.4" paint-order="stroke">SW · highest</text>
+                </g>
+              </g>
+            </svg>
+          </div>
+          <div class="maplegend">
+            <span class="lab">Lower</span>
+            <span class="bar"></span>
+            <span class="lab">Higher</span>
+            <span class="unit">kWh / kWp · yr</span>
+          </div>
+          <div class="mapfoot">
+            <span class="dot"></span>
+            <span>North-East ≈ <b>780</b> · South-West ≈ <b>1,080</b> kWh/kWp</span>
+          </div>
         </div>
       </div>
-    </div>
-  </header>
 
-  <nav class="tab-bar" role="tablist">
-    <button class="tab-btn active" role="tab"
-            aria-selected="true" aria-controls="panel-prediction"
-            id="tab-prediction">
-      Prediction
-    </button>
-    <button class="tab-btn" role="tab"
-            aria-selected="false" aria-controls="panel-validation"
-            id="tab-validation">
-      Validation
-    </button>
-    <button class="tab-btn" role="tab"
-            aria-selected="false" aria-controls="panel-about"
-            id="tab-about">
-      About
-    </button>
-  </nav>
+      <!-- where to start -->
+      <section class="ia">
+        <div class="ia-head">
+          <h2>Where would you like to start?</h2>
+        </div>
+        <div class="iagrid">
+          <a class="ia-card primary" data-page="prediction" href="#prediction">
+            <span class="ic">⌂</span>
+            <span class="tag">Prediction</span>
+            <h3>Estimate your roof's yield</h3>
+            <p>Enter your location and panel setup and get a weather-driven estimate of the energy you'd generate across the year.</p>
+            <span class="go">Start a prediction →</span>
+          </a>
+          <a class="ia-card" data-page="validation" href="#validation">
+            <span class="ic">✓</span>
+            <span class="tag">Validation</span>
+            <h3>See how the model holds up</h3>
+            <p>Compare predictions against the real measured output of the systems the networks were trained on. No cherry-picking.</p>
+            <span class="go">View the validation →</span>
+          </a>
+          <a class="ia-card" data-page="about" href="#about">
+            <span class="ic">i</span>
+            <span class="tag">About</span>
+            <h3>How the model works</h3>
+            <p>The two-network method, the PVOutput &amp; Open-Meteo data sources, and the assumptions behind every estimate.</p>
+            <span class="go">About the model →</span>
+          </a>
+        </div>
+      </section>
+    </section>
 
-  <main>
-    <section id="panel-prediction" class="panel active"
-             role="tabpanel" aria-labelledby="tab-prediction">
-      <div class="section-intro">
-        <h2>Speculate a new installation</h2>
-        <p>
-          Click a point on the UK map and describe the panels. The model returns
-          a climatological (typical-year) annual yield estimate with an
-          uncertainty band. That band is a <strong>floor</strong>: a ±17 % (1σ)
-          per-site spread measured across the training sites — an arbitrary roof
-          can sit below it, so treat the estimate as optimistic.
-        </p>
+    <!-- ============ PREDICTION ============ -->
+    <section class="page" id="prediction">
+      <div class="page-header">
+        <span class="kick">Prediction</span>
+        <h1>Speculate a new installation</h1>
+        <p>Click a point on the UK map and describe the panels. The model returns a climatological (typical-year) annual yield estimate with an uncertainty band. That band is a <b>floor</b>: a ±17 % (1σ) per-site spread measured across the training sites — an arbitrary roof can sit below it, so treat the estimate as optimistic.</p>
       </div>
 
-      <div class="predict-layout">
-        <div id="prediction-map" class="map"></div>
+      <div class="grid-2">
+        <div class="card mapcard">
+          <div id="prediction-map" class="map"></div>
+        </div>
 
-        <form id="prediction-form" class="predict-form">
+        <form id="prediction-form" class="card formcard">
           <div class="field">
             <label>Location</label>
-            <span id="prediction-latlng" class="latlng">
-              Click the map to choose a point
-            </span>
+            <div class="ctrl loc" id="prediction-location">
+              <span class="pindot" hidden></span>
+              <span id="prediction-latlng" class="loc-coord ph">Click the map to choose a point</span>
+            </div>
           </div>
           <div class="field">
-            <label for="pred-capacity">Panel capacity (W)</label>
-            <input type="number" id="pred-capacity" min="1" step="1"
-                   value="4000" required>
+            <label for="pred-capacity">Panel capacity <span class="sub">(W)</span></label>
+            <input type="number" id="pred-capacity" class="ctrl" min="1" step="1" value="4000" required>
           </div>
           <div class="field">
-            <label for="pred-azimuth">Azimuth (° from N; 180 = S)</label>
-            <input type="number" id="pred-azimuth" min="0" max="359" step="1"
-                   value="180" required>
+            <label for="pred-azimuth">Azimuth <span class="sub">(° from N; 180 = S)</span></label>
+            <input type="number" id="pred-azimuth" class="ctrl" min="0" max="359" step="1" value="180" required>
           </div>
           <div class="field">
-            <label for="pred-tilt">Tilt (° from horizontal)</label>
-            <input type="number" id="pred-tilt" min="0" max="90" step="1"
-                   value="35" required>
+            <label for="pred-tilt">Tilt <span class="sub">(° from horizontal)</span></label>
+            <input type="number" id="pred-tilt" class="ctrl" min="0" max="90" step="1" value="35" required>
           </div>
           <div class="field">
-            <label for="pred-age">Install age (years)</label>
-            <input type="number" id="pred-age" min="0" step="0.5" value="0">
+            <label for="pred-age">Install age <span class="sub">(years)</span></label>
+            <input type="number" id="pred-age" class="ctrl" min="0" step="0.5" value="0">
           </div>
-          <button type="submit" id="pred-submit" class="submit-btn" disabled>
+          <button type="submit" id="pred-submit" class="btn-block primary" disabled>
             Estimate yield
           </button>
         </form>
@@ -111,158 +199,132 @@
 
       <div id="prediction-status" class="status" hidden></div>
 
-      <div id="prediction-result" hidden>
-        <div id="prediction-headline" class="headline"></div>
-        <div id="prediction-chart" class="chart"></div>
-        <p class="chart-note">
-          Estimated monthly energy for a typical year. The ± band on the headline
-          is the <em>annual</em> figure's 1σ floor — it is a uniform per-site
-          level spread, not broken out per month.
-        </p>
+      <div id="prediction-result" class="card result" hidden>
+        <div class="rtop">
+          <span class="rlab">Estimated annual yield</span>
+          <span class="badge">typical-year climatological</span>
+        </div>
+        <div class="big"><span class="v" id="pred-value">—</span><span class="u">kWh / year</span></div>
+        <div class="rangeline" id="pred-range"></div>
+
+        <div class="charttoolbar">
+          <span class="ct-title">Output by month <span class="ct-unit" id="pred-unit">kWh / month</span></span>
+          <div class="seg" id="pred-seg">
+            <button type="button" data-mode="month" class="active">kWh / month</button>
+            <button type="button" data-mode="day">kWh / day</button>
+            <button type="button" data-mode="cf">kW avg / kW peak</button>
+          </div>
+        </div>
+        <svg id="prediction-chart" class="chart-svg" viewBox="0 0 900 300" role="img" aria-label="Predicted output by month with uncertainty"></svg>
+        <p class="bandnote">Whiskers show the uniform ±17 % (1σ) per-site floor applied to each month — an annual-level spread, not month-specific uncertainty.</p>
+
         <ul id="prediction-caveats" class="caveats"></ul>
         <p id="prediction-meta" class="meta"></p>
       </div>
     </section>
 
-    <section id="panel-validation" class="panel"
-             role="tabpanel" aria-labelledby="tab-validation" hidden>
-      <div class="section-intro">
-        <h2>How the model tracks real sites</h2>
-        <p>
-          The deployed PV model is run over the last ~90 days of <em>real</em>
-          weather for each known site and compared against that site's measured
-          output. This path never runs the weather model, so it isolates
-          PV-model accuracy from weather-forecast error.
-        </p>
+    <!-- ============ VALIDATION ============ -->
+    <section class="page" id="validation">
+      <div class="page-header">
+        <span class="kick">Validation</span>
+        <h1>How the model tracks real sites</h1>
+        <p>The deployed PV model is run over the last ~90 days of <b>real</b> weather for each known site and compared against that site's measured output. This path never runs the weather model, so it isolates PV-model accuracy from weather-forecast error.</p>
       </div>
 
-      <div class="validation-layout">
-        <div id="validation-map" class="map validation-map"></div>
-        <div class="controls">
-          <label for="site-select">Site</label>
-          <select id="site-select" disabled>
-            <option>Loading sites…</option>
-          </select>
-          <label class="toggle">
-            <input type="checkbox" id="cf-toggle"> Show capacity factor
-          </label>
+      <div class="grid-2">
+        <div class="card mapcard">
+          <div id="validation-map" class="map"></div>
+        </div>
+
+        <div class="card ctrlcard">
+          <div class="field">
+            <label for="site-select">Site</label>
+            <select id="site-select" class="ctrl" disabled>
+              <option>Loading sites…</option>
+            </select>
+          </div>
+          <div class="legend-sites">
+            <span class="sw">N</span> numbered markers are the training sites — click any to load it.
+            <br><span class="sw cur">N</span> the highlighted marker is the site shown in the chart below.
+          </div>
         </div>
       </div>
 
       <div id="validation-status" class="status" hidden></div>
 
       <div id="validation-result" hidden>
-        <div id="validation-metrics" class="metrics"></div>
-        <div id="validation-chart" class="chart"></div>
-        <p class="chart-note">
-          Lines compare predicted vs actual daily energy. Red markers flag
-          <strong>clipped</strong> (inverter-limited) days — these are excluded
-          from the error metrics above, since the lost headroom is informative,
-          not model error.
-        </p>
+        <div id="validation-metrics" class="stats"></div>
+
+        <div class="card chartcard">
+          <div class="charttoolbar">
+            <span class="ct-title">Actual vs predicted <span class="ct-unit" id="val-unit">kWh / day</span></span>
+            <div class="seg" id="val-seg">
+              <button type="button" data-mode="kwh" class="active">kWh / day</button>
+              <button type="button" data-mode="cf">kW avg / kW peak</button>
+            </div>
+          </div>
+          <svg id="validation-chart" class="chart-svg" viewBox="0 0 900 320" role="img" aria-label="Daily energy: actual versus predicted over the validation window"></svg>
+          <div class="clegend">
+            <span class="it"><span class="ln" style="background:var(--blue)"></span>Actual</span>
+            <span class="it"><span class="ln" style="background:var(--sun)"></span>Predicted</span>
+            <span class="it"><span class="sq"></span>Clipped (inverter-limited)</span>
+          </div>
+        </div>
+
         <ul id="validation-caveats" class="caveats"></ul>
         <p id="validation-meta" class="meta"></p>
       </div>
     </section>
 
-    <section id="panel-about" class="panel"
-             role="tabpanel" aria-labelledby="tab-about" hidden>
-      <div class="section-intro">
-        <h2>About PV Prospect</h2>
+    <!-- ============ ABOUT ============ -->
+    <section class="page" id="about">
+      <div class="page-header">
+        <span class="kick">About</span>
+        <h1>About PV Prospect</h1>
       </div>
-      <div class="about-content">
-        <p>
-          PV Prospect estimates the annual energy yield of a UK solar installation.
-          The result is a <strong>typical-year climatological estimate</strong> — not
-          a forecast for a specific year, but a long-run average learned from
-          historical data.
-        </p>
+      <div class="article">
+        <p class="lead">PV&nbsp;Prospect estimates the annual energy yield of a UK solar installation. The result is a <b>typical-year climatological estimate</b> — not a forecast for a specific year, but a long-run average learned from historical data.</p>
+
         <h3>How the model works</h3>
-        <p>Two neural networks are chained with a physics step between them:</p>
-        <ol>
-          <li>
-            <strong>Weather model</strong> — given location and time of year, predicts
-            climatological values for direct normal irradiance (DNI), diffuse horizontal
-            irradiance (DHI), and ambient temperature, from
-            <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>
-            historical data.
-          </li>
-          <li>
-            <strong>Solar geometry</strong> — standard physics converts DNI and DHI into
-            plane-of-array (POA) irradiance for the given panel orientation and tilt.
-          </li>
-          <li>
-            <strong>PV model</strong> — predicts daily capacity factor from POA irradiance
-            and temperature; a fixed degradation factor (~0.7&thinsp;%/year) is applied for
-            panel age. Trained on generation data from 10 real UK systems shared on
-            <a href="https://pvoutput.org/" target="_blank" rel="noopener">PVOutput</a>.
-          </li>
+        <p style="margin-top:0;">Two neural networks are chained with a physics step between them:</p>
+        <ol class="olist">
+          <li><span class="n">1</span><span class="bd"><b>Weather model</b> — given location and time of year, predicts climatological values for direct normal irradiance (DNI), diffuse horizontal irradiance (DHI), and ambient temperature, from <a class="lnk" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> historical data.</span></li>
+          <li><span class="n">2</span><span class="bd"><b>Solar geometry</b> — standard physics converts DNI and DHI into plane-of-array (POA) irradiance for the given panel orientation and tilt.</span></li>
+          <li><span class="n">3</span><span class="bd"><b>PV model</b> — predicts daily capacity factor (kW avg / kW peak) from POA irradiance and temperature; a fixed degradation factor (~0.7 %/year) is applied for panel age. Trained on generation data from 10 real UK systems shared on <a class="lnk" href="https://pvoutput.org/" target="_blank" rel="noopener">PVOutput</a>.</span></li>
         </ol>
+
         <h3>Inputs</h3>
-        <ul>
+        <ul class="blist">
           <li>Location (latitude and longitude)</li>
-          <li>Panel rating (W) and optional inverter rating (W)</li>
+          <li>Panel rating (W)</li>
           <li>Orientation: azimuth (° clockwise from North) and tilt (° from horizontal)</li>
           <li>Installation age (years, optional)</li>
         </ul>
-        <p class="meta">
-          Source code:
-          <a href="https://github.com/rjferrier/pv-prospect" target="_blank" rel="noopener">
-            github.com/rjferrier/pv-prospect
-          </a>
-        </p>
+
+        <h3>Uncertainty</h3>
+        <div class="callout">The annual yield estimate carries a <b>±17 % (1σ) uncertainty floor</b>, calibrated by leave-one-site-out cross-validation across the 10 training sites. It captures site-to-site variability but excludes weather-year fluctuations and real-world variation in shading, soiling, and roof condition. The training corpus is self-selected by motivated system owners, so estimates are optimistic for an arbitrary installation.</div>
+
+        <div class="source">Source code: <a class="lnk" href="https://github.com/rjferrier/pv-prospect" target="_blank" rel="noopener">github.com/rjferrier/pv-prospect</a></div>
       </div>
     </section>
-  </main>
+  </div>
 
-  <footer>
-    <div id="footer-version" class="version-info"></div>
-    <a href="/docs" class="api-link">Developer API &#x2197;</a>
+  <footer class="foot">
+    <span class="brand">
+      <span class="mark"></span>
+      <span class="wm"><span class="pv">PV</span> Prospect</span>
+    </span>
+    <span id="footer-version" class="version-info"></span>
+    <a href="/docs" class="api-link">Developer API ↗</a>
   </footer>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-          crossorigin=""></script>
-  <script src="https://unpkg.com/uplot@1.6.31/dist/uPlot.iife.min.js"
           crossorigin=""></script>
   <script src="/static/api.js"></script>
   <script src="/static/map.js"></script>
   <script src="/static/chart.js"></script>
   <script src="/static/validation.js"></script>
   <script src="/static/prediction.js"></script>
-  <script>
-    /* Tab switching */
-    document.querySelectorAll('.tab-btn').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        document.querySelectorAll('.tab-btn').forEach(function(t) {
-          t.classList.remove('active');
-          t.setAttribute('aria-selected', 'false');
-        });
-        document.querySelectorAll('.panel').forEach(function(p) {
-          p.classList.remove('active');
-          p.hidden = true;
-        });
-        btn.classList.add('active');
-        btn.setAttribute('aria-selected', 'true');
-        var target = document.getElementById(btn.getAttribute('aria-controls'));
-        if (target) { target.classList.add('active'); target.hidden = false; }
-      });
-    });
-
-    /* Footer: model version from /version */
-    var versionEl = document.getElementById('footer-version');
-    callApi('GET', '/version').then(function(v) {
-      var parts = [
-        'PV model: ' + v.pv_model_version,
-        'R²=' + v.pv_critical_metric_r2.toFixed(3),
-        'Weather: ' + v.weather_model_version,
-      ];
-      if (v.window_loaded && v.window_updated_at) {
-        parts.push('Window: ' + v.window_updated_at);
-      }
-      versionEl.textContent = parts.join(' · ');
-    }).catch(function(e) {
-      versionEl.textContent = e.type === 'warming' ? 'Models warming up…' : '';
-    });
-  </script>
+  <script src="/static/ui.js"></script>
 </body>
 </html>
