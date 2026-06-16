@@ -2,6 +2,7 @@
 
 ## Next
 
+- [ ] [Show the capacity-factor map on the website (via the staging bucket)](briefs/capacity-factor-map-website.md) — `pv-prospect-map`'s render is offline-only; serve it from the staging bucket at runtime (the same path as `pv_sites.csv`) and embed it in the site, keeping the regenerated PNG out of the deploy image
 - [ ] [Replace Open-Meteo elevation with a cheaper API](briefs/elevation-api.md) — Open-Meteo is used to query elevation for a lat/lon; a free or cheaper dedicated elevation API would reduce costs
 
 ## Later
