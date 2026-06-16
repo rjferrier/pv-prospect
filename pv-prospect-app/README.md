@@ -125,6 +125,7 @@ curl http://localhost:8000/validate/89665
 | `store_dir` | `/tmp/pv-prospect-models` | Model artifact store. Override with `STORE_DIR` env var (e.g. `gs://pv-prospect-versioned-model` in production). |
 | `validation_window_dir` | `/tmp/pv-prospect-validation-window` | Validation window artifact directory. Override with `VALIDATION_WINDOW_DIR` env var. |
 | `resources_dir` | `resources` | Directory containing `pv_sites.csv`. Override with `RESOURCES_DIR` env var (e.g. `gs://<staging-bucket>/resources` in production). |
+| `assets_dir` | `assets` | Directory containing the generated `capacity-factor-map.png` (loaded at startup, served at `/assets/capacity-factor-map.png`). Empty in a fresh checkout. Override with `ASSETS_DIR` env var (e.g. `gs://<staging-bucket>/assets` in production). |
 | `rate_limit_enabled` | `true` | Enable per-IP rate limiting on `/predict` and `/validate/*`. Override with `RATE_LIMIT_ENABLED` env var (`false` to disable). |
 | `rate_limit_predict` | `20/minute` | Rate limit for `POST /predict`. Override with `RATE_LIMIT_PREDICT` env var (e.g. `10/minute`). |
 | `rate_limit_validate` | `30/minute` | Rate limit for `GET /validate/*`. Override with `RATE_LIMIT_VALIDATE` env var. |
@@ -192,6 +193,14 @@ the same JSON endpoints same-origin:
 Charts are hand-drawn inline SVG (`chart.js`, no charting library); maps are real
 Leaflet widgets. The Home hero shows an *illustrative* UK PV-potential map whose
 blue→teal→amber→sun colour ramp matches the capacity-factor render produced by
-`pv-prospect-map` (the rendered PNG itself is served separately). The OpenAPI
-contract the UI binds to is committed in `openapi.yaml` (regenerate from
-`app.openapi()` if routes change) and served live at `/docs`.
+`pv-prospect-map`. The **real** rendered map is served separately, from the
+staging bucket: it is fetched once at startup from `assets_dir` (see
+[Configuration](#configuration)) and served same-origin at
+`GET /assets/capacity-factor-map.png` (in memory, no per-request bucket read).
+The Home page embeds it in a "resource map" panel below the hero — a panel that
+stays hidden until the image loads, so a fresh checkout (no asset) or a
+not-yet-published bucket shows no broken image. A regenerated render is picked up
+on the next app restart. See `pv-prospect-map`'s README for how to produce and
+publish the PNG. The OpenAPI contract the UI binds to is committed in
+`openapi.yaml` (regenerate from `app.openapi()` if routes change) and served live
+at `/docs`.

@@ -466,6 +466,7 @@ module "cloud_run_app" {
     STORE_DIR             = "gs://${module.storage.versioned_model_bucket_name}"
     VALIDATION_WINDOW_DIR = "gs://${module.storage.staging_bucket_name}/data/served/validation-window"
     RESOURCES_DIR         = "gs://${module.storage.staging_bucket_name}/resources"
+    ASSETS_DIR            = "gs://${module.storage.staging_bucket_name}/assets"
   }
 
   depends_on = [google_project_service.apis, module.artifact_registry_app]

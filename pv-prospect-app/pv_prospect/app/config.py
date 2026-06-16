@@ -13,6 +13,11 @@ _DEFAULT_RATE_LIMIT_PREDICT = '20/minute'
 _DEFAULT_RATE_LIMIT_VALIDATE = '30/minute'
 _DEFAULT_RATE_LIMIT_TRUSTED_HOPS = 1
 
+# Local-dev default for the generated-asset directory (the capacity-factor map
+# PNG). Empty in a fresh checkout; the serve route degrades gracefully when the
+# asset is absent. Override via ASSETS_DIR (e.g. a gs:// prefix) in prod.
+_DEFAULT_ASSETS_DIR = 'assets'
+
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
@@ -26,6 +31,7 @@ class AppConfig:
     store_dir: str
     validation_window_dir: str
     resources_dir: str
+    assets_dir: str
     rate_limit_enabled: bool = _DEFAULT_RATE_LIMIT_ENABLED
     rate_limit_predict: str = _DEFAULT_RATE_LIMIT_PREDICT
     rate_limit_validate: str = _DEFAULT_RATE_LIMIT_VALIDATE
@@ -40,6 +46,9 @@ class AppConfig:
             os.environ.get('VALIDATION_WINDOW_DIR') or data['validation_window_dir']
         )
         resources_dir = os.environ.get('RESOURCES_DIR') or data['resources_dir']
+        assets_dir = os.environ.get('ASSETS_DIR') or data.get(
+            'assets_dir', _DEFAULT_ASSETS_DIR
+        )
         rate_limit_enabled = _env_bool(
             'RATE_LIMIT_ENABLED',
             data.get('rate_limit_enabled', _DEFAULT_RATE_LIMIT_ENABLED),
@@ -58,6 +67,7 @@ class AppConfig:
             store_dir=store_dir,
             validation_window_dir=validation_window_dir,
             resources_dir=resources_dir,
+            assets_dir=assets_dir,
             rate_limit_enabled=rate_limit_enabled,
             rate_limit_predict=rate_limit_predict,
             rate_limit_validate=rate_limit_validate,

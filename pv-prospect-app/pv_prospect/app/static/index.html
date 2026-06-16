@@ -152,6 +152,21 @@
           </a>
         </div>
       </section>
+
+      <!-- The real rendered capacity-factor map (served from the staging bucket
+           via /assets). The panel stays hidden until the image loads, so it never
+           shows a broken icon in dev or before the first publish — see ui.js. -->
+      <section class="ia resourcemap" id="resource-map" hidden>
+        <div class="ia-head">
+          <span class="kick">Resource map</span>
+          <h2>The model's view of UK solar potential</h2>
+        </div>
+        <figure class="card cf-map">
+          <img id="cf-map-img" src="/assets/capacity-factor-map.png"
+               alt="Annual-mean PV capacity-factor map of the United Kingdom, shaded from blue (lower) in the north to amber (higher) in the south-west.">
+          <figcaption>Annual-mean capacity factor (kW&nbsp;avg / kW&nbsp;peak) for a south-facing 37.5°&nbsp;panel, produced by running the same weather&nbsp;→&nbsp;POA&nbsp;→&nbsp;PV chain that sits behind every prediction over a UK grid. It is a <b>relative resource surface</b>, not a guaranteed per-site yield — the same ±17&nbsp;% (1σ) per-site floor and optimistic-corpus caveat apply (see <a class="lnk" data-page="about" href="#about">About</a>).</figcaption>
+        </figure>
+      </section>
     </section>
 
     <!-- ============ PREDICTION ============ -->

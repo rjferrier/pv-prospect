@@ -4,6 +4,9 @@ store_dir: '/tmp/pv-prospect-models'
 # Local-dev defaults; override via VALIDATION_WINDOW_DIR / RESOURCES_DIR env vars in prod.
 validation_window_dir: '/tmp/pv-prospect-validation-window'
 resources_dir: 'resources'
+# Generated-asset directory (the capacity-factor map PNG). Empty in a fresh
+# checkout; override via ASSETS_DIR (e.g. gs://<staging>/assets) in prod.
+assets_dir: 'assets'
 # Per-IP rate limits on the public endpoints. Override via RATE_LIMIT_* env vars
 # in prod (Cloud Run) to tune without a redeploy. trusted_hops selects the client
 # IP from the right of X-Forwarded-For; 1 = direct *.run.app, raise to 2 behind a

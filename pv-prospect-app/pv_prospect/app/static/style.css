@@ -207,6 +207,19 @@ p.lede { font-size: 18px; line-height: 1.55; color: var(--muted); margin: 22px 0
 .ia-card.primary { background: linear-gradient(180deg, #fffdf6, #fff); border-color: #fae3a3; }
 .ia-card.primary .ic { background: #fdf0cf; color: #9a6c00; }
 
+/* ---------- home resource map (the real rendered capacity-factor PNG) ---------- */
+.resourcemap .ia-head { display: flex; flex-direction: column; gap: 7px; }
+.cf-map { margin: 0; padding: 16px; }
+.cf-map img {
+    display: block; width: 100%; height: auto; border-radius: 12px;
+    border: 1px solid var(--line);
+    background: radial-gradient(120% 90% at 50% 28%, #f4f9fd, #e9f1f8);
+}
+.cf-map figcaption {
+    margin-top: 14px; font-size: 13.5px; line-height: 1.55; color: var(--muted); max-width: 88ch;
+}
+.cf-map figcaption b { color: var(--ink); font-weight: 600; }
+
 /* ---------- maps (real Leaflet) ---------- */
 .mapcard { overflow: hidden; padding: 0; }
 .map { height: 440px; width: 100%; }

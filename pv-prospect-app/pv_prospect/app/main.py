@@ -40,6 +40,13 @@ logger = logging.getLogger(__name__)
 
 _store: ModelStore | None = None
 _window_cache: ValidationWindowCache | None = None
+# The annual-mean capacity-factor render produced by pv-prospect-map. It is a
+# generated, model-dependent asset (not source), so it is fetched once at startup
+# from the configured assets dir and held in memory — mirroring the pv_sites.csv
+# load — rather than baked into the deploy image. None when absent (dev / not yet
+# published); the serve route 404s and the home-page panel hides itself.
+_capacity_factor_map: bytes | None = None
+CAPACITY_FACTOR_MAP_FILENAME = 'capacity-factor-map.png'
 _static_dir = Path(str(files('pv_prospect.app').joinpath('static')))
 
 # Prospect yield uncertainty band: the 1σ fractional margin on the expected
@@ -88,7 +95,7 @@ _VALIDATION_AGE_FILL_CAVEAT = (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    global _store, _window_cache
+    global _store, _window_cache, _capacity_factor_map
     config = get_config(AppConfig, base_config_dirs=[get_config_dir()])
     SETTINGS.predict = config.rate_limit_predict
     SETTINGS.validate = config.rate_limit_validate
@@ -124,9 +131,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info('PV site repo built from %s', config.resources_dir)
     except Exception:
         logger.warning('PV site repo load failed at startup', exc_info=True)
+    try:
+        assets_fs = filesystem_for(config.assets_dir)
+        _capacity_factor_map = assets_fs.read_bytes(CAPACITY_FACTOR_MAP_FILENAME)
+        logger.info('Capacity-factor map loaded from %s', config.assets_dir)
+    except Exception:
+        logger.warning(
+            'Capacity-factor map not available at startup (%s); the home-page '
+            'resource panel will be hidden',
+            config.assets_dir,
+        )
     yield
     _store = None
     _window_cache = None
+    _capacity_factor_map = None
 
 
 app = FastAPI(
@@ -262,6 +280,24 @@ def prospect_uncertainty_band(
 @app.get('/', include_in_schema=False)
 def index() -> FileResponse:
     return FileResponse(_static_dir / 'index.html')
+
+
+@app.get('/assets/capacity-factor-map.png', include_in_schema=False)
+def capacity_factor_map() -> Response:
+    """Serve the in-memory capacity-factor render fetched at startup.
+
+    Not rate-limited and served from memory (no per-request bucket read). The URL
+    is stable, so a short max-age keeps browser staleness bounded while honouring
+    the restart-to-refresh model: a regenerated render is picked up on the next
+    app restart.
+    """
+    if _capacity_factor_map is None:
+        raise HTTPException(status_code=404, detail='Capacity-factor map not available')
+    return Response(
+        content=_capacity_factor_map,
+        media_type='image/png',
+        headers={'Cache-Control': 'public, max-age=3600'},
+    )
 
 
 @app.get('/healthz', responses=_503)

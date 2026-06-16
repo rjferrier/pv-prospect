@@ -135,6 +135,16 @@ At startup, `pv-prospect-app`:
    until the cache self-heals on the next request.
 3. Builds the in-memory PV-site registry from
    `gs://<staging-bucket>/resources/pv_sites.csv`. Also non-fatal.
+4. Loads the annual-mean **capacity-factor map** PNG from
+   `gs://<staging-bucket>/assets/capacity-factor-map.png` into memory and serves it
+   at `GET /assets/capacity-factor-map.png` for the home-page resource panel. Like
+   the registry, this is a generated, model-dependent asset kept out of the deploy
+   image, so its refresh cadence is decoupled from app deploys; the load is
+   non-fatal (the panel hides itself if the asset is absent). It is produced
+   offline by `pv-prospect-map` — see that package's README for the publish step.
+
+A failed model load is fatal; the other three are non-fatal. Items 2–4 read from
+the staging bucket via the same `objectViewer` grant, so no new IAM is needed.
 
 Per-request freshness: before each `/validate/{system_id}` call, the app compares
 the in-memory manifest's `updated_at` against the live manifest on GCS. If the

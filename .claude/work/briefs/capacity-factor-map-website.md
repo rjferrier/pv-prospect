@@ -1,5 +1,35 @@
 # Show the capacity-factor map on the website (via the staging bucket)
 
+## Status (2026-06-16)
+
+**Code & docs complete and verified; only the outward-facing publish + deploy
+remain.** Resolved open decisions: bucket prefix = **`assets/`** (dedicated, with
+`config.assets_dir` / `ASSETS_DIR`); publish = **manual `gcloud storage cp`** for
+now (CI regeneration still deferred — needs a model store + elevation API);
+staleness = **restart-to-refresh** (asset loaded once at startup, `max-age=3600`);
+UI placement = a **home-page "resource map" panel** below the hero (the hero keeps
+its illustrative SVG).
+
+Done in the submodule (uncommitted at time of writing): `assets_dir` config +
+`ASSETS_DIR` override; startup load into a module global; `GET
+/assets/capacity-factor-map.png` (in-memory, schema-excluded, rate-limit-exempt,
+404 when absent); home panel that hides itself until the PNG loads; `style.css` /
+`ui.js`; acceptance tests (404-absent, 200-from-memory, filesystem `read_bytes`
+round-trip); `terraform/main.tf` `ASSETS_DIR` env; READMEs (app config row +
+served-website, map publish section, top-level startup list). The PNG was
+re-rendered with the brand ramp (pixel-verified blue→teal→amber→sun, not viridis).
+
+**Remaining (operator, outward-facing — confirm before running):**
+1. Upload the brand-ramp render (note the underscore→hyphen rename):
+   `gcloud storage cp pv-prospect-map/out/cf-map/capacity_factor_map.png
+   gs://pv-prospect-staging/assets/capacity-factor-map.png`
+   (use `capacity_factor_map.png`, **not** `…_map.v0.png`, which is viridis).
+2. Rebuild the app image and `terraform apply` so the new route **and** the
+   `ASSETS_DIR` env var ship; the asset loads on the resulting restart.
+
+Once the map is live on the deployed site, finalise: delete this brief and the
+TODO line (the steady-state behaviour is already in the READMEs).
+
 ## What
 
 Surface the `pv-prospect-map` annual-mean capacity-factor render

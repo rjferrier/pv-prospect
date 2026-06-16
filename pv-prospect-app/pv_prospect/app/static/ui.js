@@ -83,6 +83,19 @@
         });
     })();
 
+    // ---- home resource map: reveal its panel only once the PNG loads ----
+    // The asset is served from the staging bucket and is absent in dev / before
+    // the first publish, so the panel stays hidden unless the image resolves —
+    // no broken-image icon on the landing page.
+    (function revealResourceMap() {
+        var panel = document.getElementById('resource-map');
+        var img = document.getElementById('cf-map-img');
+        if (!panel || !img) { return; }
+        img.addEventListener('load', function () { panel.hidden = false; });
+        img.addEventListener('error', function () { panel.hidden = true; });
+        if (img.complete && img.naturalWidth > 0) { panel.hidden = false; }
+    })();
+
     // ---- footer: model version from /version ----
     var versionEl = document.getElementById('footer-version');
     callApi('GET', '/version').then(function (v) {

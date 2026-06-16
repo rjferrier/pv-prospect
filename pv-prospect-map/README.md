@@ -114,6 +114,28 @@ cp -r models/gate-a-store-2026-06-12/promoted/weather "$STORE/promoted/weather"
 # then: --store-dir ../../.tmp/cf-store
 ```
 
+## Publishing to the website
+
+`pv-prospect-app` serves this render on its home page, read at startup from
+`gs://pv-prospect-staging/assets/capacity-factor-map.png` (its `assets_dir` /
+`ASSETS_DIR`) — a generated, model-dependent asset kept **out** of the deploy
+image, mirroring how `pv_sites.csv` is hosted under `resources/`. Publishing is a
+manual upload of the locally generated PNG; a regenerated render is picked up on
+the app's next restart.
+
+```bash
+# from pv-prospect-map/, after a `capacity-factor-map` run wrote out/cf-map/
+gcloud storage cp out/cf-map/capacity_factor_map.png \
+    gs://pv-prospect-staging/assets/capacity-factor-map.png
+```
+
+The app's service account already has `objectViewer` on the staging bucket, so no
+IAM change is needed. To re-skin the render without re-running the chain (e.g. a
+palette change), re-render from the saved per-cell `capacity_factor.csv` by
+scattering it back onto the grid axes and calling `render_contour_map` — no model
+store or elevation API needed — then upload as above. CI automation of the full
+regeneration is deferred (it needs a model store and the elevation API).
+
 ## Caveats
 
 The map inherits the PV model's uncertainty (the ±17 % 1σ per-site floor) and the
