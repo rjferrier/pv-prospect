@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 
 import pytest
-from pv_prospect.app.poa import reconstruct_daily_mean_poa
+from pv_prospect.physics.poa import reconstruct_daily_mean_poa
 
 
 def test_returns_positive_poa_for_valid_summer_inputs() -> None:

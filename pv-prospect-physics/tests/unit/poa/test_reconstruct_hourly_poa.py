@@ -6,7 +6,7 @@ import datetime
 
 import numpy as np
 import pytest
-from pv_prospect.app.poa import reconstruct_daily_mean_poa, reconstruct_hourly_poa
+from pv_prospect.physics.poa import reconstruct_daily_mean_poa, reconstruct_hourly_poa
 
 
 def test_returns_24_element_array() -> None:

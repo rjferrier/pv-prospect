@@ -1,8 +1,9 @@
 # pv-prospect-physics
 
-Shared solar-irradiance physics for PV Prospect. Currently provides the
-plane-of-array (POA) irradiance calculation used by both the transformation
-pipeline and the prediction API.
+Shared solar-irradiance physics for PV Prospect. Provides the plane-of-array
+(POA) irradiance calculation used by both the transformation pipeline and the
+prediction API, plus the climatological POA *reconstruction* used wherever the
+weather model's monthly-mean DNI/DHI must be turned back into POA.
 
 ## Why this is a package
 
@@ -28,6 +29,19 @@ returns the `poa_global` series (W/m2) for a **single** panel geometry, using
 pvlib's `get_total_irradiance` with the isotropic sky-diffuse model. Callers with
 multiple panel geometries (e.g. `prepare_pv`) invoke it per geometry and weight
 the results by `area_fraction`.
+
+```python
+from pv_prospect.physics import reconstruct_hourly_poa, reconstruct_daily_mean_poa
+```
+
+`reconstruct_hourly_poa` / `reconstruct_daily_mean_poa` turn the weather model's
+monthly-mean 24h-mean DNI/DHI back into POA: they use a pvlib clear-sky profile
+for the representative day as the intraday *shape*, scale each component so its
+24h-mean matches the model output, then call `compute_poa_irradiance`. This is
+**prediction-time** logic (training uses measured DNI/DHI, never reconstructs);
+it lives here so every consumer — the prediction API (`pv-prospect-app`) and
+offline tools (`pv-prospect-map`) — shares one implementation beside the
+`compute_poa_irradiance` it wraps.
 
 ### Conventions the caller owns
 

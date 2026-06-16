@@ -32,8 +32,8 @@ from pv_prospect.etl.storage import (
     get_filesystem,
     parse_storage_config,
 )
+from pv_prospect.model import load_artifact, load_weather_artifact
 from pv_prospect.model.domain import ModelArtifact, WeatherModelArtifact
-from pv_prospect.model.persistence import load_artifact, load_weather_artifact
 
 logger = logging.getLogger(__name__)
 

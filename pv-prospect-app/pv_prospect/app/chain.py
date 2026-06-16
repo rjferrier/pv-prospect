@@ -11,13 +11,13 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from pv_prospect.app.poa import reconstruct_hourly_poa
 from pv_prospect.model import (
     clamped_power_pred,
     predict_capacity_factor,
     predict_weather,
 )
 from pv_prospect.model.domain import ModelArtifact, WeatherModelArtifact
+from pv_prospect.physics import reconstruct_hourly_poa
 
 # UK bounding box — models were trained exclusively on UK sites.
 _UK_LAT_MIN, _UK_LAT_MAX = 49.5, 61.0
