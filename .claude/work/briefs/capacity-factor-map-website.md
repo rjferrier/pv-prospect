@@ -19,13 +19,14 @@ round-trip); `terraform/main.tf` `ASSETS_DIR` env; READMEs (app config row +
 served-website, map publish section, top-level startup list). The PNG was
 re-rendered with the brand ramp (pixel-verified blue→teal→amber→sun, not viridis).
 
-**Remaining (operator, outward-facing — confirm before running):**
-1. Upload the brand-ramp render (note the underscore→hyphen rename):
-   `gcloud storage cp pv-prospect-map/out/cf-map/capacity_factor_map.png
-   gs://pv-prospect-staging/assets/capacity-factor-map.png`
-   (use `capacity_factor_map.png`, **not** `…_map.v0.png`, which is viridis).
-2. Rebuild the app image and `terraform apply` so the new route **and** the
-   `ASSETS_DIR` env var ship; the asset loads on the resulting restart.
+**Remaining (operator, outward-facing):**
+1. ~~Upload the brand-ramp render to
+   `gs://pv-prospect-staging/assets/capacity-factor-map.png`.~~ **Done 2026-06-16**
+   (214600 B, `image/png`).
+2. **Deploy** — rebuild the app image and `terraform apply` so the new route
+   **and** the `ASSETS_DIR` env var ship; the asset loads on the resulting
+   restart. Until this runs, the deployed site still lacks the route/env, so the
+   panel stays hidden in prod even though the PNG is in the bucket.
 
 Once the map is live on the deployed site, finalise: delete this brief and the
 TODO line (the steady-state behaviour is already in the READMEs).
