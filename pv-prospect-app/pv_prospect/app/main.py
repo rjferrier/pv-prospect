@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 from contextlib import asynccontextmanager
 from importlib.resources import files
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pv_prospect.app.chain import OutsideUKDomainError, check_uk_domain, predict_yield
 from pv_prospect.app.config import AppConfig
@@ -47,6 +48,11 @@ _window_cache: ValidationWindowCache | None = None
 # published); the serve route 404s and the home-page panel hides itself.
 _capacity_factor_map: bytes | None = None
 CAPACITY_FACTOR_MAP_FILENAME = 'capacity-factor-map.png'
+# Sidecar metadata alongside the PNG: the min/max contour-level percentages the
+# colour ramp spans, so the home-page gradient legend can show the real numeric
+# range (the render carries no baked-in colour bar). Loaded and served like the PNG.
+_capacity_factor_map_meta: dict[str, Any] | None = None
+CAPACITY_FACTOR_MAP_META_FILENAME = 'capacity-factor-map-meta.json'
 _static_dir = Path(str(files('pv_prospect.app').joinpath('static')))
 
 # Prospect yield uncertainty band: the 1σ fractional margin on the expected
@@ -95,7 +101,7 @@ _VALIDATION_AGE_FILL_CAVEAT = (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    global _store, _window_cache, _capacity_factor_map
+    global _store, _window_cache, _capacity_factor_map, _capacity_factor_map_meta
     config = get_config(AppConfig, base_config_dirs=[get_config_dir()])
     SETTINGS.predict = config.rate_limit_predict
     SETTINGS.validate = config.rate_limit_validate
@@ -141,10 +147,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             'resource panel will be hidden',
             config.assets_dir,
         )
+    try:
+        _capacity_factor_map_meta = json.loads(
+            filesystem_for(config.assets_dir).read_text(
+                CAPACITY_FACTOR_MAP_META_FILENAME
+            )
+        )
+        logger.info('Capacity-factor map metadata loaded from %s', config.assets_dir)
+    except Exception:
+        logger.warning(
+            'Capacity-factor map metadata not available at startup (%s); the '
+            'legend falls back to Lower/Higher',
+            config.assets_dir,
+        )
     yield
     _store = None
     _window_cache = None
     _capacity_factor_map = None
+    _capacity_factor_map_meta = None
 
 
 app = FastAPI(
@@ -296,6 +316,19 @@ def capacity_factor_map() -> Response:
     return Response(
         content=_capacity_factor_map,
         media_type='image/png',
+        headers={'Cache-Control': 'public, max-age=3600'},
+    )
+
+
+@app.get('/assets/capacity-factor-map-meta.json', include_in_schema=False)
+def capacity_factor_map_meta() -> JSONResponse:
+    """Serve the map's contour-range sidecar (loaded at startup) for the legend."""
+    if _capacity_factor_map_meta is None:
+        raise HTTPException(
+            status_code=404, detail='Capacity-factor map metadata not available'
+        )
+    return JSONResponse(
+        _capacity_factor_map_meta,
         headers={'Cache-Control': 'public, max-age=3600'},
     )
 

@@ -65,6 +65,11 @@ rather than a stock matplotlib colormap, so the render shares the PV Prospect
 website's palette — the same gradient the front end's PV-potential legend uses.
 Update both together if the brand palette changes.
 
+The output is **bare and transparent**: just the UK silhouette (gradient fill +
+white contour lines + a navy coastline), with no axes, title, or colour bar, on a
+transparent background. It is built to drop straight onto the website backdrop, so
+the page supplies its own gradient legend rather than baking one into the PNG.
+
 ## Usage
 
 ```bash
@@ -82,7 +87,8 @@ wheel, the same entry point runs as
 Outputs under `--out-dir`:
 
 - `capacity_factor.csv` — per-cell `latitude, longitude, capacity_factor`.
-- `capacity_factor_map.png` — the contour render.
+- `capacity_factor_map.png` — the contour render (bare transparent UK silhouette).
+- `capacity_factor_map_meta.json` — the min/max contour-level percentages the colour ramp spans (the website gradient legend reads these to label its endpoints).
 
 Options: `--resolution` (degrees, default 0.2), `--tilt` (default 37.5),
 `--azimuth` (default 180), `--age-years` (default 0).
@@ -127,6 +133,8 @@ the app's next restart.
 # from pv-prospect-map/, after a `capacity-factor-map` run wrote out/cf-map/
 gcloud storage cp out/cf-map/capacity_factor_map.png \
     gs://pv-prospect-staging/assets/capacity-factor-map.png
+gcloud storage cp out/cf-map/capacity_factor_map_meta.json \
+    gs://pv-prospect-staging/assets/capacity-factor-map-meta.json
 ```
 
 The app's service account already has `objectViewer` on the staging bucket, so no

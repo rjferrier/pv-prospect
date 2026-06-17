@@ -105,6 +105,23 @@ def test_assets_map_served_from_memory_when_loaded() -> None:
         main._capacity_factor_map = saved
 
 
+def test_assets_map_meta_404_when_absent() -> None:
+    resp = TestClient(app).get('/assets/capacity-factor-map-meta.json')
+    assert resp.status_code == 404
+
+
+def test_assets_map_meta_served_when_loaded() -> None:
+    meta = {'min_capacity_factor_percent': 9.0, 'max_capacity_factor_percent': 13.0}
+    saved = main._capacity_factor_map_meta
+    main._capacity_factor_map_meta = meta
+    try:
+        resp = TestClient(app).get('/assets/capacity-factor-map-meta.json')
+        assert resp.status_code == 200
+        assert resp.json() == meta
+    finally:
+        main._capacity_factor_map_meta = saved
+
+
 def test_capacity_factor_map_round_trips_through_filesystem(tmp_path: Path) -> None:
     # Locks the startup seam the assets route depends on: the filename constant
     # plus filesystem_for(...).read_bytes(...). Neither pv_sites.csv nor the

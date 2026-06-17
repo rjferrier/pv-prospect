@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -50,10 +51,15 @@ def render_contour_map(
     cf_percent_grid: np.ndarray,
     geometry: BaseGeometry,
     out_png: Path,
-    *,
-    title: str,
 ) -> None:
     """Render the ``(n_lat, n_lon)`` capacity-factor grid (NaN outside land).
+
+    Produces a **bare, transparent** web overlay: the UK silhouette filled with
+    the brand ramp plus contour lines, with no axes, title, or colour bar and a
+    transparent background, so it drops cleanly onto the website backdrop. The
+    site supplies its own gradient legend, so none is baked in; the legend's
+    numeric range is written to a ``<out_png stem>_meta.json`` sidecar (the
+    min/max contour-level percentages the colour ramp spans).
 
     ``cf_percent_grid`` is capacity factor in percent. To stop the filled
     contours falling short of the coastline (a quad fills only when all four
@@ -79,31 +85,43 @@ def render_contour_map(
         lat_grid,
         field,
         levels=levels,
-        colors='black',
-        linewidths=0.3,
-        alpha=0.35,
+        colors='white',
+        linewidths=0.4,
+        alpha=0.5,
     )
 
     clip_path = _geometry_to_clip_path(geometry)
     filled.set_clip_path(clip_path, ax.transData)
     lines.set_clip_path(clip_path, ax.transData)
 
+    # UK coastline, drawn over the fill in the brand navy (matches the site).
     polygons = getattr(geometry, 'geoms', [geometry])
     for polygon in polygons:
         x, y = polygon.exterior.xy
-        ax.plot(x, y, color='black', linewidth=0.5)
-
-    colorbar = fig.colorbar(filled, ax=ax, fraction=0.046, pad=0.04)
-    colorbar.set_label('Annual-mean capacity factor (%)')
+        ax.plot(x, y, color='#16395a', linewidth=0.7, alpha=0.6)
 
     mean_lat = float(np.mean(lats))
     ax.set_aspect(1.0 / math.cos(math.radians(mean_lat)))
     ax.set_xlim(float(lons.min()), float(lons.max()))
     ax.set_ylim(float(lats.min()), float(lats.max()))
-    ax.set_xlabel('Longitude')
-    ax.set_ylabel('Latitude')
-    ax.set_title(title)
+    ax.axis('off')
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_png, dpi=150, bbox_inches='tight')
+    fig.savefig(out_png, dpi=150, bbox_inches='tight', pad_inches=0, transparent=True)
     plt.close(fig)
+
+    # Sidecar metadata: the contour-level bounds the colour ramp spans, so the
+    # website can label its gradient legend with the real range (the baked-in
+    # colour bar having been dropped). These are the ends of the fill normalisation
+    # (floor(min)..ceil(max) in percent), i.e. what the bar's two ends represent.
+    meta_path = out_png.with_name(f'{out_png.stem}_meta.json')
+    meta_path.write_text(
+        json.dumps(
+            {
+                'min_capacity_factor_percent': round(float(levels[0]), 2),
+                'max_capacity_factor_percent': round(float(levels[-1]), 2),
+            },
+            indent=2,
+        )
+        + '\n'
+    )

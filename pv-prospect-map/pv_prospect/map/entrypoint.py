@@ -100,11 +100,7 @@ def main() -> None:
     ).to_csv(data_csv, index=False)
 
     out_png = args.out_dir / 'capacity_factor_map.png'
-    title = (
-        f'UK annual-mean PV capacity factor\n'
-        f'azimuth {args.azimuth}°, tilt {args.tilt:g}°, age {args.age_years:g}y'
-    )
-    render_contour_map(lats, lons, cf_percent_grid, geometry, out_png, title=title)
+    render_contour_map(lats, lons, cf_percent_grid, geometry, out_png)
 
     print(
         f'\nCapacity factor: min={100 * cf.min():.1f}%  '
@@ -112,6 +108,7 @@ def main() -> None:
     )
     print(f'Wrote {data_csv}')
     print(f'Wrote {out_png}')
+    print(f'Wrote {out_png.with_name(f"{out_png.stem}_meta.json")}')
 
 
 if __name__ == '__main__':
