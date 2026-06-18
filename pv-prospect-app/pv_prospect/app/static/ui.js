@@ -1,6 +1,6 @@
 /**
  * ui.js — chrome shared across pages: brand-mark injection, hash routing,
- * the illustrative hero UK map, and the footer model-version line.
+ * the illustrative home UK map, and the footer model-version line.
  *
  * Routing dispatches a `pv:pageshow` CustomEvent ({detail:{page}}) so the
  * prediction/validation controllers can (re)measure their Leaflet maps when
@@ -41,8 +41,8 @@
 
     show(location.hash.slice(1) || 'home');
 
-    // ---- illustrative hero UK map (smoothed coastlines + PV-potential bands) ----
-    (function buildHeroMap() {
+    // ---- illustrative home UK map (smoothed coastlines + PV-potential bands) ----
+    (function buildHomeMap() {
         function spline(pts, closed) {
             var n = pts.length;
             var get = function (i) {
@@ -83,27 +83,29 @@
         });
     })();
 
-    // ---- home resource map: reveal its panel only once the PNG loads ----
-    // The asset is served from the staging bucket and is absent in dev / before
-    // the first publish, so the panel stays hidden unless the image resolves —
-    // no broken-image icon on the landing page.
-    (function revealResourceMap() {
-        var panel = document.getElementById('resource-map');
-        var img = document.getElementById('cf-map-img');
-        if (!panel || !img) { return; }
-        img.addEventListener('load', function () { panel.hidden = false; });
-        img.addEventListener('error', function () { panel.hidden = true; });
-        if (img.complete && img.naturalWidth > 0) { panel.hidden = false; }
+    // ---- home map: swap the illustrative SVG for the real capacity-factor PNG ----
+    // The rendered PNG is served from the staging bucket and is absent in dev /
+    // before the first publish, so the illustrative SVG (built above) stays as a
+    // graceful fallback: the PNG is hidden until it loads, then it replaces the
+    // SVG. The contour-range sidecar fills the real legend bounds (e.g. "9.0 %"…
+    // "13.0 %"); on error the PNG simply stays hidden and the SVG shows through.
+    (function revealHomeMap() {
+        var img = document.getElementById('home-cf-img');
+        var svg = document.querySelector('.mapcanvas .ukmap');
+        if (!img) { return; }
+        function reveal() {
+            img.hidden = false;
+            if (svg) { svg.style.display = 'none'; }
+        }
+        img.addEventListener('load', reveal);
+        if (img.complete && img.naturalWidth > 0) { reveal(); }
 
-        // Fetch the contour-range sidecar and replace the placeholder "Lower" /
-        // "Higher" labels with the real numeric bounds (e.g. "9.0 %" / "13.0 %").
-        // Silently falls back to the placeholder text if the sidecar is absent.
         fetch('/assets/capacity-factor-map-meta.json')
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (meta) {
                 if (!meta) { return; }
-                var minEl = document.getElementById('cf-legend-min');
-                var maxEl = document.getElementById('cf-legend-max');
+                var minEl = document.getElementById('home-cf-min');
+                var maxEl = document.getElementById('home-cf-max');
                 if (minEl) { minEl.textContent = meta.min_capacity_factor_percent.toFixed(1) + ' %'; }
                 if (maxEl) { maxEl.textContent = meta.max_capacity_factor_percent.toFixed(1) + ' %'; }
             })

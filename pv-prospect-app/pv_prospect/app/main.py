@@ -76,6 +76,12 @@ SITE_DISPLAY_ID: dict[int, int] = {
 }
 SITE_REAL_ID: dict[int, int] = {v: k for k, v in SITE_DISPLAY_ID.items()}
 
+# Validation-site coordinates are coarsened to this many decimal places before
+# being exposed (the map markers / the /validate/sites response). At UK latitudes
+# 3 dp is ~100 m — enough to anonymise an installation's exact position while
+# keeping its marker in the right locale. The precise location is never served.
+SITE_COORD_DECIMALS = 3
+
 _VINTAGE_CAVEAT = (
     'Model limitation: predictions carry per-site level uncertainty due to '
     'self-selection bias in the training corpus (10 well-maintained PVOutput '
@@ -292,6 +298,16 @@ def prospect_uncertainty_band(
     )
 
 
+def coarsen_site_coordinate(value: float) -> float:
+    """Round an exposed validation-site coordinate to anonymise its location.
+
+    Coarsens to SITE_COORD_DECIMALS decimal places (~100 m at UK latitudes) so
+    the public /validate/sites response and its map markers never reveal an
+    installation's exact position.
+    """
+    return round(value, SITE_COORD_DECIMALS)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -435,9 +451,9 @@ def validate_sites(request: Request, response: Response) -> ValidateSitesRespons
     for sid in sorted(window.system_ids, key=lambda s: SITE_DISPLAY_ID.get(s, s)):
         display_id = SITE_DISPLAY_ID.get(sid, sid)
         try:
-            pv_site = get_pv_site_by_system_id(sid)
-            lat: float | None = float(pv_site.location.latitude)
-            lng: float | None = float(pv_site.location.longitude)
+            location = get_pv_site_by_system_id(sid).location
+            lat: float | None = coarsen_site_coordinate(float(location.latitude))
+            lng: float | None = coarsen_site_coordinate(float(location.longitude))
         except KeyError:
             lat = None
             lng = None

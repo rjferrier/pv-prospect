@@ -77,7 +77,7 @@
         });
     }
 
-    // ~8 evenly spaced x-axis ticks, labelled M/D from the ISO date strings.
+    // ~8 evenly spaced x-axis ticks, labelled D/M (UK order) from the ISO dates.
     function dateTicks(series) {
         var n = series.length;
         var count = Math.min(8, n);
@@ -85,7 +85,7 @@
         for (var k = 0; k < count; k++) {
             var idx = count === 1 ? 0 : Math.round(k * (n - 1) / (count - 1));
             var parts = series[idx].date.split('-');
-            ticks.push({ idx: idx, text: Number(parts[1]) + '/' + Number(parts[2]) });
+            ticks.push({ idx: idx, text: Number(parts[2]) + '/' + Number(parts[1]) });
         }
         return ticks;
     }

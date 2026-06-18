@@ -218,7 +218,7 @@ both require a redeploy.
 
 The app also serves a no-build demo UI from `/` (HTML + vanilla JS + CDN Leaflet,
 mounted at `/static`). It is a single hash-routed page (`ui.js`) with four views:
-a **Home** hero landing, **Prediction**, **Validation**, and **About**. It fronts
+a **Home** landing, **Prediction**, **Validation**, and **About**. It fronts
 the same JSON endpoints same-origin:
 
 - **Prediction** — click a UK map point, enter panel parameters, and see the
@@ -226,17 +226,20 @@ the same JSON endpoints same-origin:
   toggle (kWh/month · kWh/day · kW avg / kW peak) and ±17 % whiskers.
 - **Validation** — predicted-vs-actual over the rolling window, with the same unit
   toggle (kWh/day · kW avg / kW peak); clipped (inverter-limited) days are flagged.
+  Training-site markers are placed at coordinates coarsened to 3 dp (~100 m at UK
+  latitudes) so the map never reveals an installation's exact position; the precise
+  location is never served (see `coarsen_site_coordinate` / `SITE_COORD_DECIMALS`).
 
 Charts are hand-drawn inline SVG (`chart.js`, no charting library); maps are real
-Leaflet widgets. The Home hero shows an *illustrative* UK PV-potential map whose
-blue→teal→amber→sun colour ramp matches the capacity-factor render produced by
-`pv-prospect-map`. The **real** rendered map is served separately, from the
-staging bucket: it is fetched once at startup from `assets_dir` (see
-[Configuration](#configuration)) and served same-origin at
-`GET /assets/capacity-factor-map.png` (in memory, no per-request bucket read).
-The Home page embeds it in a "resource map" panel below the hero — a panel that
-stays hidden until the image loads, so a fresh checkout (no asset) or a
-not-yet-published bucket shows no broken image. A regenerated render is picked up
+Leaflet widgets. The Home page shows the **real** rendered capacity-factor map,
+fetched once at startup from `assets_dir` (see [Configuration](#configuration)) and
+served same-origin at `GET /assets/capacity-factor-map.png` (in memory, no
+per-request bucket read). The home map swaps to it once it loads; until then — and on a
+fresh checkout (no asset) or a not-yet-published bucket — it shows an
+*illustrative* inline-SVG UK PV-potential map (same blue→teal→amber→sun colour ramp
+as the `pv-prospect-map` render) as a graceful fallback, so no broken image ever
+appears. Its gradient legend shows the render's real capacity-factor bounds, read
+from the `capacity-factor-map-meta.json` sidecar. A regenerated render is picked up
 on the next app restart. See `pv-prospect-map`'s README for how to produce and
 publish the PNG. The OpenAPI contract the UI binds to is committed in
 `openapi.yaml` (regenerate from `app.openapi()` if routes change) and served live

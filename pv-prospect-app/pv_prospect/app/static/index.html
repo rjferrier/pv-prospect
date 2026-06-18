@@ -49,13 +49,12 @@
       </div>
     </nav>
 
-    <!-- ============ HOME / HERO ============ -->
+    <!-- ============ HOME ============ -->
     <section class="page active" id="home">
-      <div class="hero">
-        <div class="hero-copy">
-          <span class="eyebrow"><span class="pulse"></span>UK · weather-driven model</span>
+      <div class="home">
+        <div class="home-copy">
           <h1 class="head">Know what your roof could produce<span class="swoosh"><svg viewBox="0 0 200 11" preserveAspectRatio="none"><path d="M2 8 C 50 2, 150 2, 198 7" fill="none" stroke="var(--sun)" stroke-width="4" stroke-linecap="round"></path></svg></span></h1>
-          <p class="lede">PV&nbsp;Prospect models real solar output from UK weather. Enter your location and a few panel details — two neural networks turn the climate into an estimate of the energy you'd generate.</p>
+          <p class="lede">PV&nbsp;Prospect models real solar output from UK weather. Enter your location and a few panel details, and receive an estimate of the energy you'd generate.</p>
           <div class="trust">
             <div class="t"><span class="ic">⚡</span><span>Training data from <b><a class="lnk" href="https://pvoutput.org/" target="_blank" rel="noopener">PVOutput</a></b></span></div>
             <span class="sep"></span>
@@ -63,13 +62,18 @@
           </div>
         </div>
 
-        <!-- UK PV-POTENTIAL MAP (illustrative; the rendered capacity-factor map
-             is served separately and shares this colour ramp) -->
+        <!-- UK PV-POTENTIAL MAP. Shows the real rendered capacity-factor map
+             (served from the staging bucket via /assets, shares this colour
+             ramp). The illustrative SVG below is the graceful fallback shown in
+             dev / before the first publish; ui.js swaps to the PNG once it loads. -->
         <div class="mapframe">
           <div class="maphead">
             <span class="rtitle">PV potential · United Kingdom</span>
           </div>
           <div class="mapcanvas">
+            <img id="home-cf-img" class="cf-render"
+                 src="/assets/capacity-factor-map.png" hidden
+                 alt="Annual-mean PV capacity-factor map of the United Kingdom, shaded from blue (lower) in the north to amber (higher) in the south-west.">
             <svg class="ukmap" viewBox="0 0 220 330" role="img" aria-label="Map of the United Kingdom shaded by photovoltaic potential — higher in the south, lower in the north">
               <defs>
                 <linearGradient id="pvgrad" x1="0" y1="0" x2="0" y2="1">
@@ -111,14 +115,14 @@
             </svg>
           </div>
           <div class="maplegend">
-            <span class="lab">Lower</span>
+            <span class="lab" id="home-cf-min">Lower</span>
             <span class="bar"></span>
-            <span class="lab">Higher</span>
-            <span class="unit">kWh / kWp · yr</span>
+            <span class="lab" id="home-cf-max">Higher</span>
+            <span class="unit">capacity factor</span>
           </div>
           <div class="mapfoot">
             <span class="dot"></span>
-            <span>North-East ≈ <b>780</b> · South-West ≈ <b>1,080</b> kWh/kWp</span>
+            <span>Higher in the sunnier <b>south-west</b>, lower toward the <b>north</b></span>
           </div>
         </div>
       </div>
@@ -129,7 +133,7 @@
           <h2>Where would you like to start?</h2>
         </div>
         <div class="iagrid">
-          <a class="ia-card primary" data-page="prediction" href="#prediction">
+          <a class="ia-card" data-page="prediction" href="#prediction">
             <span class="ic">⌂</span>
             <span class="tag">Prediction</span>
             <h3>Estimate your roof's yield</h3>
@@ -139,39 +143,18 @@
           <a class="ia-card" data-page="validation" href="#validation">
             <span class="ic">✓</span>
             <span class="tag">Validation</span>
-            <h3>See how the model holds up</h3>
-            <p>Compare predictions against the real measured output of the systems the networks were trained on. No cherry-picking.</p>
+            <h3>See how well the model performs</h3>
+            <p>Compare predictions against the real measured output of the systems the networks were trained on.</p>
             <span class="go">View the validation →</span>
           </a>
           <a class="ia-card" data-page="about" href="#about">
             <span class="ic">i</span>
             <span class="tag">About</span>
             <h3>How the model works</h3>
-            <p>The two-network method, the PVOutput &amp; Open-Meteo data sources, and the assumptions behind every estimate.</p>
+            <p>Understand the two neural networks and physics powering the model.</p>
             <span class="go">About the model →</span>
           </a>
         </div>
-      </section>
-
-      <!-- The real rendered capacity-factor map (served from the staging bucket
-           via /assets). The panel stays hidden until the image loads, so it never
-           shows a broken icon in dev or before the first publish — see ui.js. -->
-      <section class="ia resourcemap" id="resource-map" hidden>
-        <div class="ia-head">
-          <span class="kick">Resource map</span>
-          <h2>The model's view of UK solar potential</h2>
-        </div>
-        <figure class="card cf-map">
-          <img id="cf-map-img" src="/assets/capacity-factor-map.png"
-               alt="Annual-mean PV capacity-factor map of the United Kingdom, shaded from blue (lower) in the north to amber (higher) in the south-west.">
-          <div class="maplegend cf-legend">
-            <span class="lab" id="cf-legend-min">Lower</span>
-            <span class="bar"></span>
-            <span class="lab" id="cf-legend-max">Higher</span>
-            <span class="unit">capacity factor</span>
-          </div>
-          <figcaption>Annual-mean capacity factor (kW&nbsp;avg / kW&nbsp;peak) for a south-facing 37.5°&nbsp;panel, produced by running the same weather&nbsp;→&nbsp;POA&nbsp;→&nbsp;PV chain that sits behind every prediction over a UK grid. It is a <b>relative resource surface</b>, not a guaranteed per-site yield — the same ±17&nbsp;% (1σ) per-site floor and optimistic-corpus caveat apply (see <a class="lnk" data-page="about" href="#about">About</a>).</figcaption>
-        </figure>
       </section>
     </section>
 
@@ -249,7 +232,7 @@
       <div class="page-header">
         <span class="kick">Validation</span>
         <h1>How the model tracks real sites</h1>
-        <p>The deployed PV model is run over the last ~90 days of <b>real</b> weather for each known site and compared against that site's measured output. This path never runs the weather model, so it isolates PV-model accuracy from weather-forecast error.</p>
+        <p>The deployed PV model is run over the last ~90 days of real weather for each known site and compared against that site's measured output. This path never runs the weather model, so it isolates PV-model accuracy from weather-forecast error.</p>
       </div>
 
       <div class="grid-2">
@@ -307,22 +290,25 @@
         <p class="lead">PV&nbsp;Prospect estimates the annual energy yield of a UK solar installation. The result is a <b>typical-year climatological estimate</b> — not a forecast for a specific year, but a long-run average learned from historical data.</p>
 
         <h3>How the model works</h3>
-        <p style="margin-top:0;">Two neural networks are chained with a physics step between them:</p>
+        <p style="margin-top:0;">Two neural networks, chained with a physics step, turn a location, panel rating and orientation into an energy estimate:</p>
         <ol class="olist">
-          <li><span class="n">1</span><span class="bd"><b>Weather model</b> — given location and time of year, predicts climatological values for direct normal irradiance (DNI), diffuse horizontal irradiance (DHI), and ambient temperature, from <a class="lnk" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> historical data.</span></li>
-          <li><span class="n">2</span><span class="bd"><b>Solar geometry</b> — standard physics converts DNI and DHI into plane-of-array (POA) irradiance for the given panel orientation and tilt.</span></li>
-          <li><span class="n">3</span><span class="bd"><b>PV model</b> — predicts daily capacity factor (kW avg / kW peak) from POA irradiance and temperature; a fixed degradation factor (~0.7 %/year) is applied for panel age. Trained on generation data from 10 real UK systems shared on <a class="lnk" href="https://pvoutput.org/" target="_blank" rel="noopener">PVOutput</a>.</span></li>
+          <li><span class="n">1</span><span class="bd"><b>Weather model</b> — predicts the typical-year solar resource.</span></li>
+          <li><span class="n">2</span><span class="bd"><b>Solar geometry</b> — projects it onto the panel plane.</span></li>
+          <li><span class="n">3</span><span class="bd"><b>PV model</b> — converts that into electrical yield.</span></li>
         </ol>
 
-        <h3>Inputs</h3>
-        <ul class="blist">
-          <li>Location (latitude and longitude)</li>
-          <li>Panel rating (W)</li>
-          <li>Orientation: azimuth (° clockwise from North) and tilt (° from horizontal)</li>
-          <li>Installation age (years, optional)</li>
-        </ul>
+        <h3>1 · Weather model</h3>
+        <p>Given a location and time of year, the first network predicts a typical-year climatology of the solar resource: direct normal irradiance (DNI), diffuse horizontal irradiance (DHI), and ambient temperature. It is trained on <a class="lnk" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> historical data. It takes no day-specific weather inputs (no live cloud cover, no forecast) — it predicts the long-run average for a location and date, which is why the result is a climatology rather than a forecast for a single year.</p>
 
-        <h3>Uncertainty</h3>
+        <h3>2 · Solar geometry</h3>
+        <p>A deterministic physics step (no learned parameters) converts DNI and DHI into <b>plane-of-array (POA) irradiance</b> for the panel's azimuth and tilt.</p>
+
+        <h3>3 · PV model</h3>
+        <p>The second network predicts <b>daily capacity factor</b> (kW avg / kW peak) from POA irradiance and temperature, then scales by panel rating to give energy. It is trained on generation data from 10 UK systems shared on <a class="lnk" href="https://pvoutput.org/" target="_blank" rel="noopener">PVOutput</a> (unaffiliated).</p>
+        <ul class="blist">
+          <li>A fixed ~0.7 %/year degradation is applied for installation age.</li>
+          <li>An inverter cap is applied to reconstructed hourly power.</li>
+        </ul>
         <div class="callout">The annual yield estimate carries a <b>±17 % (1σ) uncertainty floor</b>, calibrated by leave-one-site-out cross-validation across the 10 training sites. It captures site-to-site variability but excludes weather-year fluctuations and real-world variation in shading, soiling, and roof condition. The training corpus is self-selected by motivated system owners, so estimates are optimistic for an arbitrary installation.</div>
 
         <div class="source">Source code: <a class="lnk" href="https://github.com/rjferrier/pv-prospect" target="_blank" rel="noopener">github.com/rjferrier/pv-prospect</a></div>
