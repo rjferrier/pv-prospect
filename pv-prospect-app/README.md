@@ -58,7 +58,7 @@ poetry run uvicorn pv_prospect.app.main:app --reload
 To work offline, point `RESOURCES_DIR` at your local `pv-prospect-instance`
 checkout (`.../pv-prospect-instance/data/static`) and seed the validation window
 to a local directory (see
-[Seeding the Validation Window](../README.md#seeding-the-validation-window)),
+[Seeding the Validation Window](../pv-prospect-data-transformation/doc/runbooks/seed-validation-window.md)),
 then point `VALIDATION_WINDOW_DIR` at it.
 
 > Do **not** copy `pv_sites.csv` into `pv-prospect-app/resources/`: that path is
@@ -176,6 +176,43 @@ can produce brief irradiance spikes above the clear-sky envelope, this slightly
 under-estimates clipping losses — a conservative direction. The `/validate`
 route uses real measured daily-mean power and excludes clipped days from
 metrics, so this approximation does not affect validation accuracy reporting.
+
+## Deployment
+
+`pv-prospect-app` runs as a Terraform-managed Cloud Run Service; there is no CD
+pipeline, so deploys are manual. The easiest path is `deploy.sh deploy-app` from
+the `terraform/` directory, which expands to `build-app,terraform-app`:
+
+```bash
+cd terraform
+bash deploy.sh deploy-app
+```
+
+Equivalently, manual steps run from the **submodule root** (one level up from
+`pv-prospect-app/`) so the shared local packages are visible to the Dockerfile's
+`COPY` instructions:
+
+```bash
+APP_TAG=$(git rev-parse --short HEAD)
+IMAGE_URL=$(cd terraform && terraform output -raw artifact_registry_app_url)/pv-prospect-app
+gcloud auth configure-docker europe-west2-docker.pkg.dev --quiet
+
+docker build -t "$IMAGE_URL:$APP_TAG" --target entrypoint -f pv-prospect-app/Dockerfile .
+docker push "$IMAGE_URL:$APP_TAG"
+
+cd terraform && terraform apply -var "app_image_tag=$APP_TAG"
+```
+
+The image is tagged with the short commit SHA (not `:latest`) so Terraform always
+sees a changed tag and rolls Cloud Run to the new revision. Static website assets
+are baked into the image (`pv_prospect/app/static/`) and the promoted models load
+at startup, so picking up new static assets or a freshly promoted `model-v<date>`
+both require a redeploy.
+
+**Public by default.** The service is public (`allow_unauthenticated = true` in
+`terraform/variables.tf`), protected by per-IP rate limiting baked into the image
+(see [Rate limiting](#rate-limiting)). To restrict to IAM auth, set
+`allow_unauthenticated = false` in `terraform.tfvars` and re-apply.
 
 ## Served website
 

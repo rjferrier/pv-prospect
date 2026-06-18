@@ -124,8 +124,9 @@ is idempotent: re-running or catching up a skipped day simply deduplicates
 on `(system_id, time)`.
 
 The step **fails closed** if the artifact has not been seeded — it never
-bootstraps from scratch. See the top-level README's _Seeding the Validation
-Window_ section for the one-time seed procedure.
+bootstraps from scratch. See
+[`doc/runbooks/seed-validation-window.md`](doc/runbooks/seed-validation-window.md)
+for the one-time seed procedure.
 
 ### How the stages connect
 

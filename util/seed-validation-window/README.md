@@ -5,8 +5,9 @@ from a locally-pulled prepared PV corpus and writes a rolling N-day window to
 a local directory or GCS URI.
 
 Run once at launch before enabling the daily `maintain_validation_window`
-transformer job. See the top-level README's _Seeding the Validation Window_
-section for the full procedure (including the targeted DVC pull).
+transformer job. See
+[`pv-prospect-data-transformation/doc/runbooks/seed-validation-window.md`](../../pv-prospect-data-transformation/doc/runbooks/seed-validation-window.md)
+for the full procedure (including the targeted DVC pull).
 
 ## Setup
 
