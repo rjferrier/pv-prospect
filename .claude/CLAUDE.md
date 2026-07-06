@@ -181,6 +181,28 @@ won't show. The report captures what was done and why, the key results/measureme
 facts a future reader needs that neither the code nor the commit history reveals, and any
 follow-up the task deliberately left open.
 
+Preferred report format: reports are **self-contained** (a future reader has no access to the
+conversation or queries that prompted them) and structured as:
+
+- An unnumbered **Summary** section first, before the Contents.
+- A **Contents** list of the numbered sections, formatted as plain lines rather than a
+  Markdown list: escape the numbers' periods, and end every line except the last of each
+  block with a hard line break (trailing `\`). Unnumbered end-sections (References,
+  Appendices) form a second block after a blank line, e.g.:
+
+  ```
+  1\. Introduction\
+  ...
+
+  References\
+  Appendix A
+  ```
+- Numbered body sections, opening with an **Introduction** (the review/task's purpose and scope,
+  inlining any originating question in the report's own voice) and closing with **Conclusions**
+  and **Recommendations** where they apply.
+- Optional unnumbered **References** and **Appendices** sections at the end, for supporting
+  material that doesn't belong in the main body.
+
 A typical task lifecycle:
 - Start as a brief (what, why, any blockers).
 - Optionally promote to a plan if the scope requires design work.
