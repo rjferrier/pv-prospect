@@ -1,21 +1,17 @@
 # Cloud Storage resources for data management and DVC
 #
 # - staging: single bucket with data/ and tracking/ top-level prefixes
-#       data/      — resources/, raw/, cleaned/, prepared-batches/, prepared/
+#       data/      — resources/, cleaned/, prepared-batches/, prepared/, served/
 #       tracking/  — manifests/, cursors/, ledger/, logs/
-# - versioned-raw: corpus of raw CSV data tracked by DVC
+# - raw: dedicated durable archive of raw extracted CSVs (see archive-raw-data).
+#       Extraction writes here and transform reads here (via the shared
+#       staged_raw_data_storage config key); a lifecycle rule tiers each object
+#       Standard -> Coldline at age 8 days, in place. Not DVC-versioned: raw is
+#       append-only + non-refetchable, so it needs durability, not git-tag
+#       reconstructability.
 # - versioned-feature: corpus of model-ready feature data tracked by DVC
 # - versioned-model: trained model artifacts tracked by DVC (lineage role)
 #     + plain promoted/{pv,weather}/ serving path read by pv-prospect-app
-
-resource "google_storage_bucket" "pv_prospect_data" {
-  name                        = "pv-prospect-data"
-  location                    = var.region
-  uniform_bucket_level_access = true
-  hierarchical_namespace {
-    enabled = true
-  }
-}
 
 resource "google_storage_bucket" "staging" {
   name                        = "${var.bucket_prefix}-staging"
@@ -27,13 +23,28 @@ resource "google_storage_bucket" "staging" {
   }
 }
 
-resource "google_storage_bucket" "versioned_raw" {
-  name                        = "${var.bucket_prefix}-versioned-raw"
+# Dedicated raw-data archive. Objects land Standard (hot, transform consumes
+# within ~1-2 days) and auto-tier to Coldline after 8 days, in place at the same
+# path — a week of Standard margin covers pipeline catch-up before the cold tail
+# tiers down. No retention lock: the archival threat model is not a concern, and a
+# lock would block any future correction.
+resource "google_storage_bucket" "raw" {
+  name                        = "${var.bucket_prefix}-raw"
   location                    = var.region
   uniform_bucket_level_access = true
 
   hierarchical_namespace {
     enabled = true
+  }
+
+  lifecycle_rule {
+    action {
+      type          = "SetStorageClass"
+      storage_class = "COLDLINE"
+    }
+    condition {
+      age = 8
+    }
   }
 }
 
@@ -63,12 +74,6 @@ resource "google_service_account" "dvc_sa" {
 }
 
 # The DVC SA only needs write access to the versioned buckets.
-resource "google_storage_bucket_iam_member" "dvc_sa_versioned_raw" {
-  bucket = google_storage_bucket.versioned_raw.name
-  role   = "roles/storage.objectCreator"
-  member = "serviceAccount:${google_service_account.dvc_sa.email}"
-}
-
 resource "google_storage_bucket_iam_member" "dvc_sa_versioned_feature" {
   bucket = google_storage_bucket.versioned_feature.name
   role   = "roles/storage.objectCreator"

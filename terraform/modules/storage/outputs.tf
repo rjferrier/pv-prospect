@@ -8,9 +8,9 @@ output "staging_bucket_name" {
   description = "Name of the staging bucket (data/ and tracking/ top-level prefixes)"
 }
 
-output "versioned_raw_bucket_name" {
-  value       = google_storage_bucket.versioned_raw.name
-  description = "Name of the versioned raw data bucket"
+output "raw_bucket_name" {
+  value       = google_storage_bucket.raw.name
+  description = "Name of the dedicated raw-data archive bucket"
 }
 
 output "versioned_feature_bucket_name" {

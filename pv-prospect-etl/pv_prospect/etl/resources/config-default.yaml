@@ -3,6 +3,11 @@
 #   tracking/  — manifests, cursors, ledger entries, and write-audit logs
 #   resources/ — supporting data that has been manually collected and assembled
 # Each second-level prefix below carves out its own subtree.
+#
+# Raw extracted data is the exception: it lives in its own durable archive bucket
+# (pv-prospect-raw), not under staging/data/raw. Extraction writes it and transform
+# reads it via staged_raw_data_storage below; a lifecycle rule tiers it to Coldline
+# after 8 days. See the archive-raw-data task.
 
 resources_storage:
   backend: 'gcs'
@@ -11,8 +16,7 @@ resources_storage:
 
 staged_raw_data_storage:
   backend: 'gcs'
-  bucket_name: 'pv-prospect-staging'
-  prefix: 'data/raw'
+  bucket_name: 'pv-prospect-raw'
 
 staged_cleaned_data_storage:
   backend: 'gcs'
@@ -53,10 +57,6 @@ log_storage:
   backend: 'gcs'
   bucket_name: 'pv-prospect-staging'
   prefix: 'tracking/logs'
-
-versioned_raw_data_storage:
-  backend: 'gcs'
-  bucket_name: 'pv-prospect-versioned-raw'
 
 versioned_feature_data_storage:
   backend: 'gcs'

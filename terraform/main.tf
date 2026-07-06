@@ -48,6 +48,15 @@ resource "google_storage_bucket_iam_member" "pipeline_staging" {
   member = "serviceAccount:${google_service_account.pipeline.email}"
 }
 
+# The pipeline SA reads/writes objects in the dedicated raw archive bucket:
+# extraction writes, transform reads, and the one-time migration deletes from the
+# staging source (already covered by the staging grant above).
+resource "google_storage_bucket_iam_member" "pipeline_raw" {
+  bucket = module.storage.raw_bucket_name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.pipeline.email}"
+}
+
 # The pipeline SA needs to run Cloud Run Jobs
 resource "google_project_iam_member" "pipeline_run_invoker" {
   project = var.project_id
