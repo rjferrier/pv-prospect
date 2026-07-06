@@ -2,6 +2,7 @@
 
 ## Next
 
+- [ ] [Floor the backfill march at 2016 and densify the weather grid](briefs/openmeteo-2016-floor.md) — **operational bleed** (`reports/openmeteo-2016-floor.md`): the weather-grid backfill has failed ~8.5k pre-2016 weather fetches/day since 2026-06-19 (Open-Meteo's fixed 2016-01-01 floor vs floor-less cursors). Add a shared `MIN_ARCHIVE_DATE`: halt PV-sites at the floor (R1a — deadline ~late Sep 2026, before it orphans non-refetchable raw PV) and give the weather grid a 2-D densifying cursor with a `target_density` cap (R1b, chosen). Corpus is safe by construction — this is efficiency + the deferred spatial-densification, not a repair
 - [ ] [Replace Open-Meteo elevation with a cheaper API](briefs/elevation-api.md) — Open-Meteo is used to query elevation for a lat/lon; a free or cheaper dedicated elevation API would reduce costs
 - [ ] [Version raw extracted data alongside prepared data in the weekly versioning run](briefs/version-raw-data.md) — **raised from Later** (`reports/data-pipeline-retrospective.md` rec 2): safety precondition for `data-derived-transform-planning` — "delete prepared and re-run" recovery is only routine if raw is versioned (PVOutput history is non-refetchable)
 
