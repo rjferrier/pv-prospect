@@ -218,3 +218,98 @@ bulk move + two dead-bucket decommissions + docs. No Python, no versioner change
 no new service. Unblocks `data-derived-transform-planning` (raw is now durable).
 Do the DVC-scaffolding cleanup (step 5) in the same change since it's the direct
 counterpart of the pivot.
+
+---
+
+## Phase A — landed (reversible repo work)
+
+Committed and inert until a deliberate deploy/apply:
+
+- Submodule `5a2524e`: `terraform/` (new `raw` bucket + lifecycle + pipeline IAM +
+  `raw_bucket_name` output; removed `versioned_raw` and `pv_prospect_data`
+  resources/IAM/output) and `pv-prospect-etl` `config-default.yaml`
+  (`staged_raw_data_storage` → `pv-prospect-raw`, no prefix; dropped
+  `versioned_raw_data_storage`).
+- Instance repo `5263d45`: `.dvc/config` (removed `raw` remote), `CLAUDE.md` (DVC
+  section rewrite).
+
+Confirmed at write time: `versioned-raw` empty (0 B), `pv-prospect-data` 656 MB,
+`staging/data/raw` 5.96 GB / 701k objects (`gcloud storage du`); no runtime env
+override touches the raw bucket (`apply_prefix_overrides` rewrites only
+prepared/cursors/ledger *prefixes*, never `staged_raw` or any `bucket_name`);
+`terraform validate` + `fmt` clean; transformation config/override tests green.
+
+Deliberately **not** in Phase A (they must track live reality / real measurements):
+narrative docs (`README.md`, `doc/architecture.puml`), the `reports/` entry, and
+task finalisation (delete brief + plan, TODO). These ride with Phase B execution.
+
+## Phase B — execution runbook (gated on go-ahead)
+
+Outward-facing, partly irreversible; run as one deliberate operational sequence.
+Env: project `semiotic-effort-474309-t7`, region/location `europe-west2`. New
+bucket layout: **no prefix** — objects live at bucket root (`timeseries/…`), so the
+migration must map `data/raw/<X>` → `<X>`.
+
+1. **Create the new bucket + IAM only** (targeted apply — does *not* touch the
+   removed buckets yet):
+   ```
+   cd terraform
+   terraform apply \
+     -target=module.storage.google_storage_bucket.raw \
+     -target=google_storage_bucket_iam_member.pipeline_raw
+   gcloud storage buckets describe gs://pv-prospect-raw \
+     --format='value(lifecycle_config)'   # confirm SetStorageClass→COLDLINE age 8
+   ```
+
+2. **Quiesce** the pipeline (daily schedulers leave `paused` unmanaged, so
+   out-of-band pause is safe and Terraform won't fight it):
+   ```
+   for J in pv-prospect-daily-extract \
+            pv-prospect-daily-extract-pv-sites-backfill \
+            pv-prospect-daily-extract-weather-grid-backfill \
+            pv-prospect-daily-transform \
+            pv-prospect-daily-transform-pv-sites-backfill \
+            pv-prospect-daily-transform-weather-grid-backfill; do
+     gcloud scheduler jobs pause "$J" --location=europe-west2
+   done
+   ```
+   Let any in-flight execution drain before proceeding.
+
+3. **Migrate** existing raw out of staging, straight to Coldline (already-cold,
+   already-transformed data — skip the 8-day Standard tail). 701k objects: expect
+   this to run long; use a resumable session (tmux/`nohup`) or Storage Transfer:
+   ```
+   gcloud storage mv gs://pv-prospect-staging/data/raw/* gs://pv-prospect-raw/ \
+     --recursive --storage-class=COLDLINE
+   # spot-check the path mapping is data/raw/<X> → <X>:
+   gcloud storage ls gs://pv-prospect-raw/timeseries/pvoutput/ | head
+   gcloud storage ls gs://pv-prospect-staging/data/raw/   # should be empty
+   ```
+
+4. **Deploy the redirected config** via the normal image build/deploy path: rebuild
+   + push the `data-extraction` and `data-transformation` images (they bundle the
+   `pv-prospect-etl` config), bump `extractor_image_tag` / `transformer_image_tag`
+   in `terraform.tfvars`, and apply. New writes/reads now use `pv-prospect-raw`.
+
+5. **Verify end-to-end** (still quiesced): trigger one extract execution for a
+   single system/day and confirm the object lands at
+   `gs://pv-prospect-raw/timeseries/…`; run one transform slice and confirm it
+   reads from there. Re-confirm the lifecycle rule (step 1).
+
+6. **Re-enable** the schedulers (`gcloud scheduler jobs resume …` for the six jobs).
+
+7. **Destroy the dead buckets.** `versioned-raw` is empty (clean destroy);
+   `pv-prospect-data` (656 MB) must be emptied first or Terraform refuses:
+   ```
+   gcloud storage rm --recursive gs://pv-prospect-data/**
+   cd terraform && terraform apply    # untargeted: destroys the two removed buckets
+   ```
+
+8. **Finalise** (per the task lifecycle): flip `README.md` (raw lives in
+   `pv-prospect-raw`, Standard→Coldline; staging no longer holds raw) and
+   `doc/architecture.puml` (drop the `VersionedRaw` node + V1/V2 versioner→raw
+   arrows; raw is an archive fed by extraction, read by transform); write
+   `reports/archive-raw-data.md` with the actual figures (objects moved, buckets
+   destroyed, tiering confirmed live); remove the task from `TODO.md`; delete this
+   plan and `briefs/archive-raw-data.md` (retain the report). Push the submodule,
+   bump the instance-repo pointer, push the instance repo.
