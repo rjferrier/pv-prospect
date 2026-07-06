@@ -1,5 +1,10 @@
 # Clarify end-date semantics in backfill cursors and manifests
 
+> **Sequencing (2026-07-06).** Do this *after* `data-derived-transform-planning`:
+> the transform consumed-through markers are deleted by that task, leaving only
+> the extraction cursors/manifests to migrate here. See
+> `reports/data-pipeline-retrospective.md` §5.
+
 `BackfillCursor.next_end_date` is exclusive throughout, so a 28-day window
 ending just before 2026-05-15 is serialised as `"end_date": "2026-05-15"` in
 manifests and `END_DATE=2026-05-15` in task env vars. Both visually read as

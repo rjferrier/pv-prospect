@@ -1,5 +1,13 @@
 # Reduce per-task env footprint in phased manifests
 
+> **Likely stale (2026-07-06).** The motivating case predates the transform
+> backfill's migration off Cloud Workflows — transform backfills no longer write
+> manifests at all. Before doing this work, verify whether any remaining manifest
+> (daily transform in particular) approaches the 2 MiB limit; if not, delete this
+> brief. If `data-derived-transform-planning`'s daily-transform assessment adopts
+> the single-process shape, transform manifests cease to exist entirely. See
+> `reports/data-pipeline-retrospective.md` §5.
+
 The weather-grid transform backfill manifest hit Cloud Workflows' 2 MiB
 per-step HTTP-response limit (2026-05-16). The primary fix — splitting the
 manifest into a phases index plus per-phase files — is in place and gives ~3×

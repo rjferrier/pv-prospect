@@ -1,5 +1,11 @@
 # Restructure `tracking/` prefix to group files by date
 
+> **Sequencing (2026-07-06).** Do this *after* `data-derived-transform-planning`:
+> that task deletes the two transform consumed-through markers and removes the
+> ledger's recovery duties (including the `superseded-ledgers/` mechanics below),
+> so this restructure shrinks to pure legibility/archival and avoids renaming
+> files headed for deletion. See `reports/data-pipeline-retrospective.md` §5.
+
 Inspecting the state of a day's run currently requires picking through several
 disjoint paths: `tracking/ledger/<date>/`, `tracking/manifests/` (if
 separate), `tracking/cursors/`. Grouping everything under a single date
