@@ -182,6 +182,7 @@ module "extractor_pv_sites_backfill_scheduler" {
   workflow_id           = module.extractor_pv_sites_backfill_workflow.workflow_id
   service_account_email = google_service_account.pipeline.email
   schedule              = var.extractor_pv_sites_backfill_scheduler_cron
+  paused                = var.backfills_paused
 
   depends_on = [google_project_service.apis, module.extractor_pv_sites_backfill_workflow]
 }
@@ -206,6 +207,7 @@ module "extractor_weather_grid_backfill_scheduler" {
   service_account_email = google_service_account.pipeline.email
   schedule              = var.extractor_weather_grid_backfill_scheduler_cron
   argument_json         = jsonencode({})
+  paused                = var.backfills_paused
 
   depends_on = [google_project_service.apis, module.extractor_weather_grid_backfill_workflow]
 }
@@ -289,6 +291,7 @@ module "transformer_pv_sites_backfill_scheduler" {
   job_name              = module.cloud_run_transform.job_name
   schedule              = var.transformer_pv_sites_backfill_scheduler_cron
   service_account_email = google_service_account.pipeline.email
+  paused                = var.backfills_paused
   env_overrides = {
     JOB_TYPE       = "run_transform_backfill"
     BACKFILL_SCOPE = "pv_sites"
@@ -306,6 +309,7 @@ module "transformer_weather_grid_backfill_scheduler" {
   job_name              = module.cloud_run_transform.job_name
   schedule              = var.transformer_weather_grid_backfill_scheduler_cron
   service_account_email = google_service_account.pipeline.email
+  paused                = var.backfills_paused
   env_overrides = {
     JOB_TYPE       = "run_transform_backfill"
     BACKFILL_SCOPE = "weather_grid"

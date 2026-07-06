@@ -148,3 +148,17 @@ variable "github_repo" {
   type        = string
   description = "The GitHub repository containing the Actions that will authenticate with GCP. Format: 'owner/repo' (e.g., 'rjferrier/pv-prospect-instance')."
 }
+
+variable "backfills_paused" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    Single switch to pause/resume all four historical backfill schedulers (the
+    PV-sites and weather-grid extraction backfills and their two transformation
+    counterparts). Set true and `terraform apply` to stop them firing — no
+    workflow runs, no Cloud Run Job executions, no API cost; cursors freeze in
+    place and resume cleanly when set back to false. The daily extraction/
+    transformation and weekly versioning schedulers are unaffected. See
+    "Pausing the backfills" in terraform/README.md.
+  EOT
+}

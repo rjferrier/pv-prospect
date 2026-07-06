@@ -181,6 +181,11 @@ Approximate monthly costs (varies by usage volume):
 > **Note**: This is significantly cheaper than a continuously running orchestrator
 > like Cloud Composer or keeping GKE/VM nodes running.
 
+The bulk of the Cloud Run Job spend is the daily historical backfills. Once the
+corpus is deep enough, they can be paused indefinitely with the `backfills_paused`
+switch (see [Pausing the backfills](#pausing-the-backfills)) to drop that cost to
+zero while the daily pipeline and weekly training keep running.
+
 ## Operational Tuning
 
 ### Cloud Run Job timeout
@@ -231,6 +236,25 @@ The default cron expressions are defined as Terraform variables
 `transformer_weather_grid_backfill_scheduler_cron`,
 `versioner_scheduler_cron`) and can be overridden in `terraform.tfvars`
 without touching module code.
+
+### Pausing the backfills
+
+The four historical backfill schedulers (PV-sites and weather-grid, extraction and
+transformation) can be paused together by the `backfills_paused` variable — set it
+`true` in `terraform.tfvars` and re-apply to stop them firing, `false` to resume.
+Pausing costs nothing to keep in place (the scheduler jobs remain, they just don't
+trigger), cursors freeze and resume cleanly, and the daily extraction/transformation
+and weekly versioning schedulers are unaffected. This wiring lives in the shared
+`scheduler` and `cloud_run_scheduler` modules, which each expose a `paused` variable
+(left `null`, i.e. unmanaged, for the non-backfill schedulers).
+
+The provider's `paused` field is *computed*, so a scheduler whose `paused` is left
+unmanaged keeps whatever state an out-of-band `gcloud scheduler jobs pause/resume`
+set — that survives `terraform apply`. The four backfill jobs are the exception:
+because `backfills_paused` sets their `paused` explicitly, an apply reconciles them
+back to the flag, so use the flag (not a manual `gcloud` pause) for anything
+indefinite. The operational commands for both paths are in
+[`doc/backfill-operations.md`](../doc/backfill-operations.md#pausing-and-resuming-the-backfills).
 
 ### Checkpoint-based resume
 

@@ -11,6 +11,7 @@ resource "google_cloud_scheduler_job" "scheduler" {
   region      = var.region
   schedule    = var.schedule
   time_zone   = var.time_zone
+  paused      = var.paused
   description = "Triggers Cloud Run Job ${var.job_name} on a cron schedule"
 
   http_target {
