@@ -85,7 +85,7 @@ today covers the mechanics but omits the density story entirely.
   the live WGB cursor to `(today, pass=1)` stops it immediately — a production
   state change, do only with the owner's go-ahead.
 - **R1a deadline:** land before ~late Sep 2026 to avoid orphaned raw PV; coordinate
-  with the pending `version-raw-data` task (raw PV is non-refetchable).
+  with the pending `archive-raw-data` task (raw PV is non-refetchable).
 - **R3 (optional cleanup):** if R1a slips and orphaned pre-2016 raw PV appears,
   delete it under `data/raw/timeseries/pvoutput/**` (report §6 R3).
 

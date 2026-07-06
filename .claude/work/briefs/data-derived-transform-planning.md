@@ -74,7 +74,7 @@ marker rewind. That brief re-scopes to extract-side only (see Follow-ups).
 
 ## Sequencing
 
-- **After `version-raw-data`** — the safety precondition: with "delete prepared
+- **After `archive-raw-data`** — the safety precondition: with "delete prepared
   and re-run" as the routine recovery move, raw must be versioned first (PVOutput
   history is non-refetchable).
 - **Before `tracking-restructure` and `end-date-semantics`** — avoid renaming or
