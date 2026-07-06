@@ -2,7 +2,6 @@
 
 ## Next
 
-- [ ] [Show the capacity-factor map on the website (via the staging bucket)](briefs/capacity-factor-map-website.md) — **code/docs done & verified; PNG uploaded** to `gs://pv-prospect-staging/assets/`. **Remaining = deploy** (rebuild image + `terraform apply` so the route and `ASSETS_DIR` ship; panel stays hidden in prod until then). Finalise (delete brief) once live.
 - [ ] [Replace Open-Meteo elevation with a cheaper API](briefs/elevation-api.md) — Open-Meteo is used to query elevation for a lat/lon; a free or cheaper dedicated elevation API would reduce costs
 
 ## Later
