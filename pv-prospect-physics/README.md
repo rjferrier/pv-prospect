@@ -5,6 +5,12 @@ Shared solar-irradiance physics for PV Prospect. Provides the plane-of-array
 prediction API, plus the climatological POA *reconstruction* used wherever the
 weather model's monthly-mean DNI/DHI must be turned back into POA.
 
+## Contents
+
+- [Why this is a package](#why-this-is-a-package)
+- [API](#api)
+- [Development](#development)
+
 ## Why this is a package
 
 POA must be computed **identically** wherever it appears: the value the PV model

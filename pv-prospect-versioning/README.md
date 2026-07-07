@@ -13,6 +13,12 @@ that the **model-trainer** will reuse to version trained model artefacts:
 - `dvc_pull` — pull DVC-tracked files from a named remote (used by the model-trainer
   bootstrap to fetch the prepared corpus at a `data-v<date>` tag).
 
+## Contents
+
+- [Why this is a package](#why-this-is-a-package)
+- [API](#api)
+- [Development](#development)
+
 ## Why this is a package
 
 The data-versioner and the (future) model-trainer both need these operations;

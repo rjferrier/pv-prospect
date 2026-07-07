@@ -3,6 +3,17 @@
 ML model training for `pv-prospect`. Consumes versioned prepared CSV data and
 produces trained model artifacts.
 
+## Contents
+
+- [Package Structure](#package-structure)
+- [PV Model Data Flow](#pv-model-data-flow)
+- [Smoke-Run Results (2026-06-02, local DVC mirror)](#smoke-run-results-2026-06-02-local-dvc-mirror)
+- [CLI Usage](#cli-usage)
+- [Artifact Format](#artifact-format)
+- [Design Notes](#design-notes)
+- [PV Cross-Site (LOSO) Evaluation](#pv-cross-site-loso-evaluation)
+- [Weather Model](#weather-model)
+
 ## Package Structure
 
 ```

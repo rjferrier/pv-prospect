@@ -4,6 +4,13 @@ Trains the PV and weather models from a versioned corpus snapshot and either wri
 a local artifact store (bootstrap mode) or promotes the result to the instance repo
 and the model GCS bucket (promote mode / Cloud Run job mode).
 
+## Contents
+
+- [Producing the models](#producing-the-models)
+- [Prerequisites](#prerequisites)
+- [Repo-separation invariant](#repo-separation-invariant)
+- [Development](#development)
+
 ## Producing the models
 
 ### 1. Bootstrap (local dev)

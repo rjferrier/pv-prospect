@@ -7,8 +7,8 @@ consumed-through markers — but transformation is gated on the extraction ledge
 it only transforms windows whose extraction has a committed `completed` record.
 
 For the underlying orchestration machinery (plan-commit pattern, manifests, ledger)
-see [`doc/orchestration.md`](orchestration.md). For the full workflow schedule see
-[`doc/workflows.md`](workflows.md).
+see [`doc/orchestration.md`](../orchestration.md). For the full workflow schedule see
+[`doc/infrastructure.md`](../infrastructure.md).
 
 ## Triggering Workflows Manually
 
@@ -87,9 +87,9 @@ indefinite so a routine apply doesn't silently un-pause them.
 
 | Situation | Runbook |
 |---|---|
-| `pv-prospect-extract-pv-sites-backfill` timed out or was cancelled | [Resume PV-sites extraction backfill](../pv-prospect-data-extraction/doc/runbooks/resume-pv-sites-backfill.md) |
-| `pv-prospect-extract-weather-grid-backfill` failed | [Re-trigger weather-grid extraction backfill](../pv-prospect-data-extraction/doc/runbooks/resume-weather-grid-backfill.md) |
-| Transformation backfill timed out or crashed | [Resume transformation backfill](../pv-prospect-data-transformation/doc/runbooks/resume-transform-backfill.md) |
-| Need to replay specific transformation windows | [Replay a transformation window](../pv-prospect-data-transformation/doc/runbooks/replay-window.md) |
-| Need to re-base the corpus onto a new feature convention | [Re-base the corpus](../pv-prospect-data-transformation/doc/runbooks/re-base-corpus.md) |
-| Seeding the validation window for the first time | [Seed the validation window](../pv-prospect-data-transformation/doc/runbooks/seed-validation-window.md) |
+| `pv-prospect-extract-pv-sites-backfill` timed out or was cancelled | [Resume PV-sites extraction backfill](../../pv-prospect-data-extraction/doc/runbooks/resume-pv-sites-backfill.md) |
+| `pv-prospect-extract-weather-grid-backfill` failed | [Re-trigger weather-grid extraction backfill](../../pv-prospect-data-extraction/doc/runbooks/resume-weather-grid-backfill.md) |
+| Transformation backfill timed out or crashed | [Resume transformation backfill](../../pv-prospect-data-transformation/doc/runbooks/resume-transform-backfill.md) |
+| Need to replay specific transformation windows | [Replay a transformation window](../../pv-prospect-data-transformation/doc/runbooks/replay-window.md) |
+| Need to re-base the corpus onto a new feature convention | [Re-base the corpus](../../pv-prospect-data-transformation/doc/runbooks/re-base-corpus.md) |
+| Seeding the validation window for the first time | [Seed the validation window](../../pv-prospect-data-transformation/doc/runbooks/seed-validation-window.md) |

@@ -3,6 +3,15 @@
 Prediction API for UK PV energy-yield estimates. Chains the weather model → POA
 reconstruction → PV model to produce climatological annual/monthly yield estimates.
 
+## Contents
+
+- [Quick start (local dev)](#quick-start-local-dev)
+- [Endpoints](#endpoints)
+- [Configuration](#configuration)
+- [Known limitations](#known-limitations)
+- [Deployment](#deployment)
+- [Served website](#served-website)
+
 ## Quick start (local dev)
 
 `/predict` needs only the model artifacts. The validation endpoints

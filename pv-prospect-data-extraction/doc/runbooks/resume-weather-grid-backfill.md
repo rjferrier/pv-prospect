@@ -1,6 +1,6 @@
 # Re-trigger Weather-Grid Extraction Backfill
 
-See [`doc/backfill-operations.md`](../../../doc/backfill-operations.md) for the
+See [`doc/runbooks/backfill-operations.md`](../../../doc/runbooks/backfill-operations.md) for the
 overview of the extract → transform backfill chain.
 
 The weather-grid backfill has no per-batch checkpoint — it runs as a single linear

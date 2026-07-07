@@ -3,6 +3,14 @@
 A model of photovoltaic (PV) power outputs according to weather in the UK. 
 The website can be accessed [here](https://pv-prospect-app-iwge6y4a5q-nw.a.run.app/).
 
+## Contents
+
+- [About the Model](#about-the-model)
+- [System Architecture](#system-architecture)
+- [App Serving](#app-serving)
+- [Operational Workflows](#operational-workflows)
+- [Full Documentation](#full-documentation)
+
 ## About the Model
 
 PV Prospect estimates the annual energy yield of a UK solar installation. The
@@ -45,57 +53,41 @@ The pipeline is orchestrated around the following named flows:
 
 | Key | Description                      | When it happens    |
 |-----|----------------------------------|--------------------|
-| E   | Data extraction                  | Daily              |
-| C   | Data cleaning                    | When E finishes    |
-| P   | Data preparation (featurisation) | When C finishes    |
-| A   | App data loading                 | When App starts up |
-| V   | Data/model versioning            | Weekly             |
-| M   | Model training                   | When V finishes    |
+| A   | Data extraction                  | Daily              |
+| B   | Data cleaning                    | When A finishes    |
+| C   | Data preparation (featurisation) | When B finishes    |
+| D   | App data loading                 | When App starts up |
+| E   | Data/model versioning            | Weekly             |
+| F   | Model training                   | When E finishes    |
 
 Each data source — here the Open-Meteo weather API and the PVOutput API —
-has its own extraction (E) and cleaning (C) flow. Preparation (P)
+has its own extraction (A) and cleaning (B) flow. Preparation (C)
 then builds a *feature set* per model — here the weather model and the PV
 model. The source-to-model mapping is not one-to-one: a feature set may draw
 on several cleaned sources. The PV model's features join cleaned PV power with
 cleaned on-site weather, whereas the weather model's features come from the
 weather source alone — so the weather source feeds both feature sets.
 
-### E — Data Extraction
+### A. Data Extraction
 
 Pulls weather data from the **Open-Meteo API** and PV power readings from the
 **PVOutput API**, staging them as CSV to a dedicated raw-data archive bucket
 (`gs://pv-prospect-raw`, separate from the working `staging` bucket — see
-"Raw Data Archive" below). Each run is scoped to a single PV system and date
-range. Implemented in `pv-prospect-data-extraction`.
+[Raw Data Archive](doc/infrastructure.md#raw-data-archive)). Each run is scoped to
+a single PV system and date range. Implemented in `pv-prospect-data-extraction`.
 
 On GCP, extraction is triggered daily by Cloud Scheduler, orchestrated by Cloud
 Workflows, and executed as Cloud Run Jobs. Locally it can be driven by the Docker
 Compose `runner` service.
 
-### Raw Data Archive
-
-Raw extracted CSVs live in `gs://pv-prospect-raw`, a bucket dedicated to durable
-archival rather than working storage — kept separate from `staging` so its
-unbounded growth (weather-grid densification, historical backfills) doesn't
-churn alongside the `cleaned/`/`prepared/` data that is rewritten on every run.
-Raw is **not** DVC-versioned: it is append-only and non-refetchable from the
-source APIs, so what it needs is durability, not git-tag reconstructability. A
-GCS lifecycle rule tiers each object from Standard to **Coldline** storage class
-in place (same path, no cross-bucket move) once it reaches **8 days old** —
-comfortably after the daily transform has consumed it (≤1–2 days), while still
-leaving a margin for pipeline catch-up after a short outage. Both extraction
-(write) and transform (read) reach this bucket through the same
-`staged_raw_data_storage` configuration key, so it is the only raw-data path the
-pipeline knows about.
-
-### C — Data Cleaning
+### B. Data Cleaning
 
 Cleans raw CSVs (column selection, renaming, UTC time synthesis) — reading from
 the raw archive bucket — and writes them as CSV to the staging bucket
 (`cleaned/` prefix). All data sources must be cleaned before preparation can
 begin. Implemented in `pv-prospect-data-transformation`.
 
-### P — Data Preparation
+### C. Data Preparation
 
 Reads cleaned CSVs, performs feature selection, downsampling, joins weather with PV
 data, and computes plane-of-array (POA) irradiance via the shared
@@ -138,17 +130,17 @@ workflow step can run (see
 [Seeding the Validation Window](pv-prospect-data-transformation/doc/runbooks/seed-validation-window.md)).
 Implemented in `pv-prospect-data-transformation`.
 
-### A — App Data Loading
+### D. App Data Loading
 
 At startup, `pv-prospect-app`:
 
 1. Downloads the promoted model artifacts from the model store
    (`gs://pv-prospect-versioned-model/promoted/` in production, or a local directory
    for development) and loads them into memory. The store is written by the model
-   trainer's promote step (see M below). A failed model load is fatal — without models
+   trainer's promote step (see F below). A failed model load is fatal — without models
    there is nothing to serve.
 2. Loads the rolling 90-day validation window from
-   `gs://<staging-bucket>/data/served/validation-window/` (see P above). A failed
+   `gs://<staging-bucket>/data/served/validation-window/` (see C above). A failed
    window load is non-fatal: `/predict` continues serving; `/validate/*` returns 503
    until the cache self-heals on the next request.
 3. Builds the in-memory PV-site registry from
@@ -172,7 +164,7 @@ The check reads only the small manifest file, so unchanged requests pay no I/O c
 How these loaded models serve requests — the prediction and validation flows — is
 covered in the **App Serving** section below.
 
-### V — Data Versioning
+### E. Data Versioning
 
 Snapshots prepared CSV data on a weekly cadence: stages `.dvc` files pointing at
 the prepared-feature corpus and pushes them to `gs://pv-prospect-versioned-feature`,
@@ -187,9 +179,9 @@ pipeline** — any un-regenerated window stays on the old basis. That case needs
 explicit clean rebuild: see
 [`pv-prospect-data-transformation/doc/runbooks/re-base-corpus.md`](pv-prospect-data-transformation/doc/runbooks/re-base-corpus.md).
 
-### M — Model Training
+### F. Model Training
 
-Triggered automatically by the version workflow (V) on success. The model trainer
+Triggered automatically by the version workflow (E) on success. The model trainer
 (`pv-prospect-model-trainer`):
 
 1. Clones `pv-prospect-instance` at the `data-v<date>` tag and `dvc pull`s the
@@ -246,22 +238,39 @@ set `allow_unauthenticated = false` in `terraform.tfvars` and re-apply.
 ## Operational Workflows
 
 The automated pipeline is driven by Cloud Scheduler cron jobs. See
-[`doc/workflows.md`](doc/workflows.md) for detailed descriptions and
-[`doc/backfill-operations.md`](doc/backfill-operations.md) for operational
-runbooks (manual triggers, failure recovery).
-
-| Workflow | Schedule (UTC) | Description |
-|---|---|---|
-| `pv-prospect-extract` | Daily 02:00 | Daily data extraction for the previous day |
-| `pv-prospect-extract-pv-sites-backfill` | Daily 02:40 | PV-sites historical backfill (28-day rolling window) |
-| `pv-prospect-extract-weather-grid-backfill` | Daily 03:20 | Weather-grid historical backfill (14-day rolling window) |
-| `pv-prospect-transform` | Daily 05:30 | Daily data cleaning and preparation |
-| `pv-prospect-daily-transform-pv-sites-backfill` | Daily 06:00 | PV-sites transformation backfill |
-| `pv-prospect-daily-transform-weather-grid-backfill` | Daily 08:00 | Weather-grid transformation backfill |
-| `pv-prospect-version` | Weekly Sun 23:00 | Data versioning + model training |
-| `pv-prospect-app` | Always on (Cloud Run Service) | Prediction API and website |
+[`doc/infrastructure.md`](doc/infrastructure.md#scheduled-workflows) for the full
+schedule and per-workflow descriptions, and [`doc/runbooks.md`](doc/runbooks.md)
+for operational runbooks (manual triggers, failure recovery, pausing).
 
 ### Deploying the App & Going Public
 
 See [`pv-prospect-app/README.md`](pv-prospect-app/README.md#deployment) for build and deploy instructions.
+
+## Full Documentation
+
+This README is the high-level entry point. Deeper documentation is organised as
+follows.
+
+**Top-level docs:**
+
+| Document | Contents |
+|---|---|
+| [`doc/infrastructure.md`](doc/infrastructure.md) | The deployed GCP infrastructure: storage buckets, scheduled workflows, Cloud Run compute, scheduling rationale, and cost. |
+| [`doc/orchestration.md`](doc/orchestration.md) | The manifest / ledger / plan-commit machinery that coordinates the extraction and transformation pipelines (shared `pv-prospect-etl` design), and the staging bucket layout. |
+| [`doc/runbooks.md`](doc/runbooks.md) | Index of operational runbooks — manual triggers, failure recovery, pausing, replaying and re-basing the corpus, seeding the validation window. |
+| [`terraform/README.md`](terraform/README.md) | How to **provision** the infrastructure with Terraform: bootstrap, remote state, and the deploy process. |
+
+**Package docs** — every package directory has its own `README.md` (and some a
+`doc/` subtree). The principal ones:
+
+| Package | Role |
+|---|---|
+| [`pv-prospect-app`](pv-prospect-app/README.md) | Prediction / validation API and demo website; deployment instructions. |
+| [`pv-prospect-data-extraction`](pv-prospect-data-extraction/README.md) | Extraction pipeline (PVOutput + Open-Meteo) with backfill cursors. |
+| [`pv-prospect-data-transformation`](pv-prospect-data-transformation/README.md) | Cleaning + preparation (featurisation) pipeline. |
+| [`pv-prospect-etl`](pv-prospect-etl/README.md) | Storage abstraction and workflow orchestration shared across packages. |
+| [`pv-prospect-physics`](pv-prospect-physics/README.md) | Shared solar-geometry / POA physics — used by both training and the prediction API. |
+| [`pv-prospect-model`](pv-prospect-model/README.md), [`pv-prospect-model-trainer`](pv-prospect-model-trainer/README.md) | Model definitions and the training / promotion pipeline. |
+| [`pv-prospect-data-versioner`](pv-prospect-data-versioner/README.md), [`pv-prospect-versioning`](pv-prospect-versioning/README.md) | Weekly DVC data versioning and the shared git + DVC operations it builds on. |
+| [`pv-prospect-map`](pv-prospect-map/README.md) | Offline capacity-factor map asset generator. |
 

@@ -19,6 +19,15 @@ the `pv-prospect-etl` package:
 The Cloud Workflows in `terraform/modules/` consume the manifests these modules
 produce.
 
+## Contents
+
+- [Bucket Layout](#bucket-layout)
+- [Core Concepts](#core-concepts)
+- [Daily Workflows (Extraction and Transformation)](#daily-workflows-extraction-and-transformation)
+- [Extraction Backfill Workflows (Plan-Commit Pattern)](#extraction-backfill-workflows-plan-commit-pattern)
+- [Retry and Rate-Limit Handling](#retry-and-rate-limit-handling)
+- [Error Handling](#error-handling)
+
 ## Bucket Layout
 
 The staging bucket has three top-level prefixes:
@@ -412,7 +421,8 @@ is small enough that this hasn't been a real concern.
 - **PVOutput**: `PVOutputRateLimiter` tracks rate-limit headers from API
   responses.
 - **Scheduling**: Workflows are staggered to prevent concurrent API access
-  from breaching rate limits (see `terraform/README.md` for the schedule).
+  from breaching rate limits (see
+  [`infrastructure.md`](infrastructure.md#scheduling-rationale) for the schedule).
 
 ## Error Handling
 

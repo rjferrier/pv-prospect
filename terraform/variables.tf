@@ -159,6 +159,6 @@ variable "backfills_paused" {
     workflow runs, no Cloud Run Job executions, no API cost; cursors freeze in
     place and resume cleanly when set back to false. The daily extraction/
     transformation and weekly versioning schedulers are unaffected. See
-    "Pausing the backfills" in terraform/README.md.
+    "Pausing the Backfills" in doc/infrastructure.md.
   EOT
 }

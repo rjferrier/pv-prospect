@@ -2,6 +2,15 @@
 
 Data extraction pipeline for PV Prospect, supporting PVOutput and OpenMeteo weather data sources.
 
+## Contents
+
+- [Overview](#overview)
+- [Local Development (Recommended)](#local-development-recommended)
+- [Command-Line Options](#command-line-options)
+- [Cloud Infrastructure](#cloud-infrastructure)
+- [Legacy Infrastructure (Celery / RabbitMQ)](#legacy-infrastructure-celery--rabbitmq)
+- [Troubleshooting](#troubleshooting)
+
 ## Overview
 
 The pipeline is designed for both local development and cloud-native batch processing. It features:
@@ -95,7 +104,9 @@ The production pipeline is deployed to Google Cloud Platform using Terraform.
 
 See [terraform/README.md](../terraform/README.md) for deployment instructions
 and [doc/orchestration.md](../doc/orchestration.md) for the manifest/ledger
-design shared across extraction and transformation.
+design shared across extraction and transformation. Operational recovery
+procedures (resuming a failed backfill) are indexed in
+[doc/runbooks.md](doc/runbooks.md).
 
 ---
 

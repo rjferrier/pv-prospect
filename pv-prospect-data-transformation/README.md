@@ -150,3 +150,9 @@ the same call stack, and writes one partition file. The cross-step dependency is
 explicit: both `clean_weather` and `clean_pv` are sequential function calls
 within `produce_pv_slice`, not separate tasks. There is no phase barrier and no
 `cleaned/` write — the cleaned frames live only in memory.
+
+## Runbooks
+
+Operational procedures for this pipeline — resuming a transformation backfill,
+replaying a window, re-basing the corpus, and seeding the validation window — are
+indexed in [`doc/runbooks.md`](doc/runbooks.md).

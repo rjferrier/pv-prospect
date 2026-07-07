@@ -4,6 +4,15 @@ Data versioning pipeline for PV Prospect. Snapshots prepared CSV data from the
 staging bucket to a DVC-tracked versioned feature store on a weekly cadence,
 producing an immutable reference each training run can pin against.
 
+## Contents
+
+- [Where data comes from and where it goes](#where-data-comes-from-and-where-it-goes)
+- [Pipeline](#pipeline)
+- [Configuration](#configuration)
+- [Cloud Run Job entrypoint](#cloud-run-job-entrypoint)
+- [Staging cleanup on hierarchical-namespace (HNS) buckets](#staging-cleanup-on-hierarchical-namespace-hns-buckets)
+- [Coordinated redeploy with extraction / transformation](#coordinated-redeploy-with-extraction--transformation)
+
 ## Where data comes from and where it goes
 
 The versioner sits downstream of the daily extraction and transformation

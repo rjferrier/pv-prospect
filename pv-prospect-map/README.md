@@ -9,6 +9,16 @@ This is an analysis/asset-generation tool, **not** a serving path. It is a
 separate package so its plotting/geo dependencies (`matplotlib`, `shapely`,
 `pyshp`) stay out of the deployed `pv-prospect-app` image.
 
+## Contents
+
+- [What it computes](#what-it-computes)
+- [Elevation](#elevation)
+- [The UK landmask](#the-uk-landmask)
+- [Usage](#usage)
+- [Publishing to the website](#publishing-to-the-website)
+- [Caveats](#caveats)
+- [Development](#development)
+
 ## What it computes
 
 For each land cell, for each of the 12 calendar months:

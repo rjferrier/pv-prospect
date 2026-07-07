@@ -1,16 +1,21 @@
 # PV Prospect Terraform Infrastructure
 
-This directory contains Terraform configurations for deploying the serverless PV
-Prospect data extraction pipeline on Google Cloud Platform.
+This directory contains the Terraform configuration that **provisions** the PV
+Prospect infrastructure on Google Cloud Platform, and the process for applying it.
+For what that infrastructure *is* — the buckets, scheduled workflows, Cloud Run
+compute, scheduling rationale, and cost model — see
+[`doc/infrastructure.md`](../doc/infrastructure.md).
 
-## Architecture Overview
+## Contents
 
-The pipeline uses a fully serverless, pay-per-use architecture: Cloud Run
-Jobs do the work, and Cloud Workflows fans them out for the daily extract,
-transform, and version flows. The transformation backfills are an exception —
-they invoke a Cloud Run Job directly (planning, execution, and commit happen
-in one container) because the per-unit work is small and there is no benefit
-to dispatch-side fan-out.
+- [Directory Structure](#directory-structure)
+- [Bootstrap vs. Main Configuration](#bootstrap-vs-main-configuration)
+- [Remote State & Configuration](#remote-state--configuration)
+- [Prerequisites](#prerequisites)
+- [Quick Start (First Time)](#quick-start-first-time)
+- [Subsequent Deployments](#subsequent-deployments)
+- [Operational Tuning & Cost](#operational-tuning--cost)
+- [Security Considerations](#security-considerations)
 
 ## Directory Structure
 
@@ -166,126 +171,13 @@ bash deploy.sh <your-project-id>
 Bootstrap only needs to be re-applied if foundational resources change (e.g., adding
 a new Artifact Registry repository).
 
-## Cost Estimation
+## Operational Tuning & Cost
 
-This architecture is entirely serverless (scale-to-zero). You only pay for what you
-use.
-
-Approximate monthly costs (varies by usage volume):
-- **Cloud Scheduler**: Free tier (up to 3 jobs/month free)
-- **Cloud Workflows**: Free tier (first 5,000 steps/month free)
-- **Cloud Run Jobs**: ~$1-$5 (depending on extraction volume/duration)
-- **Artifact Registry**: ~$0.10/GB stored
-- **GCS Storage**: Standard GCS pricing
-
-> **Note**: This is significantly cheaper than a continuously running orchestrator
-> like Cloud Composer or keeping GKE/VM nodes running.
-
-The bulk of the Cloud Run Job spend is the daily historical backfills. Once the
-corpus is deep enough, they can be paused indefinitely with the `backfills_paused`
-switch (see [Pausing the backfills](#pausing-the-backfills)) to drop that cost to
-zero while the daily pipeline and weekly training keep running.
-
-## Operational Tuning
-
-### Cloud Run Job timeout
-
-The extraction Cloud Run Job (`module.cloud_run_extract`) has a task timeout of
-**1800s (30 minutes)**. This was set to accommodate the sequential PV-site backfill
-which makes up to ~1,066 API calls per job execution. The earlier value of 600s
-caused executions to be cut off mid-run when API latency spiked.
-
-The transformation and versioner jobs have their own, independently configured
-timeouts (`900s` and `1800s` respectively).
-
-### Scheduler spacing
-
-Because individual Cloud Run Job tasks can now run for up to 30 minutes, the
-extraction workflows are spaced **40 minutes apart** to prevent concurrent
-executions from combining to breach PVOutput's 300 requests/hour rate limit:
-
-| Schedule | Trigger time (UTC) | API used |
-|---|---|---|
-| Daily extraction | 02:00 | PVOutput |
-| PV site extraction backfill | 02:40 | PVOutput |
-| Weather grid extraction backfill | 03:20 | OpenMeteo only |
-| Daily transformation | 05:30 | -- |
-| PV-sites transformation backfill | 06:00 | -- |
-| Weather-grid transformation backfill | 08:00 | -- |
-| Weekly versioning (Sun) | 23:00 | -- |
-
-The weather grid backfill uses OpenMeteo exclusively, so it does not conflict
-with PVOutput. It runs in a single execution per day — the 9 batches it
-dispatches are paced internally by `sleep_seconds_between_batches` (default
-720 s), so a sliding-60-minute window contains at most ~3 batches × 1,330
-calls ≈ 3,990 calls, comfortably under OpenMeteo's 5,000/hour limit. Total
-wall time ≈ 3 h 24 min — so the extract finishes ~06:44, consolidate adds a
-few minutes, and the weather-grid transform backfill at 08:00 has ~1 h
-margin before reading the consolidated ledger.
-
-The transformation schedules don't hit any external API, so they could in
-principle run back-to-back. They are placed where they are so the planner
-sees a fully-consolidated extraction ledger when it runs: 06:00 for the
-PV-sites transform backfill (extraction finishes by 03:10), and 08:00 for
-the weather-grid transform backfill (extraction finishes by ~06:44).
-
-The default cron expressions are defined as Terraform variables
-(`extractor_scheduler_cron`, `extractor_pv_sites_backfill_scheduler_cron`,
-`extractor_weather_grid_backfill_scheduler_cron`,
-`transformer_scheduler_cron`, `transformer_pv_sites_backfill_scheduler_cron`,
-`transformer_weather_grid_backfill_scheduler_cron`,
-`versioner_scheduler_cron`) and can be overridden in `terraform.tfvars`
-without touching module code.
-
-### Pausing the backfills
-
-The four historical backfill schedulers (PV-sites and weather-grid, extraction and
-transformation) can be paused together by the `backfills_paused` variable — set it
-`true` in `terraform.tfvars` and re-apply to stop them firing, `false` to resume.
-Pausing costs nothing to keep in place (the scheduler jobs remain, they just don't
-trigger), cursors freeze and resume cleanly, and the daily extraction/transformation
-and weekly versioning schedulers are unaffected. This wiring lives in the shared
-`scheduler` and `cloud_run_scheduler` modules, which each expose a `paused` variable
-(left `null`, i.e. unmanaged, for the non-backfill schedulers).
-
-The provider's `paused` field is *computed*, so a scheduler whose `paused` is left
-unmanaged keeps whatever state an out-of-band `gcloud scheduler jobs pause/resume`
-set — that survives `terraform apply`. The four backfill jobs are the exception:
-because `backfills_paused` sets their `paused` explicitly, an apply reconciles them
-back to the flag, so use the flag (not a manual `gcloud` pause) for anything
-indefinite. The operational commands for both paths are in
-[`doc/backfill-operations.md`](../doc/backfill-operations.md#pausing-and-resuming-the-backfills).
-
-### Checkpoint-based resume
-
-The PV-sites backfill workflow maintains a GCS position checkpoint so that a
-re-triggered execution resumes from where the previous one stopped rather than
-starting over:
-
-| Workflow | GCS checkpoint object | Checkpoint key |
-|---|---|---|
-| `pv-prospect-extract-pv-site-backfill` | `tracking/checkpoints/pv_sites_backfill.json` | Next PV task index (integer) |
-
-The checkpoint is a JSON object written to GCS after each dispatched task.
-
-**Behaviour:**
-
-- **Normal run** -- no checkpoint exists; the workflow processes every task in
-  the manifest and deletes the checkpoint on success.
-- **Interrupted run** -- checkpoint records the next task index. Re-triggering
-  manually loads the checkpoint, logs `"Resuming from checkpoint -- starting at
-  PV task N"`, and skips earlier tasks.
-- **Next scheduled run** -- because the checkpoint was deleted on the previous
-  successful run (or never created), the scheduled run starts fresh.
-
-If a run is interrupted *before* any task completes (e.g. the `plan` step fails),
-no checkpoint exists and a re-run starts from the beginning.
-
-The weather-grid backfill does **not** use a checkpoint: it runs as a single
-linear pass per day, and a re-trigger after failure re-runs every batch from
-index 0. The cost is roughly 3 hours of OpenMeteo budget on the rare manual
-retrigger; in exchange there is no checkpoint-shaped coordination surface for
-concurrent same-day executions to race on.
+Job timeouts, scheduler spacing, pausing the backfills, and the cost model are
+properties of the running system rather than the provisioning process, so they are
+documented in [`doc/infrastructure.md`](../doc/infrastructure.md). The knobs
+themselves — the cron schedules, job timeouts, and the `backfills_paused` switch —
+are all exposed as variables in `terraform.tfvars`.
 
 ## Security Considerations
 
