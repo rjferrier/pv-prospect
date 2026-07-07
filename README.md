@@ -30,8 +30,8 @@ Two neural networks are chained with a physics step between them:
 * tilt (degrees from the horizontal)
 * installation age (years, optional)
 
-**Uncertainty:** the annual yield estimate carries a ±17 % (1σ) uncertainty floor,
-calibrated by leave-one-site-out cross-validation across the 10 training sites. It
+**Uncertainty:** the annual yield estimate carries a minimum ±17 % (1σ) uncertainty
+band, calibrated by leave-one-site-out cross-validation across the 10 training sites. It
 captures site-to-site variability but excludes weather-year fluctuations and
 real-world variation in shading, soiling, and roof condition. The training corpus is
 self-selected by motivated system owners, so estimates are optimistic for an
@@ -217,7 +217,7 @@ CORS, no build step) — fronting the two serving surfaces as browser tabs:
 * **Prediction** — click a UK map point and enter panel parameters (capacity,
   azimuth, tilt, age, optional inverter). The page calls `POST /predict` and
   renders the expected annual yield with its uncertainty band (the ±17 % 1σ
-  per-site level floor, calibrated by the cross-site LOSO eval — see the
+  per-site level minimum, calibrated by the cross-site LOSO eval — see the
   `pv-age-feature` report), a monthly bar chart, and the response's own
   `caveats[]`.
 * **Validation** — pick a known site (listed dynamically by

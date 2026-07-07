@@ -146,7 +146,7 @@ regeneration is deferred (it needs a model store and the elevation API).
 
 ## Caveats
 
-The map inherits the PV model's uncertainty (the ±17 % 1σ per-site floor) and the
+The map inherits the PV model's uncertainty (the ±17 % 1σ per-site minimum) and the
 optimistic-corpus bias documented in the top-level README — it is a relative
 resource surface, not a guaranteed per-site yield.
 

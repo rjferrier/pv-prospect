@@ -154,14 +154,15 @@ a "you're going too fast" message rather than a broken UI.
 ## Known limitations
 
 The PV model is trained on 10 self-selected, well-maintained PVOutput sites, so
-predictions carry per-site level uncertainty (±17 % at 1σ out-of-sample). This
-represents an optimistic population; an arbitrary roof will likely fall below the
-estimate. The model applies a fixed degradation factor (0.7%/year) to handle
-age-related decline; this factor is held constant across sites rather than
-site-specific to avoid overfitting. See the `pv-age-feature` report for full
-rationale and cross-site generalisation analysis.
+predictions carry a minimum per-site level uncertainty (±17 % at 1σ out-of-sample).
+Those sites aren't representative of an arbitrary roof, so this represents an
+optimistic population; an arbitrary roof will likely fall below the estimate. The
+model applies a fixed degradation factor (0.7%/year) to handle age-related decline;
+this factor is held constant across sites rather than site-specific to avoid
+overfitting. See the `pv-age-feature` report for full rationale and cross-site
+generalisation analysis.
 
-This floor is exposed, not just documented: every `/predict` response carries an
+This minimum is exposed, not just documented: every `/predict` response carries an
 `uncertainty` object — `sigma_frac` (0.17) plus the `annual_kwh_low` /
 `annual_kwh_high` bracket around `expected_annual_kwh`. The single fractional
 margin lets a client widen to 2σ without an API change. The constant lives in

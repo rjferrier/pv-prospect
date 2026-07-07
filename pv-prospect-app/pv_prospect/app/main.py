@@ -58,7 +58,7 @@ _static_dir = Path(str(files('pv_prospect.app').joinpath('static')))
 # Prospect yield uncertainty band: the 1σ fractional margin on the expected
 # annual estimate, calibrated by the Phase 2 LOSO cross-site eval (the spread of
 # per-site "level" across the 10 self-selected training sites). Framed as a
-# floor — it captures per-site level, not weather-model or single-year noise.
+# minimum — it captures per-site level, not weather-model or single-year noise.
 # See reports/pv-age-feature.md §6 and briefs/prospect-uncertainty-band.md.
 PROSPECT_BAND_1SIGMA_FRAC = 0.17
 
@@ -85,7 +85,7 @@ SITE_COORD_DECIMALS = 3
 _VINTAGE_CAVEAT = (
     'Model limitation: predictions carry per-site level uncertainty due to '
     'self-selection bias in the training corpus (10 well-maintained PVOutput '
-    'sites). Cross-site generalisation testing shows a floor of '
+    'sites). Cross-site generalisation testing shows a minimum of '
     f'±{PROSPECT_BAND_1SIGMA_FRAC * 100:.0f} % (1σ) yield uncertainty for an '
     'arbitrary prospect (see pv-age-feature report). The model represents an '
     'optimistic population; actual installations on less-ideal roofs will fall '
@@ -288,7 +288,7 @@ def prospect_uncertainty_band(
     """Annual-yield uncertainty band for a prospect.
 
     A uniform fractional margin on the expected estimate (the LOSO-calibrated
-    per-site level spread), exposed as a 1σ band. It is a *floor*: it omits
+    per-site level spread), exposed as a 1σ band. It is a *minimum*: it omits
     weather-model and single-year noise — see PROSPECT_BAND_1SIGMA_FRAC.
     """
     return UncertaintyBand(

@@ -163,7 +163,7 @@
       <div class="page-header">
         <span class="kick">Prediction</span>
         <h1>Speculate a new installation</h1>
-        <p>Click a point on the UK map and describe the panels. The model returns a climatological (typical-year) annual yield estimate with an uncertainty band. That band is a <b>floor</b>: a ±17 % (1σ) per-site spread measured across the training sites — an arbitrary roof can sit below it, so treat the estimate as optimistic.</p>
+        <p>Click a point on the UK map and describe the panels. The model returns a climatological (typical-year) annual yield estimate with an uncertainty band. That band is a <b>minimum</b> ±17 % (1σ) per-site spread measured across the training sites — those sites are self-selected by motivated owners and aren't representative of an arbitrary roof, so treat the estimate as optimistic.</p>
       </div>
 
       <div class="grid-2">
@@ -220,7 +220,7 @@
           </div>
         </div>
         <svg id="prediction-chart" class="chart-svg" viewBox="0 0 900 300" role="img" aria-label="Predicted output by month with uncertainty"></svg>
-        <p class="bandnote">Whiskers show the uniform ±17 % (1σ) per-site floor applied to each month — an annual-level spread, not month-specific uncertainty.</p>
+        <p class="bandnote">Whiskers show the uniform ±17 % (1σ) per-site minimum applied to each month — an annual-level spread, not month-specific uncertainty.</p>
 
         <ul id="prediction-caveats" class="caveats"></ul>
         <p id="prediction-meta" class="meta"></p>
@@ -309,7 +309,7 @@
           <li>A fixed ~0.7 %/year degradation is applied for installation age.</li>
           <li>An inverter cap is applied to reconstructed hourly power.</li>
         </ul>
-        <div class="callout">The annual yield estimate carries a <b>±17 % (1σ) uncertainty floor</b>, calibrated by leave-one-site-out cross-validation across the 10 training sites. It captures site-to-site variability but excludes weather-year fluctuations and real-world variation in shading, soiling, and roof condition. The training corpus is self-selected by motivated system owners, so estimates are optimistic for an arbitrary installation.</div>
+        <div class="callout">The annual yield estimate carries a <b>minimum ±17 % (1σ) uncertainty</b>, calibrated by leave-one-site-out cross-validation across the 10 training sites. It captures site-to-site variability but excludes weather-year fluctuations and real-world variation in shading, soiling, and roof condition. The training corpus is self-selected by motivated system owners, so estimates are optimistic for an arbitrary installation.</div>
 
         <div class="source">Source code: <a class="lnk" href="https://github.com/rjferrier/pv-prospect" target="_blank" rel="noopener">github.com/rjferrier/pv-prospect</a></div>
       </div>
