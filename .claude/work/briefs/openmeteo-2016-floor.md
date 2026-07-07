@@ -84,10 +84,11 @@ today covers the mechanics but omits the density story entirely.
 - **Interim:** until R1b ships the WGB burns ~8.5k failed fetches/day. Resetting
   the live WGB cursor to `(today, pass=1)` stops it immediately — a production
   state change, do only with the owner's go-ahead.
-- **R1a deadline:** land before ~late Sep 2026 to avoid orphaned raw PV; coordinate
-  with the pending `archive-raw-data` task (raw PV is non-refetchable).
+- **R1a deadline:** land before ~late Sep 2026 to avoid orphaned raw PV. Raw now
+  lives durably in `pv-prospect-raw` (see `reports/archive-raw-data.md`), so an
+  orphan here is a wasted-quota/efficiency issue only, not a data-loss risk.
 - **R3 (optional cleanup):** if R1a slips and orphaned pre-2016 raw PV appears,
-  delete it under `data/raw/timeseries/pvoutput/**` (report §6 R3).
+  delete it under `gs://pv-prospect-raw/timeseries/pvoutput/**` (report §6 R3).
 
 ## Tests
 

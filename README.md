@@ -63,19 +63,37 @@ weather source alone — so the weather source feeds both feature sets.
 ### E — Data Extraction
 
 Pulls weather data from the **Open-Meteo API** and PV power readings from the
-**PVOutput API**, staging them as CSV to a GCS staging bucket (`raw/` prefix).
-Each run is scoped to a single PV system and date range. Implemented in
-`pv-prospect-data-extraction`.
+**PVOutput API**, staging them as CSV to a dedicated raw-data archive bucket
+(`gs://pv-prospect-raw`, separate from the working `staging` bucket — see
+"Raw Data Archive" below). Each run is scoped to a single PV system and date
+range. Implemented in `pv-prospect-data-extraction`.
 
 On GCP, extraction is triggered daily by Cloud Scheduler, orchestrated by Cloud
 Workflows, and executed as Cloud Run Jobs. Locally it can be driven by the Docker
 Compose `runner` service.
 
+### Raw Data Archive
+
+Raw extracted CSVs live in `gs://pv-prospect-raw`, a bucket dedicated to durable
+archival rather than working storage — kept separate from `staging` so its
+unbounded growth (weather-grid densification, historical backfills) doesn't
+churn alongside the `cleaned/`/`prepared/` data that is rewritten on every run.
+Raw is **not** DVC-versioned: it is append-only and non-refetchable from the
+source APIs, so what it needs is durability, not git-tag reconstructability. A
+GCS lifecycle rule tiers each object from Standard to **Coldline** storage class
+in place (same path, no cross-bucket move) once it reaches **8 days old** —
+comfortably after the daily transform has consumed it (≤1–2 days), while still
+leaving a margin for pipeline catch-up after a short outage. Both extraction
+(write) and transform (read) reach this bucket through the same
+`staged_raw_data_storage` configuration key, so it is the only raw-data path the
+pipeline knows about.
+
 ### C — Data Cleaning
 
-Cleans raw CSVs (column selection, renaming, UTC time synthesis) and writes them
-as CSV to the staging bucket (`cleaned/` prefix). All data sources must be cleaned
-before preparation can begin. Implemented in `pv-prospect-data-transformation`.
+Cleans raw CSVs (column selection, renaming, UTC time synthesis) — reading from
+the raw archive bucket — and writes them as CSV to the staging bucket
+(`cleaned/` prefix). All data sources must be cleaned before preparation can
+begin. Implemented in `pv-prospect-data-transformation`.
 
 ### P — Data Preparation
 

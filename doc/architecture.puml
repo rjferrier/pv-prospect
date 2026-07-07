@@ -8,17 +8,17 @@ skinparam rankdir TB
 
 collections "Third Party APIs" as ThirdPartyAPIs
 
+database "Raw Data" as RawData
+
 database Staging {
 '  database "Resources" as StagingResources
 '  database "Data" as StagingData {
-    database "Raw" as StagingRaw
     database "Cleaned" as StagingCleaned
     database "Prepared" as StagingPrepared
     database "Served" as StagingServed
 '  }
 }
 
-database "Versioned Raw Data" as VersionedRaw
 database "Versioned Feature Store" as VersionedFeature
 
 database "Versioned Model Store" as VersionedModel
@@ -32,11 +32,14 @@ database "Project Instance Repo" as ProjectInstanceRepo #transparent
 
 component "PV Prospect App" as PvProspectApp
 
+actor User
+
 'DataExtractor -[hidden]> DataTransformer
 
-'StagingResources -[hidden]> StagingRaw
+RawData -[hidden]> Staging
+
 StagingCleaned -[hidden]> StagingPrepared
-StagingRaw -[hidden]> StagingCleaned
+RawData -[hidden]> StagingCleaned
 StagingPrepared -[hidden]> StagingServed
 
 'PvProspectApp --> StagingResources : A0: get
@@ -44,26 +47,27 @@ PvProspectApp --> VersionedModel : A1: get
 PvProspectApp --> StagingServed : A2: get
 
 'DataExtractor ---> StagingResources : E0: get
-ThirdPartyAPIs <- DataExtractor : E1: call
-DataExtractor --> StagingRaw : E2: put
+'ThirdPartyAPIs <- DataExtractor : E1: call
+ThirdPartyAPIs <-- DataExtractor : E1: call
+DataExtractor --> RawData : E2: put
 
 'DataTransformer --> StagingResources : C1: get
-DataTransformer --> StagingRaw : C1: get
+DataTransformer --> RawData : C1: get
 DataTransformer --> StagingCleaned : C2: put\nP1: get
 
 DataTransformer <- DataTransformer : P2: calculate_POA
 DataTransformer --> StagingPrepared : P3: put
 DataTransformer --> StagingServed : P4: put
 
-StagingRaw <-- DataVersioner : V1: get
-VersionedRaw <- DataVersioner : V2: push (dvc)
-
-StagingPrepared <-- DataVersioner : V3: get
-VersionedFeature <-- DataVersioner : V4: push (dvc)
-DataVersioner -> ProjectInstanceRepo : V5: tag data-v<date>
+StagingPrepared <-- DataVersioner : V1: get
+VersionedFeature <-- DataVersioner : V2: push (dvc)
+DataVersioner -> ProjectInstanceRepo : V3: tag data-v<date>
 
 VersionedFeature <-- ModelTrainer : M1: pull (dvc)
 VersionedModel <-- ModelTrainer : M2: push (dvc)
 ProjectInstanceRepo <- ModelTrainer : M3: tag model-v<date>
+
+User --> PvProspectApp
+
 
 @enduml

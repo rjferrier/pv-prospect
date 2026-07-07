@@ -53,12 +53,12 @@ marker rewind. That brief re-scopes to extract-side only (see Follow-ups).
 ## What is needed
 
 1. **Design precondition — partition-naming contract.** Slice identity must be
-   reconstructible from listings alone: `data/raw/` paths must yield the planned
-   slices (replacing the extraction-ledger descriptors `plan_slices` reads today)
-   and `data/prepared-batches/` filenames must deterministically encode scope,
-   site/location, and window for the set difference. Verify the existing path
-   builders in `pv-prospect-data-sources` encode enough; if not, the naming change
-   is part of this task.
+   reconstructible from listings alone: `gs://pv-prospect-raw/timeseries/` paths
+   must yield the planned slices (replacing the extraction-ledger descriptors
+   `plan_slices` reads today) and `data/prepared-batches/` filenames must
+   deterministically encode scope, site/location, and window for the set
+   difference. Verify the existing path builders in `pv-prospect-data-sources`
+   encode enough; if not, the naming change is part of this task.
 2. **Replace the planner.** Rework `plan_slices` to a raw-vs-prepared listing diff
    (one GCS list per prefix per run — cheap at current scale). Retain a per-run
    work cap to replace `MAX_EXTRACT_RUNS` so a large backlog can't outrun the
@@ -74,9 +74,11 @@ marker rewind. That brief re-scopes to extract-side only (see Follow-ups).
 
 ## Sequencing
 
-- **After `archive-raw-data`** — the safety precondition: with "delete prepared
-  and re-run" as the routine recovery move, raw must be versioned first (PVOutput
-  history is non-refetchable).
+- **Safety precondition satisfied.** `archive-raw-data` (see
+  `reports/archive-raw-data.md`) made raw durable in its own archive bucket
+  (`pv-prospect-raw`, Standard→Coldline lifecycle), independent of the churny
+  staging bucket — so "delete prepared and re-run" is now a safe routine
+  recovery move (PVOutput history is non-refetchable).
 - **Before `tracking-restructure` and `end-date-semantics`** — avoid renaming or
   migrating tracking files this task deletes.
 
