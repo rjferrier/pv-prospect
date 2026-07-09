@@ -163,11 +163,13 @@ recomputation**, never a silent gap — the property the whole change buys.
 - Deterministic ordering, most-recent window first (recent data is worth more to
   the model).
 - Listing cost: the raw tree at full history is O(10⁵–10⁶) objects (incl.
-  sidecars) ⇒ ≤ ~1k Class A list-ops per run — comparable to or below today's
-  ledger scans. This task also *removes* the transform backfills'
-  `completed_task_hashes()` full-tree ledger walks, partially relieving
-  `ledger-scan-cost` (which stays open for extraction + shared code; coordinate
-  with it, whichever lands first).
+  sidecars) ⇒ ≤ ~1k Class A list-ops per run. Note the ledger scans are no
+  longer the benchmark they once were: `reports/ledger-scan-cost.md` cut them
+  to a single page each by pushing the workflow-name filter server-side. Plan
+  the raw-tree listing to be *scoped* (a prefix or a `start_offset` bound), not
+  a full walk filtered afterwards — that is the mistake that report unwinds.
+  This task still *removes* the transform backfills'
+  `completed_task_hashes()` ledger walks entirely.
 - Coldline: planning only **lists** raw (no retrieval fees); only planned slices
   *read* raw. Excluding versioned work from the diff is what keeps routine runs
   from re-reading the archive; large deliberate replays incur retrieval costs —
@@ -317,9 +319,10 @@ the daily keeps running unchanged until Phase 2 lands.
 - Safety precondition satisfied: raw is durable in `pv-prospect-raw`
   (`reports/archive-raw-data.md`).
 - Land **before** `tracking-restructure` and `end-date-semantics` (they migrate
-  files this task deletes). Coordinate with `ledger-scan-cost` (in **Next**):
-  whichever lands first, this task removes the transform-side scans; that brief
-  keeps extraction + shared code.
+  files this task deletes). `ledger-scan-cost` has landed
+  (`reports/ledger-scan-cost.md`): keep the `since=marker` bound on
+  `_consume_extract_descriptors`' extract-ledger listing, which survives this
+  task; only the transform-side `completed_task_hashes()` scans go away.
 - On landing, re-scope the dependent briefs: `outage-recovery` → extract-side
   cursor-rewind runbook only; `tracking-restructure` → pure legibility/archival;
   `end-date-semantics` → extraction cursors only; `failure-carry-over` → note the

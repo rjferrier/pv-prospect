@@ -184,6 +184,28 @@ Failures alone do not cause skipping — a re-run will re-attempt failed tasks.
 When `ledger_fs` is not configured (e.g. some local dev setups), filtering is
 disabled and every task is dispatched.
 
+#### Cost of the Ledger Scan
+
+Scan (2) reaches across the whole ledger history, so its cost must not scale
+with that history. Two properties keep it from doing so:
+
+- **The workflow-name suffix is a listing pattern, not a post-filter.**
+  `list_consolidated_ledgers` passes `*-<workflow>.jsonl` to
+  `FileSystem.list_files`, and the GCS backend turns it into a server-side
+  `matchGlob`. A listing is billed one Class A `ListObjects` op per 1,000
+  objects it *pages over*, so filtering client-side would charge for every
+  object in `tracking/ledger/` — per-task scratch files included — to find
+  the handful of consolidated ones.
+- **Callers holding a high-water mark pass it as `since`.** The transform
+  backfill's consumed-through marker bounds the listing to run-date
+  directories at or after the marker's date; everything below it would be
+  discarded anyway.
+
+Left unbounded, this scan is what an accumulation of un-consolidated scratch
+files silently taxes: 173k orphaned per-task files once made every workflow
+invocation page over 174 listings' worth of objects to read ~57 ledgers. See
+`.claude/work/reports/ledger-scan-cost.md`.
+
 `completed_task_hashes()` exposes the same set directly. The container's
 per-site loop uses it to skip sites the ledger already records as completed
 before fetching them again (e.g. during a Cloud Run task-attempt retry after
@@ -352,7 +374,8 @@ Cloud Scheduler invokes the `data-transformation` Cloud Run Job directly
 1. **Plan** — `plan_slices(scope, ledger_fs, cursors_fs, max_extract_runs)`
    loads the scope's **consumed-through marker** from
    `tracking/cursors/<workflow>.json`, lists the corresponding extraction
-   backfill's consolidated ledgers, takes the oldest `MAX_EXTRACT_RUNS`
+   backfill's consolidated ledgers *from the marker's run date onwards*,
+   takes the oldest `MAX_EXTRACT_RUNS`
    (default 4) whose filename sorts above the marker, and turns every
    `completed` descriptor into a `PVSlice` or `WeatherSlice`. Returns the
    slices plus the `next_marker` that the marker should advance to once the
