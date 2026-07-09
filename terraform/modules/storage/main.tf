@@ -13,6 +13,16 @@
 # - versioned-model: trained model artifacts tracked by DVC (lineage role)
 #     + plain promoted/{pv,weather}/ serving path read by pv-prospect-app
 
+# Staging. The cleaned/ prefix is intra-run working data: the clean step writes
+# it and the prepare step reads it back within the same run, so nothing depends
+# on it surviving across runs. It is expired here rather than swept by the
+# data-versioner — deleting it object-by-object could never finish inside that
+# job's timeout (see reports/versioner-hang.md). Seven days mirrors the raw
+# bucket's margin: enough for pipeline catch-up and backfill re-runs.
+#
+# Lifecycle rules delete objects, not HNS folders, so empty folders accumulate
+# under data/cleaned/; pv-prospect-etl/scripts/cleanup_empty_folders.py sweeps
+# them.
 resource "google_storage_bucket" "staging" {
   name                        = "${var.bucket_prefix}-staging"
   location                    = var.region
@@ -20,6 +30,16 @@ resource "google_storage_bucket" "staging" {
 
   hierarchical_namespace {
     enabled = true
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      age            = 7
+      matches_prefix = ["data/cleaned/"]
+    }
   }
 }
 

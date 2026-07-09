@@ -38,7 +38,6 @@ def iter_ancestor_dirs(paths: Iterable[str]) -> list[str]:
 
 def version_data(
     prepared_fs: FileSystem,
-    cleaned_fs: FileSystem,
     batches_fs: FileSystem,
     config: DataVersionerConfig,
     deploy_key: str,
@@ -51,7 +50,7 @@ def version_data(
     3. Download prepared CSVs into the clone
     4. DVC add and push
     5. Git commit, tag, and push
-    6. Clean staging (cleaned + prepared)
+    6. Clean prepared staging
     """
     file_paths = verify_readiness(prepared_fs, batches_fs)
 
@@ -82,7 +81,7 @@ def version_data(
         git_commit_and_tag(repo, dvc_file_paths, tag, message)
         git_push(repo, env)
 
-    _clean_staging(prepared_fs, cleaned_fs)
+    _clean_staging(prepared_fs)
     logger.info('Versioning complete: %s', tag)
 
 
@@ -102,20 +101,21 @@ def _download_prepared_files(
         logger.info('Downloaded %s (%d bytes)', rel_path, len(content))
 
 
-def _clean_staging(
-    prepared_fs: FileSystem,
-    cleaned_fs: FileSystem,
-) -> None:
-    """Delete all files from the cleaned and prepared staging prefixes.
+def _clean_staging(prepared_fs: FileSystem) -> None:
+    """Delete all files from the prepared staging prefix.
 
     On HNS-enabled GCS buckets, sub-folders persist after their last
     child object is removed, so rmdir every residual directory deepest
     first to keep the staging tree from accumulating empty folders.
+
+    The cleaned prefix is *not* swept here. ``delete`` costs one request
+    per object, and cleaned holds millions of them — a serial sweep
+    could never finish inside the job's timeout. A GCS lifecycle rule
+    expires it instead (see ``terraform/modules/storage``).
     """
-    for fs, label in [(prepared_fs, 'prepared'), (cleaned_fs, 'cleaned')]:
-        entries = fs.list_files('', recursive=True)
-        for entry in entries:
-            fs.delete(entry.path)
-        for directory in iter_ancestor_dirs(entry.path for entry in entries):
-            fs.rmdir(directory)
-        logger.info('Deleted %d file(s) from %s staging', len(entries), label)
+    paths = [entry.path for entry in prepared_fs.list_files('', recursive=True)]
+    for path in paths:
+        prepared_fs.delete(path)
+    for directory in iter_ancestor_dirs(paths):
+        prepared_fs.rmdir(directory)
+    logger.info('Deleted %d file(s) from prepared staging', len(paths))

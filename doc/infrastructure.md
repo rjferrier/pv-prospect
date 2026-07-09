@@ -144,10 +144,15 @@ Runs weekly at **Sunday 23:00 UTC**. A two-step Cloud Workflow:
    the new data tag, pulls the corpus, trains both models, runs the promotion gate,
    and if promoted: pushes artifacts to `gs://pv-prospect-versioned-model`, commits
    `model-v<date>`. The model trainer always runs after the versioner step, even if
-   the versioner's Cloud Run status reports non-success (the versioner has a known
-   hang-on-exit bug — see `.claude/work/briefs/versioner-hang.md` — that reports
-   failure despite completing all work; the trainer self-verifies by cloning the
-   `data-v<date>` tag).
+   the versioner's Cloud Run status reports non-success; the trainer self-verifies
+   by cloning the `data-v<date>` tag.
+
+Until 2026-07-09 the versioner reported non-success on *every* run: it timed out
+sweeping the staging `cleaned/` prefix, which had grown to ~2.66M objects and was
+deleted one request at a time. That prefix is now expired by a GCS lifecycle rule
+and the versioner no longer touches it. The workflow's tolerance of a non-success
+versioner is retained until a live run confirms a clean exit — see
+`.claude/work/reports/versioner-hang.md`.
 
 ### Prediction & Validation API + Website (`pv-prospect-app`)
 

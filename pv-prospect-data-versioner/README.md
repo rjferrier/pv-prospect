@@ -103,15 +103,23 @@ overridable via config.
 
 ### 7. Staging cleanup
 
-`_clean_staging` deletes every file under the `cleaned/` and `prepared/`
-prefixes on the staging bucket and then `rmdir`s the residual folder
-hierarchy. See [HNS cleanup](#staging-cleanup-on-hierarchical-namespace-hns-buckets)
+`_clean_staging` deletes every file under the `prepared/` prefix on the staging
+bucket and then `rmdir`s the residual folder hierarchy. See
+[HNS cleanup](#staging-cleanup-on-hierarchical-namespace-hns-buckets)
 below for why the explicit rmdir is necessary.
 
-The next weekly run therefore begins against an empty staging tree, so each
+The next weekly run therefore begins against an empty prepared tree, so each
 cycle versions exactly that week's freshly assembled partition files — the
 clean slate is what lets content-named partitions accumulate as disjoint
 `.dvc` entries across tags rather than overwriting one another.
+
+The `cleaned/` prefix is **not** swept here. `delete` costs one request per
+object and cleaned holds millions of them, so a serial sweep could never
+finish inside the job's 30-minute timeout — the bug that made every run report
+`Completed=False` (see `reports/versioner-hang.md`). A GCS lifecycle rule on
+`data/cleaned/` (`terraform/modules/storage`) expires objects at age 7 days
+instead. Nothing depends on cleaned surviving across runs: the clean step
+writes it and the prepare step reads it back within the same run.
 
 ## Configuration
 
@@ -124,7 +132,6 @@ Storage backends — bucket name and prefix come from
 `pv-prospect-etl/config-default.yaml`:
 
 - `staged_prepared_data_storage`
-- `staged_cleaned_data_storage`
 - `staged_prepared_batches_data_storage`
 
 Versioner-specific keys (defaults):
@@ -157,16 +164,18 @@ workflow trigger context. Cloud Scheduler triggers it weekly.
 ## Staging cleanup on hierarchical-namespace (HNS) buckets
 
 After uploading prepared CSVs to the versioned feature store, `version_data`
-clears the `cleaned/` and `prepared/` prefixes from the staging bucket so the
-next weekly run can verify readiness against a fresh write.
+clears the `prepared/` prefix from the staging bucket so the next weekly run
+can verify readiness against a fresh write.
 
 On the hierarchical-namespace staging bucket, folders are first-class entities
 that persist after their last child object is removed. Cleanup therefore deletes
 files and then `rmdir`s every residual ancestor directory deepest-first (e.g.
-`weather/` and each `pv/<site>/`, plus any subtree under `data/cleaned/`).
-The root prefixes themselves
-(`data/prepared/`, `data/cleaned/`) are left in place; transformation re-uses
-them on its next run.
+`weather/` and each `pv/<site>/`). The root prefix itself (`data/prepared/`) is
+left in place; transformation re-uses it on its next run.
+
+Lifecycle rules delete objects but not HNS folders, so the lifecycle-expired
+`data/cleaned/` tree accumulates empty folders. `pv-prospect-etl/scripts/
+cleanup_empty_folders.py` sweeps them; it is not on a schedule.
 
 `iter_ancestor_dirs` in `core.py` is the pure helper that derives the
 deepest-first directory list from a set of file paths; it is unit-tested in

@@ -11,7 +11,6 @@ class DataVersionerConfig:
     """Configuration for data versioning."""
 
     staged_prepared_data_storage: AnyStorageConfig
-    staged_cleaned_data_storage: AnyStorageConfig
     staged_prepared_batches_data_storage: AnyStorageConfig
     instance_repo_url: str
     instance_repo_branch: str
@@ -25,9 +24,6 @@ class DataVersionerConfig:
         return cls(
             staged_prepared_data_storage=parse_storage_config(
                 data['staged_prepared_data_storage']
-            ),
-            staged_cleaned_data_storage=parse_storage_config(
-                data['staged_cleaned_data_storage']
             ),
             staged_prepared_batches_data_storage=parse_storage_config(
                 data['staged_prepared_batches_data_storage']

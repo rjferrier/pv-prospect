@@ -46,10 +46,9 @@ def main() -> None:
     )
 
     prepared_fs = get_filesystem(config.staged_prepared_data_storage)
-    cleaned_fs = get_filesystem(config.staged_cleaned_data_storage)
     batches_fs = get_filesystem(config.staged_prepared_batches_data_storage)
 
-    version_data(prepared_fs, cleaned_fs, batches_fs, config, deploy_key, version_date)
+    version_data(prepared_fs, batches_fs, config, deploy_key, version_date)
 
 
 if __name__ == '__main__':
