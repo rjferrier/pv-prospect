@@ -8,6 +8,7 @@ from pv_prospect.etl import (
     build_backfill_plan,
     initial_backfill_cursor,
 )
+from pv_prospect.etl.backfill import MIN_ARCHIVE_DATE
 
 
 def test_initial_cursor_starts_at_today() -> None:
@@ -66,3 +67,51 @@ def test_first_run_from_initial_cursor() -> None:
         end_date=today,
     )
     assert next_cursor.next_end_date == today - timedelta(days=28)
+
+
+def test_default_floor_is_the_archive_start() -> None:
+    cursor = BackfillCursor(next_end_date=MIN_ARCHIVE_DATE + timedelta(days=1))
+
+    plan, _ = build_backfill_plan(cursor, window_days=28)
+
+    assert plan.start_date == MIN_ARCHIVE_DATE
+
+
+def test_final_window_is_truncated_at_the_floor() -> None:
+    floor = date(2016, 1, 1)
+    cursor = BackfillCursor(next_end_date=date(2016, 1, 15))
+
+    plan, next_cursor = build_backfill_plan(cursor, window_days=28, floor=floor)
+
+    assert plan == BackfillPlan(start_date=floor, end_date=date(2016, 1, 15))
+    assert next_cursor.next_end_date == floor
+
+
+def test_cursor_at_the_floor_plans_an_empty_window() -> None:
+    floor = date(2016, 1, 1)
+    cursor = BackfillCursor(next_end_date=floor)
+
+    plan, next_cursor = build_backfill_plan(cursor, window_days=28, floor=floor)
+
+    assert plan.start_date == plan.end_date == floor
+    assert next_cursor.next_end_date == floor
+
+
+def test_cursor_below_the_floor_never_plans_an_inverted_window() -> None:
+    floor = date(2016, 1, 1)
+    cursor = BackfillCursor(next_end_date=date(2010, 5, 21))
+
+    plan, next_cursor = build_backfill_plan(cursor, window_days=28, floor=floor)
+
+    assert plan.start_date == plan.end_date == floor
+    assert next_cursor.next_end_date == floor
+
+
+def test_halted_cursor_is_a_fixed_point() -> None:
+    floor = date(2016, 1, 1)
+    cursor = BackfillCursor(next_end_date=date(2016, 1, 15))
+
+    _, cursor_1 = build_backfill_plan(cursor, window_days=28, floor=floor)
+    _, cursor_2 = build_backfill_plan(cursor_1, window_days=28, floor=floor)
+
+    assert cursor_2 == cursor_1

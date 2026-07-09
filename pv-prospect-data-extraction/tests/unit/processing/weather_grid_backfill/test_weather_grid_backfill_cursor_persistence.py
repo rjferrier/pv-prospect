@@ -30,7 +30,7 @@ class FakeFileSystem:
 
 _CURSOR = WeatherGridBackfillCursor(
     next_end_date=date(2025, 11, 20),
-    next_sample_offset=9,
+    density_pass=2,
 )
 
 
@@ -45,7 +45,16 @@ def test_serialize_produces_json_with_iso_date() -> None:
     text = serialize_cursor(_CURSOR)
 
     assert '2025-11-20' in text
-    assert '"next_sample_offset": 9' in text
+    assert '"density_pass": 2' in text
+
+
+def test_deserialize_reads_a_pre_densifier_cursor_as_the_first_pass() -> None:
+    legacy = '{"next_end_date": "2010-05-21", "next_sample_offset": 417}'
+
+    cursor = deserialize_cursor(legacy)
+
+    assert cursor.next_end_date == date(2010, 5, 21)
+    assert cursor.density_pass == 0
 
 
 def test_load_cursor_returns_initial_when_file_missing() -> None:
@@ -55,7 +64,7 @@ def test_load_cursor_returns_initial_when_file_missing() -> None:
     cursor = load_cursor(cursors_fs, today)
 
     assert cursor.next_end_date == date(2026, 3, 20)
-    assert cursor.next_sample_offset == 1
+    assert cursor.density_pass == 0
 
 
 def test_load_cursor_reads_existing_file() -> None:

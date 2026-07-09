@@ -62,6 +62,15 @@ def default_window_days(scope: BackfillScope) -> int:
     return _DEFAULT_WINDOW_DAYS_BY_SCOPE[scope]
 
 
+# The earliest date any OpenMeteo historical-forecast model reaches. The API
+# validates a request against the union floor across the requested models and
+# rejects the *whole* request with a 400 when ``start_date`` falls below it.
+# The floor is a fixed archive start, not a sliding window: no amount of
+# waiting or retrying makes pre-2016 data appear. Backfills therefore stop
+# here rather than marching into permanent failure.
+MIN_ARCHIVE_DATE = date(2016, 1, 1)
+
+
 @dataclass(frozen=True)
 class BackfillCursor:
     """Tracks where a backfill left off.
@@ -89,15 +98,26 @@ def initial_backfill_cursor(today: date) -> BackfillCursor:
 def build_backfill_plan(
     cursor: BackfillCursor,
     window_days: int,
+    floor: date = MIN_ARCHIVE_DATE,
 ) -> tuple[BackfillPlan, BackfillCursor]:
     """Build a plan for the next window and return the updated cursor.
 
     Returns ``(plan, next_cursor)``. ``next_cursor`` points at the
     exclusive end of the *following* window (i.e. ``window_days`` further
-    into the past).
+    into the past), never below *floor*.
+
+    The march halts at *floor*: the last window is truncated to
+    ``[floor, end)``, and once the cursor has reached the floor every
+    subsequent plan is the **empty window** ``[floor, floor)``, whose
+    cursor is its own fixed point. Callers turn an empty window into an
+    empty task list, so a halted backfill plans, dispatches nothing, and
+    commits an unchanged cursor. Without the floor the march would run
+    below the source's archive start forever; the empty-window fixed
+    point is also what keeps a cursor left below the floor from planning
+    an *inverted* window.
     """
-    end_date = cursor.next_end_date
-    start_date = end_date - timedelta(days=window_days)
+    end_date = max(cursor.next_end_date, floor)
+    start_date = max(end_date - timedelta(days=window_days), floor)
     plan = BackfillPlan(start_date=start_date, end_date=end_date)
     next_cursor = BackfillCursor(next_end_date=start_date)
     return plan, next_cursor

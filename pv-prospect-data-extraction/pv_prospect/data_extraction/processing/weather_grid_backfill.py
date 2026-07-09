@@ -24,6 +24,7 @@ records one entry per ``(site, window)`` pair rather than per slice.
 
 import json
 from datetime import date
+from typing import Any
 
 from pv_prospect.etl import (
     WeatherGridBackfillCursor,
@@ -53,9 +54,23 @@ def serialize_cursor(cursor: WeatherGridBackfillCursor) -> str:
     return json.dumps(
         {
             'next_end_date': cursor.next_end_date.isoformat(),
-            'next_sample_offset': cursor.next_sample_offset,
+            'density_pass': cursor.density_pass,
         }
     )
+
+
+def _read_density_pass(data: dict[str, Any]) -> int:
+    """Read ``density_pass``, defaulting a pre-densifier cursor to 0.
+
+    Cursors written before the march became two-dimensional carry a
+    ``next_sample_offset`` instead. Such a cursor has already swept the
+    grid once (below the archive floor, in fact), so pass 0 is behind
+    it: the schedule sees a floored ``next_end_date``, rolls to pass 1,
+    and restarts at the top of the grid. The legacy cursor thus migrates
+    itself on the next run, and the discarded offset carries no
+    information the new sample assignment needs.
+    """
+    return int(data.get('density_pass', 0))
 
 
 def deserialize_cursor(text: str) -> WeatherGridBackfillCursor:
@@ -63,7 +78,7 @@ def deserialize_cursor(text: str) -> WeatherGridBackfillCursor:
     data = json.loads(text)
     return WeatherGridBackfillCursor(
         next_end_date=date.fromisoformat(data['next_end_date']),
-        next_sample_offset=data['next_sample_offset'],
+        density_pass=_read_density_pass(data),
     )
 
 
@@ -162,7 +177,7 @@ def serialize_manifest(
             'phases': phases,
             'next_cursor': {
                 'next_end_date': next_cursor.next_end_date.isoformat(),
-                'next_sample_offset': next_cursor.next_sample_offset,
+                'density_pass': next_cursor.density_pass,
             },
         }
     )
@@ -178,7 +193,7 @@ def deserialize_next_cursor(text: str) -> WeatherGridBackfillCursor:
     data = json.loads(text)
     return WeatherGridBackfillCursor(
         next_end_date=date.fromisoformat(data['next_cursor']['next_end_date']),
-        next_sample_offset=int(data['next_cursor']['next_sample_offset']),
+        density_pass=_read_density_pass(data['next_cursor']),
     )
 
 

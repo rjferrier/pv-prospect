@@ -3,6 +3,9 @@
 > Written 2026-07-06. A survey of the consequences of Open-Meteo's fixed
 > 2016-01-01 archive floor on the two backward-marching extraction backfills.
 > Findings and remedy proposals only — no code or corpus was modified.
+>
+> The remedies were implemented on 2026-07-09; see the **Addendum** for what
+> was built and where it diverged from §6.
 
 ## Summary
 
@@ -61,6 +64,7 @@ fillable; cleanup of the (future) orphaned raw PV is separable.
 6\. Remedies\
 7\. Conclusions
 
+Addendum: Implementation (2026-07-09)\
 References
 
 ## 1. Introduction
@@ -305,6 +309,88 @@ against the grid-weather model's actual resolution needs; it can be raised later
 without rework, since densification is monotonic. Everything else — the corpus
 (needs no repair), the pre-2016 gap (not fillable), the raw-PV tidy-up — is
 acknowledgement or optional cleanup.
+
+## Addendum: Implementation (2026-07-09)
+
+R1a and R1b were implemented as chosen, with `MIN_ARCHIVE_DATE = 2016-01-01` in
+`pv-prospect-etl/.../etl/backfill.py` and `TARGET_DENSITY_PASSES = 4` (12.5%
+relative spatial density, §7's suggested default) in `.../etl/slice_schedule.py`.
+R2 (no corpus repair) and R3 (orphan cleanup) proved unnecessary; R5 (alerting)
+was not done. The as-built design is documented in `doc/orchestration.md` under
+*The Archive Floor* and *Weather-Grid Density Passes* (R4).
+
+Three deliberate divergences from §6, each of which removed work rather than
+adding it:
+
+1. **The window grid is fixed, not re-anchored per pass.** §6's R1b resets time
+   to `today` at the start of each pass. That would drift every pass's window
+   boundaries — a pass is ~34 daily runs and 34 is not a multiple of 14 — so
+   successive passes would tile the same history with *overlapping* windows,
+   `(base + k + w) % 32` would not in fact give window *w* a distinct sample per
+   pass, and a grid point drawn twice over overlapping date ranges would
+   duplicate rows in the prepared corpus. Instead every Step-3 window is a cell
+   of one fixed 14-day tiling of `[MIN_ARCHIVE_DATE, today]`. The tiling's phase
+   is not chosen but *inherited*: the live cursor (`2010-05-21`) and every
+   window fetched to date are congruent to **2016-01-08** modulo 14 days, so the
+   grid re-uses the as-built tiling and no already-fetched window is re-cut.
+
+2. **No cursor migration is needed.** §6 called for hand-resetting the live
+   cursor to `(today, pass=1)`. Instead a pre-densifier cursor — carrying
+   `next_sample_offset` and no `density_pass` — deserialises as pass 0 with an
+   already-floored `next_end_date`, which the schedule reads as "this pass has
+   swept the grid": it rolls to pass 1 and restarts at the top of the grid on its
+   next run. The legacy cursor migrates itself, and the discarded
+   `next_sample_offset` carries no information the new assignment needs. No
+   production state change was made.
+
+3. **The bottom window is truncated, not dropped.** Both scopes now truncate
+   their bottom window to `[MIN_ARCHIVE_DATE, end)`. This recovers the
+   2016-01-01…08 days that §3 recorded as collateral loss when the straddling
+   window was rejected whole.
+
+Because the legacy pass 0 is already on disk, the three new passes (1–3) bring
+each historical window to **~4 distinct sample files**, which is the intended
+12.5%. A fresh deployment instead runs passes 0–3 for the same result.
+
+**Verification.** Beyond unit tests of the schedule as a pure function (floor
+clamp, inverted-window guard, the 2-D advance, the floor→next-pass roll, the
+`(pass, window)` sample assignment, the `target_passes` terminal, cursor
+round-trip and legacy migration), the schedule was driven forward for 1,300
+simulated days from the *live* production cursor JSON. Results: the legacy cursor
+rolls to pass 1 on its first run; the march goes quiescent after **104 Step-3
+runs** (passes of 34, 34 and 35 runs — ~3.4 months of daily runs once resumed),
+settling on the fixed point `(2016-01-01, pass=4)`; **no** window is planned
+below the floor, inverted, or overlapping Step 2's trailing window; 273 of the
+278 windows touched accumulate 3 distinct new sample files (the 5 newest fewer,
+being reached only by later passes); and **no two overlapping windows ever share
+a sample file** — the property that rules out duplicate rows.
+
+The transformation side needed no change, as §6 anticipated, and this was checked
+rather than assumed. The `{NN}` suffix of a prepared weather partition
+(`weather_{start}_{end}_{ver}-{NN}.csv`, built by `weather_partition_path` in
+data-transformation `processing/core.py`) *is* the `grid_point_sample_index`, so
+the same window under two density passes writes two distinct files; and
+`transform_backfill.plan_slices` keys weather slices by
+`(grid_point_sample_index, start_date, end_date)` read from the extraction
+ledger's descriptors, so each pass's windows are planned from their own
+`completed` descriptors automatically. Passes therefore accumulate partitions
+rather than overwriting one another, while a re-transform of any single
+`(window, sample)` pair still updates exactly one file. Separately, neither
+extraction backfill workflow indexes the first element of a phase, so the
+zero-task manifest that a floor-halted PV-sites backfill plans dispatches nothing
+and commits an unchanged cursor.
+
+**Operational state.** All four backfill schedulers have been `PAUSED` since
+2026-07-08 (see the `backfills-paused` change), so nothing marches today and the
+~8.5k failed fetches/day described in §5.1 have already stopped. Consequently:
+
+- The `~late Sep 2026` R1a deadline (§3, §5.4) is **moot while paused** — the
+  PV-sites cursor is frozen at `2022-05-20`, ~6.4 years above the floor, and R1a
+  now lands well ahead of it in any case. It never crossed the floor, so the
+  orphaned raw PV of §5.4 was never created and **R3 has nothing to clean**.
+- On resumption the weather-grid backfill immediately stops issuing pre-2016
+  requests and begins its first densifying pass; the PV-sites backfill resumes
+  its ordinary march and will now halt at the floor rather than cross it.
 
 ## References
 

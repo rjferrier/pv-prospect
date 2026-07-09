@@ -35,6 +35,13 @@ def test_empty_pv_system_ids_yields_no_slices() -> None:
     assert pv_sites_schedule(_PLAN, []) == []
 
 
+def test_empty_window_yields_no_slices() -> None:
+    # What a backfill halted at the archive floor plans.
+    halted = BackfillPlan(start_date=date(2016, 1, 1), end_date=date(2016, 1, 1))
+
+    assert pv_sites_schedule(halted, [89665, 12345]) == []
+
+
 def test_slice_values_are_pv_slices() -> None:
     slices = pv_sites_schedule(_PLAN, [89665])
 

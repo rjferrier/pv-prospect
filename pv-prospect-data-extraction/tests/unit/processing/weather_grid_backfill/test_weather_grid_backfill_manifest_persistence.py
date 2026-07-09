@@ -147,13 +147,15 @@ def test_plan_then_commit_advances_live_cursor() -> None:
     manifests_fs = _FakeFileSystem()
     today = date(2026, 4, 9)
 
+    initial = initial_weather_grid_backfill_cursor(today)
     _plan(cursors_fs, manifests_fs, today=today)
     commit_weather_grid_backfill(_RUN_DATE, cursors_fs, manifests_fs)
 
     cursor = load_cursor(cursors_fs, today)
-    # With the default 8-batch step 3 plan, the cursor offset advances from
-    # 1 to 9 (initial 1 + 8 batches).
-    assert cursor.next_sample_offset == 9
+    # The default 8-batch step 3 plan marches 8 windows down the grid,
+    # nowhere near the archive floor, so the density pass is unchanged.
+    assert cursor.next_end_date == initial.next_end_date - timedelta(days=8 * 14)
+    assert cursor.density_pass == initial.density_pass
 
 
 def test_plan_weather_grid_backfill_without_prior_cursor_uses_initial() -> None:
@@ -164,9 +166,10 @@ def test_plan_weather_grid_backfill_without_prior_cursor_uses_initial() -> None:
     _plan(cursors_fs, manifests_fs, today=today)
     next_cursor = deserialize_next_cursor(manifests_fs.files[_MANIFEST_PATH])
 
-    # Initial cursor starts at (today - 14). After 8 more 14-day backward
-    # steps the next_end_date should be (today - 14 - 8*14) = today - 126.
-    assert next_cursor.next_end_date == today - timedelta(days=126)
+    # The initial cursor snaps onto the fixed window grid at the first
+    # boundary at or below (today - 14); 2026-04-09 is not itself on the
+    # grid, so the march starts at 2026-03-20 and steps back 8 windows.
+    assert next_cursor.next_end_date == date(2026, 3, 20) - timedelta(days=8 * 14)
 
 
 def _env_value(task_env: list[dict[str, str]], name: str) -> str | None:
@@ -264,13 +267,13 @@ def test_same_cursor_state_produces_envs_with_same_computed_hashes() -> None:
     cursor + sample files: planning twice yields envs whose
     ``compute_task_hash`` values match position-by-position."""
     cursor = WeatherGridBackfillCursor(
-        next_end_date=date(2026, 3, 26),
-        next_sample_offset=1,
+        next_end_date=date(2026, 3, 20),
+        density_pass=1,
     )
     cursor_json = json.dumps(
         {
             'next_end_date': cursor.next_end_date.isoformat(),
-            'next_sample_offset': cursor.next_sample_offset,
+            'density_pass': cursor.density_pass,
         }
     )
     fs_a_c = _FakeFileSystem({_CURSOR_PATH: cursor_json})

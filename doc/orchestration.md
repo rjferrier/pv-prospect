@@ -328,6 +328,91 @@ recorded.
 | `PV_SITES` | 28 days | PVOutput's `getstatus.jsp` is single-date only (one HTTP call per system per day) and rate-limits at 300/hour; 10 sites × 28 days = 280 calls is the largest round-week multiple that fits with retry headroom. |
 | `WEATHER_GRID` | 14 days | OpenMeteo's natural single-request window for the historical-forecast endpoint. |
 
+### The Archive Floor
+
+`MIN_ARCHIVE_DATE` (2016-01-01, also in `pv_prospect.etl.backfill`) is where both
+extraction backfills stop marching. OpenMeteo's historical-forecast archive
+begins on a fixed per-model start date; 2016-01-01 is the earliest any of the
+models we request reaches. The API validates a request against the **union**
+floor across those models and rejects the *whole* request with a `400` when
+`start_date` falls below it — so a window straddling the floor loses its valid
+days too, and the two scopes both truncate their bottom window to
+`[MIN_ARCHIVE_DATE, end)` rather than let it straddle.
+
+The floor is fixed, not a sliding window: no amount of waiting or retrying makes
+pre-2016 data appear. A backfill that marches past it fails every fetch, every
+day, forever — and because a per-site fetch failure is swallowed into a `failed`
+ledger entry rather than raising `WorkflowTerminatingError`, the workflow still
+reaches its commit step and advances the cursor anyway. Nothing stops it. The
+grid-weather corpus below 2016 is therefore a permanent, unfillable gap, not a
+hole waiting to be backfilled.
+
+What the two scopes do on arrival differs, because only the weather grid has a
+spatial axis to spend further runs on:
+
+- **PV-sites halts.** Its cursor settles on `MIN_ARCHIVE_DATE` as a fixed point,
+  and every subsequent run plans the empty window `[floor, floor)` — no slices,
+  nothing dispatched, an unchanged cursor committed. The empty-window fixed point
+  is also what stops a cursor left *below* the floor from planning an inverted
+  window.
+- **Weather-grid rolls to the next density pass** — see below.
+
+Neither reaching the floor nor going quiescent is an error; a halted backfill is
+a backfill that has finished its work.
+
+### Weather-Grid Density Passes
+
+The weather-grid march is **two-dimensional**: `(next_end_date, density_pass)`.
+Time is the fast inner axis, bounded below by the floor; the density pass is the
+slow outer axis.
+
+Each Step-3 run covers 8 windows on a **fixed 14-day grid** tiling
+`[MIN_ARCHIVE_DATE, today]`, and each window draws exactly one of the 32
+grid-point sample files. One sweep of the grid is a *density pass* (~274 windows
+at 8/day ≈ 34 daily runs). On reaching the floor the cursor rolls: the pass
+increments and time resets to the top of the grid. Because a window's sample file
+is the pure function
+
+```
+sample_index = (density_pass + window_index) % num_sample_files
+```
+
+consecutive windows within a pass draw consecutive sample files, and the *same*
+window draws a *different* sample file on every pass. After `k` passes the
+historical grid holds `k` distinct sample files per window — a relative spatial
+density of `k / 32`. The march goes quiescent at `TARGET_DENSITY_PASSES` (4, i.e.
+12.5%); Step 2's rolling recent-history sample continues regardless.
+Densification is monotonic, so the target can be raised later without rework or
+re-fetching.
+
+Two properties of this scheme are load-bearing:
+
+- **The window grid is fixed, not re-anchored per pass.** Its phase is inherited
+  from the as-built march (every window fetched to date is congruent to
+  2016-01-08 modulo 14 days), so passes re-use one tiling rather than laying a
+  second, offset one over the same history. Were each pass instead to start its
+  windows at its own start date — ~34 runs apart, and 34 is not a multiple of
+  14 — successive passes would tile the same history with *overlapping* windows,
+  and a grid point drawn twice over overlapping date ranges would duplicate rows
+  in the prepared corpus.
+- **The historical march never reaches the trailing window.** A pass starts one
+  full window below `today`, snapped down onto the grid. Step 3's sample file is
+  chosen without reference to Step 2's, so date-disjointness is the only thing
+  preventing the two from drawing the same grid point over the same days.
+
+Downstream is unaffected: each `(sample_index, window)` pair writes its own
+prepared partition (`weather_{start}_{end}_{ver}-{NN}.csv`), so passes accumulate
+files rather than colliding, and the transformation backfill picks them up from
+the new `completed` descriptors automatically.
+
+Before this design the cursor was one-dimensional and the sample file was a side
+effect of how far back the march had gone (`(anchor − sample_offset) % 32`, with
+`sample_offset` growing without bound). It ran off the bottom of the archive
+instead of building density. A cursor still in that shape — carrying
+`next_sample_offset` and no `density_pass` — is read as pass 0 with a floored
+`next_end_date`, so it rolls to pass 1 and restarts at the top of the grid on its
+next run. It needs no hand migration.
+
 ### Cursor and Marker Files
 
 Each backfill instance has its own workflow name. The **extraction** backfills
@@ -347,13 +432,14 @@ independent so the pipelines advance at their own pace.
 
 The weather-grid extraction backfill runs as a single Cloud Workflows execution
 per day (one Cloud Scheduler trigger at 03:20 UTC). It dispatches all 9 batches
-sequentially, pausing `sleep_seconds_between_batches` (default 720 s) between
-successive dispatches; the in-batch sleep is what keeps the dispatch rate under
-OpenMeteo's 5,000 requests/hour limit. Total wall time ≈ 3 h 24 min; the
-cursor commits once every batch has been attempted. Failed sites within a batch
-are recorded in the ledger but not retried — the cursor still advances. There
-is no per-batch checkpoint; a workflow-level failure leaves the cursor at
-yesterday's position and tomorrow's run re-plans the same window.
+(1 Step-2 + 8 Step-3, and just the Step-2 batch once the historical march has
+gone quiescent) sequentially, pausing `sleep_seconds_between_batches` (default
+720 s) between successive dispatches; the in-batch sleep is what keeps the
+dispatch rate under OpenMeteo's 5,000 requests/hour limit. Total wall time ≈
+3 h 24 min; the cursor commits once every batch has been attempted. Failed sites
+within a batch are recorded in the ledger but not retried — the cursor still
+advances. There is no per-batch checkpoint; a workflow-level failure leaves the
+cursor at yesterday's position and tomorrow's run re-plans the same window.
 
 ### Transformation Backfills
 
