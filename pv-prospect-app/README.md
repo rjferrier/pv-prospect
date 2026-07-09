@@ -219,6 +219,21 @@ are baked into the image (`pv_prospect/app/static/`) and the promoted models loa
 at startup, so picking up new static assets or a freshly promoted `model-v<date>`
 both require a redeploy.
 
+**Never apply this service without `-var app_image_tag=...`.** A bare `terraform
+apply` falls back to the variable's default of `latest` (`terraform/variables.tf`),
+and because of the SHA-tagging above, `pv-prospect-app` is the only Artifact
+Registry repo that has no `latest` tag — so the deploy targets an image that
+cannot exist.
+
+**Always finish the push before applying.** A missing image fails slowly and
+misleadingly rather than fast: Cloud Run creates the revision, keeps retrying the
+pull for tens of minutes, and Terraform eventually gives up with `Error code 5 ...
+Image not found` — after which Cloud Run may still heal the revision on its own if
+a late `docker push` lands. This bites when an apply is run alongside a rebuild,
+since the app image is the last of the five to build. `deploy.sh` guards both
+hazards by checking each tag exists in Artifact Registry before it applies, but the
+manual sequence above has no such guard.
+
 **Public by default.** The service is public (`allow_unauthenticated = true` in
 `terraform/variables.tf`), protected by per-IP rate limiting baked into the image
 (see [Rate limiting](#rate-limiting)). To restrict to IAM auth, set

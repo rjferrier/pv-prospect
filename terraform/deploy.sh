@@ -8,7 +8,13 @@ echo "=========================================================="
 
 cd "$(dirname "$0")"
 
+# The app is tagged per-commit so Terraform sees a tag change and rolls a new
+# revision; the other four images are only ever published under :latest.
 APP_TAG=$(git rev-parse --short HEAD)
+EXTRACT_TAG=latest
+TRANSFORM_TAG=latest
+VERSION_TAG=latest
+MODEL_TAG=latest
 
 usage() {
   echo "Usage: $0 [-p|--project-id PROJECT_ID] [STAGES]"
@@ -101,7 +107,28 @@ resolve_image_urls() {
   IMAGE_URL_VERSION=$(terraform output -raw artifact_registry_versioner_url)/data-versioner
   IMAGE_URL_MODEL=$(terraform output -raw artifact_registry_model_trainer_url)/model-trainer
   IMAGE_URL_APP=$(terraform output -raw artifact_registry_app_url)/pv-prospect-app
+}
+
+configure_docker() {
   gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+}
+
+# Helper: abort unless an image tag is already in Artifact Registry. Terraform can
+# poll a Cloud Run rollout for tens of minutes before it surfaces a missing image
+# as "Error code 5 ... not found", and Cloud Run then heals the revision on its own
+# once a late push lands — so the failure is both slow and misleading.
+require_image() {
+  local image_url="$1" tag="$2" build_stage="$3"
+  if ! gcloud artifacts docker images describe "$image_url:$tag" >/dev/null 2>&1; then
+    echo ""
+    echo "ERROR: image not found in Artifact Registry:"
+    echo "         $image_url:$tag"
+    echo ""
+    echo "Build and push it first:"
+    echo "         $0 $build_stage"
+    exit 1
+  fi
+  echo "[precheck] found $image_url:$tag"
 }
 
 # 1. Provision Artifact Registries and APIs
@@ -122,9 +149,10 @@ if run_stage build-extraction; then
   echo ""
   echo "[build-extraction] Building and pushing extraction Docker image..."
   resolve_image_urls
-  echo "Building: $IMAGE_URL_EXTRACT:latest"
-  docker build -t "$IMAGE_URL_EXTRACT:latest" --target entrypoint -f ../pv-prospect-data-extraction/Dockerfile ..
-  docker push "$IMAGE_URL_EXTRACT:latest"
+  configure_docker
+  echo "Building: $IMAGE_URL_EXTRACT:$EXTRACT_TAG"
+  docker build -t "$IMAGE_URL_EXTRACT:$EXTRACT_TAG" --target entrypoint -f ../pv-prospect-data-extraction/Dockerfile ..
+  docker push "$IMAGE_URL_EXTRACT:$EXTRACT_TAG"
 fi
 
 # 2b. Build and push transformation image
@@ -132,9 +160,10 @@ if run_stage build-transformation; then
   echo ""
   echo "[build-transformation] Building and pushing transformation Docker image..."
   resolve_image_urls
-  echo "Building: $IMAGE_URL_TRANSFORM:latest"
-  docker build -t "$IMAGE_URL_TRANSFORM:latest" --target entrypoint -f ../pv-prospect-data-transformation/Dockerfile ..
-  docker push "$IMAGE_URL_TRANSFORM:latest"
+  configure_docker
+  echo "Building: $IMAGE_URL_TRANSFORM:$TRANSFORM_TAG"
+  docker build -t "$IMAGE_URL_TRANSFORM:$TRANSFORM_TAG" --target entrypoint -f ../pv-prospect-data-transformation/Dockerfile ..
+  docker push "$IMAGE_URL_TRANSFORM:$TRANSFORM_TAG"
 fi
 
 # 2c. Build and push versioner image
@@ -142,9 +171,10 @@ if run_stage build-versioner; then
   echo ""
   echo "[build-versioner] Building and pushing data-versioner Docker image..."
   resolve_image_urls
-  echo "Building: $IMAGE_URL_VERSION:latest"
-  docker build -t "$IMAGE_URL_VERSION:latest" --target entrypoint -f ../pv-prospect-data-versioner/Dockerfile ..
-  docker push "$IMAGE_URL_VERSION:latest"
+  configure_docker
+  echo "Building: $IMAGE_URL_VERSION:$VERSION_TAG"
+  docker build -t "$IMAGE_URL_VERSION:$VERSION_TAG" --target entrypoint -f ../pv-prospect-data-versioner/Dockerfile ..
+  docker push "$IMAGE_URL_VERSION:$VERSION_TAG"
 fi
 
 # 2d. Build and push model-trainer image
@@ -152,9 +182,10 @@ if run_stage build-trainer; then
   echo ""
   echo "[build-trainer] Building and pushing model-trainer Docker image..."
   resolve_image_urls
-  echo "Building: $IMAGE_URL_MODEL:latest"
-  docker build -t "$IMAGE_URL_MODEL:latest" --target entrypoint -f ../pv-prospect-model-trainer/Dockerfile ..
-  docker push "$IMAGE_URL_MODEL:latest"
+  configure_docker
+  echo "Building: $IMAGE_URL_MODEL:$MODEL_TAG"
+  docker build -t "$IMAGE_URL_MODEL:$MODEL_TAG" --target entrypoint -f ../pv-prospect-model-trainer/Dockerfile ..
+  docker push "$IMAGE_URL_MODEL:$MODEL_TAG"
 fi
 
 # 2e. Build and push pv-prospect-app image
@@ -162,6 +193,7 @@ if run_stage build-app; then
   echo ""
   echo "[build-app] Building and pushing pv-prospect-app Docker image..."
   resolve_image_urls
+  configure_docker
   echo "Building: $IMAGE_URL_APP:$APP_TAG"
   docker build -t "$IMAGE_URL_APP:$APP_TAG" --target entrypoint -f ../pv-prospect-app/Dockerfile ..
   docker push "$IMAGE_URL_APP:$APP_TAG"
@@ -171,6 +203,8 @@ fi
 if run_stage terraform-extraction; then
   echo ""
   echo "[terraform-extraction] Provisioning extraction Cloud Run, Workflows, and Schedulers..."
+  resolve_image_urls
+  require_image "$IMAGE_URL_EXTRACT" "$EXTRACT_TAG" build-extraction
   terraform apply \
     -target=module.cloud_run_extract \
     -target=module.extractor_workflow \
@@ -186,6 +220,8 @@ fi
 if run_stage terraform-transform; then
   echo ""
   echo "[terraform-transform] Provisioning transformation Cloud Run and Workflow..."
+  resolve_image_urls
+  require_image "$IMAGE_URL_TRANSFORM" "$TRANSFORM_TAG" build-transformation
   terraform apply \
     -target=module.cloud_run_transform \
     -target=module.transformer_workflow \
@@ -200,6 +236,8 @@ fi
 if run_stage terraform-app; then
   echo ""
   echo "[terraform-app] Provisioning pv-prospect-app Cloud Run Service..."
+  resolve_image_urls
+  require_image "$IMAGE_URL_APP" "$APP_TAG" deploy-app
   terraform apply \
     -target=module.cloud_run_app \
     -var "app_image_tag=$APP_TAG" \
@@ -210,6 +248,12 @@ fi
 if run_stage terraform; then
   echo ""
   echo "[terraform] Applying all infrastructure..."
+  resolve_image_urls
+  require_image "$IMAGE_URL_EXTRACT"   "$EXTRACT_TAG"   build-extraction
+  require_image "$IMAGE_URL_TRANSFORM" "$TRANSFORM_TAG" build-transformation
+  require_image "$IMAGE_URL_VERSION"   "$VERSION_TAG"   build-versioner
+  require_image "$IMAGE_URL_MODEL"     "$MODEL_TAG"     build-trainer
+  require_image "$IMAGE_URL_APP"       "$APP_TAG"       build-app
   terraform apply -var "app_image_tag=$APP_TAG" -auto-approve
 fi
 
