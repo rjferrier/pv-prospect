@@ -10,6 +10,13 @@ resource "google_cloud_run_v2_service" "service" {
   deletion_protection = false
   ingress             = "INGRESS_TRAFFIC_ALL"
 
+  # Service-wide floor on instances, distinct from the per-revision template.scaling
+  # below. Cloud Run always reports this block, so leaving it undeclared makes every
+  # plan propose removing it; declare the zero we already want.
+  scaling {
+    min_instance_count = 0
+  }
+
   template {
     service_account = var.service_account_email
 
