@@ -464,7 +464,9 @@ module "cloud_run_app" {
   source                = "./modules/cloud_run_service"
   service_name          = "pv-prospect-app"
   region                = var.region
-  image_url             = "${var.region}-docker.pkg.dev/${var.project_id}/pv-prospect-app/pv-prospect-app"
+  project_id            = var.project_id
+  repository_id         = "pv-prospect-app"
+  image_name            = "pv-prospect-app"
   image_tag             = var.app_image_tag
   cpu                   = "2"
   memory                = "4Gi"

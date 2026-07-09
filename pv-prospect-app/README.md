@@ -219,20 +219,26 @@ are baked into the image (`pv_prospect/app/static/`) and the promoted models loa
 at startup, so picking up new static assets or a freshly promoted `model-v<date>`
 both require a redeploy.
 
-**Never apply this service without `-var app_image_tag=...`.** A bare `terraform
-apply` falls back to the variable's default of `latest` (`terraform/variables.tf`),
-and because of the SHA-tagging above, `pv-prospect-app` is the only Artifact
-Registry repo that has no `latest` tag — so the deploy targets an image that
-cannot exist.
+**Never apply this service without `-var app_image_tag=...`, and never before the
+push finishes.** A bare `terraform apply` falls back to the variable's default of
+`latest` (`terraform/variables.tf`), and because of the SHA-tagging above,
+`pv-prospect-app` is the only Artifact Registry repo with no `latest` tag — so the
+deploy targets an image that cannot exist. Applying alongside a rebuild does the
+same thing, since the app image is the last of the five to build.
 
-**Always finish the push before applying.** A missing image fails slowly and
-misleadingly rather than fast: Cloud Run creates the revision, keeps retrying the
-pull for tens of minutes, and Terraform eventually gives up with `Error code 5 ...
-Image not found` — after which Cloud Run may still heal the revision on its own if
-a late `docker push` lands. This bites when an apply is run alongside a rebuild,
-since the app image is the last of the five to build. `deploy.sh` guards both
-hazards by checking each tag exists in Artifact Registry before it applies, but the
-manual sequence above has no such guard.
+Left unguarded, that fails slowly and misleadingly rather than fast. Cloud Run
+accepts the revision, retries the pull for tens of minutes, and Terraform gives up
+with `Error code 5 ... Image not found` — having already recorded the unpullable
+image as the desired state, so the *next* plan reports "No changes" over a service
+that cannot roll. Two guards prevent this:
+
+- `modules/cloud_run_service` reads the image through a
+  `google_artifact_registry_docker_image` data source, so **any** plan touching the
+  app — `deploy.sh` or bare `terraform` — dies in seconds with `Requested image was
+  not found`, before a revision exists. Because the data source lives inside the
+  module, targeted applies elsewhere (such as the backfill runbook) are unaffected.
+- `deploy.sh` additionally checks every image tag up front, covering the four Cloud
+  Run **Jobs** as well, whose images the data source does not verify.
 
 **Public by default.** The service is public (`allow_unauthenticated = true` in
 `terraform/variables.tf`), protected by per-IP rate limiting baked into the image

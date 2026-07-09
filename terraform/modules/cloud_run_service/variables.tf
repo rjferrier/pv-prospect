@@ -8,15 +8,24 @@ variable "region" {
   description = "GCP region for the Cloud Run Service"
 }
 
-variable "image_url" {
+variable "project_id" {
   type        = string
-  description = "Full Artifact Registry image URL (without tag)"
+  description = "GCP project ID hosting the Artifact Registry repository"
+}
+
+variable "repository_id" {
+  type        = string
+  description = "Artifact Registry repository holding the image"
+}
+
+variable "image_name" {
+  type        = string
+  description = "Image name within the repository (without repository path or tag)"
 }
 
 variable "image_tag" {
   type        = string
-  default     = "latest"
-  description = "Docker image tag"
+  description = "Docker image tag. No default: a wrong-but-plausible fallback such as \"latest\" is how an unbuilt image reaches Cloud Run."
 }
 
 variable "cpu" {

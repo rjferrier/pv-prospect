@@ -113,7 +113,14 @@ variable "model_trainer_image_tag" {
 variable "app_image_tag" {
   type        = string
   default     = "latest"
-  description = "Docker image tag for the pv-prospect-app container"
+  description = <<-EOT
+    Docker image tag for the pv-prospect-app container; deploy.sh passes the short
+    commit SHA. The "latest" default deliberately does not resolve — that repository
+    is SHA-tagged only. It is kept so that targeted applies which do not touch the
+    app (the backfill runbook) need not supply this variable, and any plan that does
+    touch the app fails immediately on the image data source in
+    modules/cloud_run_service rather than deploying a tag that cannot be pulled.
+  EOT
 }
 
 variable "allow_unauthenticated" {

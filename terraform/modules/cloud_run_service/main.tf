@@ -4,6 +4,22 @@
 # during requests.  Set allow_unauthenticated=true for a public demo; default
 # is IAM-authenticated (private testing).
 
+locals {
+  image_url = "${var.region}-docker.pkg.dev/${var.project_id}/${var.repository_id}/${var.image_name}"
+}
+
+# Guard, not a value source: reading this data source fails the *plan* in seconds
+# when image_tag has not been built and pushed. Without it Cloud Run accepts the
+# revision, retries the pull for tens of minutes, and Terraform eventually reports
+# a misleading "Error code 5 ... Image not found" -- by which time it has already
+# recorded the unpullable image as the desired state.
+data "google_artifact_registry_docker_image" "image" {
+  project       = var.project_id
+  location      = var.region
+  repository_id = var.repository_id
+  image_name    = "${var.image_name}:${var.image_tag}"
+}
+
 resource "google_cloud_run_v2_service" "service" {
   name                = var.service_name
   location            = var.region
@@ -26,7 +42,7 @@ resource "google_cloud_run_v2_service" "service" {
     }
 
     containers {
-      image = "${var.image_url}:${var.image_tag}"
+      image = "${local.image_url}:${var.image_tag}"
 
       resources {
         limits = {
