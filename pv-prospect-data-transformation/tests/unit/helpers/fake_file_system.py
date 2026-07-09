@@ -58,7 +58,11 @@ class FakeFileSystem:
         pass
 
     def list_files(
-        self, prefix: str, pattern: str = '*', recursive: bool = False
+        self,
+        prefix: str,
+        pattern: str = '*',
+        recursive: bool = False,
+        start_offset: str = '',
     ) -> list[FileEntry]:
         results = []
         all_paths = list(self._files) + [
@@ -66,6 +70,8 @@ class FakeFileSystem:
         ]
         for path in all_paths:
             if prefix and not path.startswith(prefix + '/') and path != prefix:
+                continue
+            if start_offset and path < start_offset:
                 continue
             name = path.split('/')[-1]
             if pattern != '*' and not fnmatch.fnmatch(name, pattern):

@@ -31,6 +31,27 @@ class GcsStorageConfig(StorageConfig):
 _HTTP_POOL_SIZE = 64
 
 
+def build_match_glob(full_prefix: str, pattern: str) -> str | None:
+    """Translate a basename *pattern* into a GCS ``matchGlob`` expression.
+
+    GCS applies ``matchGlob`` server-side, so a listing pages over the
+    objects that *match* rather than over every object under
+    *full_prefix*. Client-side filtering pages over the whole subtree
+    first and pays one Class A ``ListObjects`` op per 1,000 objects
+    scanned — the cost is set by the size of the tree, not the size of
+    the answer.
+
+    ``**/`` matches any run of leading path segments including none, so
+    one expression covers objects directly under *full_prefix* and those
+    nested below it — matching the flat basename semantics of the
+    client-side ``fnmatch``. Returns ``None`` for the match-everything
+    pattern, where a glob would only constrain the listing to no purpose.
+    """
+    if pattern == '*':
+        return None
+    return f'{full_prefix}**/{pattern}'
+
+
 class GcsFileSystem:
     """Thin I/O adapter for Google Cloud Storage."""
 
@@ -114,14 +135,22 @@ class GcsFileSystem:
             pass
 
     def list_files(
-        self, prefix: str, pattern: str = '*', recursive: bool = False
+        self,
+        prefix: str,
+        pattern: str = '*',
+        recursive: bool = False,
+        start_offset: str = '',
     ) -> list[FileEntry]:
         full_prefix = (
             self._blob_path(prefix) + '/'
             if prefix
             else (self._prefix + '/' if self._prefix else '')
         )
-        blobs = self._bucket.list_blobs(prefix=full_prefix)
+        blobs = self._bucket.list_blobs(
+            prefix=full_prefix,
+            match_glob=build_match_glob(full_prefix, pattern),
+            start_offset=self._blob_path(start_offset) if start_offset else None,
+        )
 
         files = []
         for blob in blobs:
@@ -129,6 +158,9 @@ class GcsFileSystem:
             if not name:
                 continue
 
+            # matchGlob has already applied *pattern* server-side; this
+            # re-check keeps the result identical to the local backend's
+            # fnmatch should the two glob dialects ever disagree.
             if pattern != '*' and not fnmatch.fnmatch(name, pattern):
                 continue
 

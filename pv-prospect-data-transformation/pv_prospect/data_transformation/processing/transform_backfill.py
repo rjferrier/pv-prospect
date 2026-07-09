@@ -280,11 +280,17 @@ def _consume_extract_descriptors(
     :func:`save_marker` once their run succeeds. When no unconsumed
     ledgers exist, returns an empty descriptor list and the unchanged
     marker, so callers can no-op cleanly.
+
+    The marker doubles as the listing's lower bound: everything at or
+    below it is discarded anyway, so there is nothing to gain from
+    scanning the ledger history that precedes it.
     """
     workflow_name = workflow_name_for(scope)
     marker = load_marker(cursors_fs, workflow_name)
 
-    ledgers = list_consolidated_ledgers(ledger_fs, extract_workflow_name_for(scope))
+    ledgers = list_consolidated_ledgers(
+        ledger_fs, extract_workflow_name_for(scope), since=marker.consumed_through
+    )
     unconsumed = [entry for entry in ledgers if entry.name > marker.consumed_through]
     chosen = unconsumed[:max_extract_runs]
 

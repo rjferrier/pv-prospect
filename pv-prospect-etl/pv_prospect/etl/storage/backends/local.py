@@ -69,7 +69,11 @@ class LocalFileSystem:
             full_path.rmdir()
 
     def list_files(
-        self, prefix: str, pattern: str = '*', recursive: bool = False
+        self,
+        prefix: str,
+        pattern: str = '*',
+        recursive: bool = False,
+        start_offset: str = '',
     ) -> list[FileEntry]:
         search_dir = self._base_dir / prefix if prefix else self._base_dir
         if not search_dir.exists():
@@ -80,6 +84,8 @@ class LocalFileSystem:
         for file_path in search_dir.glob(glob_pattern):
             if file_path.is_file():
                 relative_path = file_path.relative_to(self._base_dir)
+                if start_offset and str(relative_path) < start_offset:
+                    continue
                 parent_path = (
                     str(relative_path.parent)
                     if relative_path.parent != Path('.')

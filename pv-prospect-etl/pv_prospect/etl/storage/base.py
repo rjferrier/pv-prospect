@@ -34,8 +34,23 @@ class FileSystem(Protocol):
     def delete(self, path: str) -> None: ...
 
     def list_files(
-        self, prefix: str, pattern: str = '*', recursive: bool = False
-    ) -> list[FileEntry]: ...
+        self,
+        prefix: str,
+        pattern: str = '*',
+        recursive: bool = False,
+        start_offset: str = '',
+    ) -> list[FileEntry]:
+        """List entries under *prefix* whose name matches *pattern*.
+
+        *start_offset* bounds the listing from below: only entries whose
+        path sorts lexicographically at or after it are returned. On a
+        date-partitioned tree this scans from a date rather than from the
+        beginning, so the work done scales with the window of interest
+        instead of the whole history. It is expressed in the same path
+        space as the returned :class:`FileEntry` paths — relative to the
+        filesystem root, not to *prefix*.
+        """
+        ...
 
 
 @dataclass

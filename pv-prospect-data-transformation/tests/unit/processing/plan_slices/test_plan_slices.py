@@ -239,6 +239,92 @@ def test_marker_advances_to_last_consumed_ledger() -> None:
     assert next_marker == f'2026-05-14-020000-{_PV_EXTRACT_WF}.jsonl'
 
 
+def test_later_ledger_on_the_marker_s_own_day_is_still_consumed() -> None:
+    """The marker bounds the ledger listing to whole run-date directories.
+
+    A second extraction run on the marker's own day sorts above the
+    marker and must still be picked up — the bound trims history, it does
+    not stand in for the strict ``> marker`` comparison.
+    """
+    ledgers = {
+        _ledger_path('2026-05-14', '020000', _PV_EXTRACT_WF): _ledger_line(
+            'completed',
+            {
+                'data_source': 'pv',
+                'start_date': '2026-01-01',
+                'end_date': '2026-01-29',
+                'pv_system_id': '111',
+            },
+        ),
+        _ledger_path('2026-05-14', '070000', _PV_EXTRACT_WF): _ledger_line(
+            'completed',
+            {
+                'data_source': 'pv',
+                'start_date': '2026-02-01',
+                'end_date': '2026-03-01',
+                'pv_system_id': '222',
+            },
+        ),
+    }
+    marker = f'2026-05-14-020000-{_PV_EXTRACT_WF}.jsonl'
+
+    slices, next_marker = _plan(BackfillScope.PV_SITES, ledgers, marker=marker)
+
+    assert [s.pv_system_id for s in slices] == [222]
+    assert next_marker == f'2026-05-14-070000-{_PV_EXTRACT_WF}.jsonl'
+
+
+def test_bare_date_marker_treats_that_day_s_ledgers_as_unconsumed() -> None:
+    """The rewind procedure in ``doc/runbooks/replay-window.md`` sets the
+    marker to a bare ``YYYY-MM-DD``, which sorts below every ledger of
+    that day. Bounding the listing on the marker must not skip the day
+    the operator just rewound to."""
+    ledgers = {
+        _ledger_path('2026-05-14', '020000', _PV_EXTRACT_WF): _ledger_line(
+            'completed',
+            {
+                'data_source': 'pv',
+                'start_date': '2026-01-01',
+                'end_date': '2026-01-29',
+                'pv_system_id': '111',
+            },
+        ),
+    }
+
+    slices, next_marker = _plan(BackfillScope.PV_SITES, ledgers, marker='2026-05-14')
+
+    assert [s.pv_system_id for s in slices] == [111]
+    assert next_marker == f'2026-05-14-020000-{_PV_EXTRACT_WF}.jsonl'
+
+
+def test_ledgers_below_the_marker_s_date_are_not_consumed() -> None:
+    ledgers = {
+        _ledger_path('2026-05-13', '020000', _PV_EXTRACT_WF): _ledger_line(
+            'completed',
+            {
+                'data_source': 'pv',
+                'start_date': '2026-01-01',
+                'end_date': '2026-01-29',
+                'pv_system_id': '111',
+            },
+        ),
+        _ledger_path('2026-05-15', '020000', _PV_EXTRACT_WF): _ledger_line(
+            'completed',
+            {
+                'data_source': 'pv',
+                'start_date': '2026-02-01',
+                'end_date': '2026-03-01',
+                'pv_system_id': '222',
+            },
+        ),
+    }
+    marker = f'2026-05-14-020000-{_PV_EXTRACT_WF}.jsonl'
+
+    slices, _ = _plan(BackfillScope.PV_SITES, ledgers, marker=marker)
+
+    assert [s.pv_system_id for s in slices] == [222]
+
+
 def test_no_unconsumed_ledgers_returns_empty_and_keeps_marker() -> None:
     ledger_name = _ledger_path('2026-05-14', '020000', _PV_EXTRACT_WF)
     ledgers = {

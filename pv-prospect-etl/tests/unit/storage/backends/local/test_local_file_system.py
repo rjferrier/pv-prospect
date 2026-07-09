@@ -139,6 +139,48 @@ def test_list_files_recursive_finds_nested(tmp_path):
     assert names == ['nested.csv', 'top.csv']
 
 
+def test_list_files_recursive_pattern_matches_at_every_depth(tmp_path):
+    """A recursive pattern matches on basename, whatever the depth.
+
+    The GCS backend gets this from a ``**/<pattern>`` matchGlob, whose
+    ``**/`` also matches no leading segments at all. The two backends
+    must agree, since ``list_consolidated_ledgers`` relies on it.
+    """
+    (tmp_path / 'sub').mkdir()
+    (tmp_path / 'sub' / 'nested.jsonl').write_text('1')
+    (tmp_path / 'top.jsonl').write_text('2')
+    (tmp_path / 'other.csv').write_text('3')
+    fs = LocalFileSystem(str(tmp_path))
+
+    results = fs.list_files('', '*.jsonl', recursive=True)
+
+    assert sorted(r.name for r in results) == ['nested.jsonl', 'top.jsonl']
+
+
+def test_list_files_start_offset_excludes_lexically_earlier_paths(tmp_path):
+    for day in ('2026-05-13', '2026-05-14', '2026-05-15'):
+        (tmp_path / day).mkdir()
+        (tmp_path / day / f'{day}-ledger.jsonl').write_text('1')
+    fs = LocalFileSystem(str(tmp_path))
+
+    results = fs.list_files('', '*.jsonl', recursive=True, start_offset='2026-05-14')
+
+    assert sorted(r.name for r in results) == [
+        '2026-05-14-ledger.jsonl',
+        '2026-05-15-ledger.jsonl',
+    ]
+
+
+def test_list_files_empty_start_offset_returns_everything(tmp_path):
+    (tmp_path / 'a.csv').write_text('1')
+    (tmp_path / 'b.csv').write_text('2')
+    fs = LocalFileSystem(str(tmp_path))
+
+    results = fs.list_files('', start_offset='')
+
+    assert len(results) == 2
+
+
 def test_list_files_includes_parent_path(tmp_path):
     (tmp_path / 'sub').mkdir()
     (tmp_path / 'sub' / 'file.csv').write_text('1')

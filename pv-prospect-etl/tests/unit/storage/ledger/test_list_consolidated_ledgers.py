@@ -92,6 +92,63 @@ def test_includes_run_labeled_consolidated_files() -> None:
     ]
 
 
+def test_since_excludes_earlier_run_dates() -> None:
+    ledger_fs = FakeFileSystem(
+        {
+            '2026-05-13/2026-05-13-070000-wf.jsonl': '{}\n',
+            '2026-05-14/2026-05-14-070000-wf.jsonl': '{}\n',
+            '2026-05-15/2026-05-15-070000-wf.jsonl': '{}\n',
+        }
+    )
+
+    entries = list_consolidated_ledgers(
+        ledger_fs, 'wf', since='2026-05-14-070000-wf.jsonl'
+    )
+
+    assert [entry.name for entry in entries] == [
+        '2026-05-14-070000-wf.jsonl',
+        '2026-05-15-070000-wf.jsonl',
+    ]
+
+
+def test_since_is_a_bound_not_a_filter() -> None:
+    """*since* trims whole run-date directories, nothing finer.
+
+    A ledger from earlier on the same day as *since* is still returned —
+    the caller applies its own strict comparison. Bounding on the date
+    alone is what lets the backend scan from a directory rather than
+    filter a full listing.
+    """
+    ledger_fs = FakeFileSystem(
+        {
+            '2026-05-14/2026-05-14-020000-wf.jsonl': '{}\n',
+            '2026-05-14/2026-05-14-070000-wf.jsonl': '{}\n',
+        }
+    )
+
+    entries = list_consolidated_ledgers(
+        ledger_fs, 'wf', since='2026-05-14-070000-wf.jsonl'
+    )
+
+    assert [entry.name for entry in entries] == [
+        '2026-05-14-020000-wf.jsonl',
+        '2026-05-14-070000-wf.jsonl',
+    ]
+
+
+def test_empty_since_scans_the_whole_history() -> None:
+    ledger_fs = FakeFileSystem(
+        {
+            '2026-05-13/2026-05-13-070000-wf.jsonl': '{}\n',
+            '2026-05-14/2026-05-14-070000-wf.jsonl': '{}\n',
+        }
+    )
+
+    entries = list_consolidated_ledgers(ledger_fs, 'wf', since='')
+
+    assert len(entries) == 2
+
+
 def test_excludes_workflow_whose_name_extends_this_one() -> None:
     """A workflow name that is a prefix of another (``pv-prospect-extract``
     vs ``pv-prospect-extract-pv-sites-backfill``) must not pull in the

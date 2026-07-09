@@ -17,7 +17,6 @@ The schema of each entry is documented at
 ``WorkflowOrchestrator.record_outcome``.
 """
 
-import fnmatch
 import json
 import logging
 import threading
@@ -29,6 +28,10 @@ from pv_prospect.etl.storage.base import FileEntry, FileSystem
 logger = logging.getLogger(__name__)
 
 NowFn = Callable[[], datetime]
+
+# Every ledger path starts with the run date, so the first ten characters
+# of a consolidated ledger's name are also the directory it lives in.
+_RUN_DATE_LEN = len('YYYY-MM-DD')
 
 
 def _utc_now() -> datetime:
@@ -234,7 +237,7 @@ class LedgerCollector:
 
 
 def list_consolidated_ledgers(
-    ledger_fs: FileSystem, workflow_name: str
+    ledger_fs: FileSystem, workflow_name: str, since: str = ''
 ) -> list[FileEntry]:
     """Return every consolidated ledger file for *workflow_name*, name-sorted.
 
@@ -247,13 +250,26 @@ def list_consolidated_ledgers(
     consolidated files of other workflows whose name is a prefix of this
     one (e.g. ``pv-prospect-extract`` vs
     ``pv-prospect-extract-pv-sites-backfill``).
+
+    The ``-<workflow_name>.jsonl`` suffix is passed to the filesystem as
+    the listing *pattern* rather than applied to a full listing
+    afterwards, so a backend that can filter server-side (GCS) does the
+    work proportional to the number of matches instead of to the size of
+    the ledger tree.
+
+    *since* is a consolidated-ledger **name** — typically a caller's
+    high-water mark — below which nothing need be scanned. Only run-date
+    directories at or after that name's date are listed. It is a
+    conservative bound, not a filter: ledgers from earlier the same day
+    are still returned, so a caller wanting a strict ``> since`` must
+    still say so.
     """
-    pattern = f'*-{workflow_name}.jsonl'
-    entries = [
-        entry
-        for entry in ledger_fs.list_files('', '*.jsonl', recursive=True)
-        if fnmatch.fnmatch(entry.name, pattern)
-    ]
+    entries = ledger_fs.list_files(
+        '',
+        f'*-{workflow_name}.jsonl',
+        recursive=True,
+        start_offset=since[:_RUN_DATE_LEN],
+    )
     return sorted(entries, key=lambda entry: entry.name)
 
 

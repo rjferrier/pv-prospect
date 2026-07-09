@@ -106,9 +106,13 @@ class LoggingFileSystem:
         self._inner.rmdir(path)
 
     def list_files(
-        self, prefix: str, pattern: str = '*', recursive: bool = False
+        self,
+        prefix: str,
+        pattern: str = '*',
+        recursive: bool = False,
+        start_offset: str = '',
     ) -> list[FileEntry]:
-        return self._inner.list_files(prefix, pattern, recursive)
+        return self._inner.list_files(prefix, pattern, recursive, start_offset)
 
 
 def log_scratch_subprefix(workflow_name: str, run_label: str) -> str:
